@@ -337,3 +337,36 @@ Added generic entity interaction management for Paper Adapter, with spirit-root 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 11: Managed detector removal
+
+**Date**: 2026-07-08
+**Task**: Managed detector removal
+**Branch**: `main`
+
+### Summary
+
+Fixed spirit-root detector remove to delete ImmortalMC-created entities while preserving external entity bindings; added managed-entity config ownership flag, regression tests, and deployed the rebuilt plugin to the local Paper server.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5c959d7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
