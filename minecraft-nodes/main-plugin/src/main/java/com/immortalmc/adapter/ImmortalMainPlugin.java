@@ -34,6 +34,8 @@ import com.immortalmc.adapter.presentation.BukkitSpiritRootParticlePresenter;
 import com.immortalmc.adapter.presentation.SpiritRootParticlePlanner;
 import com.immortalmc.adapter.session.PlayerSessionCache;
 import java.net.http.HttpClient;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -47,7 +49,10 @@ public final class ImmortalMainPlugin extends JavaPlugin {
     @Override
     public void onEnable() {
         saveDefaultConfig();
-        saveResource("dialogues/old-man.yml", false);
+        Path defaultDialogue = getDataFolder().toPath().resolve("dialogues/old-man.yml");
+        if (!Files.exists(defaultDialogue)) {
+            saveResource("dialogues/old-man.yml", false);
+        }
 
         PluginSettings settings = PluginSettings.from(
                 getConfig().getString("game-service.base-url", "http://127.0.0.1:8000"));
