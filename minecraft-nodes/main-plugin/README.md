@@ -14,9 +14,9 @@ Game Service and displays the response in Minecraft. Cultivation, combat,
 loot, economy, player progression, and persistence rules belong in
 `game-service/`.
 
-## Current Slice
+## Current Slices
 
-The first command is:
+Connectivity command:
 
 ```bash
 /immortal health
@@ -32,6 +32,13 @@ Default config:
 game-service:
   base-url: "http://127.0.0.1:8000"
 ```
+
+Player login sync:
+
+- listens for Paper `PlayerJoinEvent`
+- calls `POST /api/v1/players/login` asynchronously
+- caches the returned account/current-life snapshot in memory
+- sends player-facing success/failure feedback on the Paper main thread
 
 ## Development Flow
 

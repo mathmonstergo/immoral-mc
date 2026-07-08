@@ -270,6 +270,8 @@ spirit_root = self._spirit_root_generator.generate()
 updated_life = self._repository.set_current_life_spirit_root(account_id, spirit_root)
 ```
 
+Game Service generates and stores the authoritative result.
+
 ## Scenario: Paper Adapter Health Command Scaffold
 
 ### 1. Scope / Trigger
@@ -389,4 +391,107 @@ healthCheckFuture.whenComplete((result, error) -> {
 The HTTP request completes off-thread, then presentation returns to the Paper
 main thread.
 
-Game Service generates and stores the authoritative result.
+## Scenario: Paper Adapter Player Login Sync
+
+### 1. Scope / Trigger
+
+Trigger: Paper Adapter starts listening to player lifecycle events and calls an
+account/life Game Service API.
+
+### 2. Signatures
+
+* Paper event: `PlayerJoinEvent`
+* Adapter client method: `GameServiceClient.loginPlayer(UUID minecraftUuid, String playerName)`
+* Game Service API: `POST /api/v1/players/login`
+* Runtime cache: in-memory map keyed by Minecraft UUID
+
+### 3. Contracts
+
+Adapter request body:
+
+```json
+{
+  "minecraft_uuid": "00000000-0000-0000-0000-000000000000",
+  "player_name": "Steve"
+}
+```
+
+Adapter response model:
+
+* `account.account_id`
+* `account.minecraft_uuid`
+* `account.player_name`
+* `current_life.life_id`
+* `current_life.account_id`
+* `current_life.generation_no`
+* `current_life.status`
+* `current_life.spirit_root`
+
+Join behavior:
+
+* sends an immediate loading message
+* calls Game Service asynchronously
+* stores the returned authoritative snapshot in memory only after success
+* dispatches cache writes and player messages back to the Paper main thread
+* does not kick the player in the MVP when login fails
+
+The Java Adapter may cache returned IDs to support later adapter commands, but
+it must not persist account/life state or generate gameplay state locally.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| New Minecraft UUID joins | Game Service creates account/current life; Adapter caches returned snapshot |
+| Existing Minecraft UUID joins | Game Service returns existing account/current life; Adapter replaces cached snapshot |
+| Game Service returns non-`200` | Adapter reports profile unavailable and leaves cache empty/unchanged for that join |
+| Game Service returns invalid JSON | Adapter reports profile unavailable and does not create fallback state |
+| Game Service is unreachable | Adapter reports profile unavailable; Paper main thread is not blocked |
+
+### 5. Good/Base/Bad Cases
+
+* Good: listener extracts `player.getUniqueId()` and `player.getName()`, then
+  delegates to a testable service.
+* Base: Java tests cover request serialization, response parsing, async
+  dispatch, successful cache writes, and failed login with no fallback cache.
+* Bad: listener performs blocking HTTP directly inside `onPlayerJoin`.
+* Bad: Adapter creates local account IDs or life IDs when Game Service is down.
+* Bad: Adapter sends spirit-root or progression decisions during login.
+
+### 6. Tests Required
+
+Java tests should assert:
+
+* login request JSON uses `minecraft_uuid` and `player_name`
+* login response maps `account` and `current_life` fields correctly
+* successful join-login writes to `PlayerSessionCache` through the dispatcher
+* failed join-login reports an unavailable message and does not cache fallback state
+* plugin build compiles the Paper listener registration
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```java
+@EventHandler
+public void onPlayerJoin(PlayerJoinEvent event) {
+    UUID accountId = UUID.randomUUID();
+    localCache.put(event.getPlayer().getUniqueId(), accountId);
+}
+```
+
+This invents authoritative player state in the Adapter.
+
+#### Correct
+
+```java
+loginFuture.whenComplete((result, error) -> {
+    scheduler.runTask(plugin, () -> {
+        sessionCache.store(result);
+        player.sendMessage("ImmortalMC profile loaded.");
+    });
+});
+```
+
+The Game Service owns account/life state; the Adapter stores only the returned
+snapshot for later presentation-layer calls.

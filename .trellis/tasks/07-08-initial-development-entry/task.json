@@ -21,7 +21,8 @@
   "children": [
     "07-08-scaffold-game-service",
     "07-08-player-account-spirit-root",
-    "07-08-scaffold-paper-adapter"
+    "07-08-scaffold-paper-adapter",
+    "07-08-paper-player-login-adapter"
   ],
   "parent": null,
   "relatedFiles": [],
