@@ -7,6 +7,7 @@ public final class ImmortalCommandService {
     private final ImmortalCommandHandler commandHandler;
     private final HealthCommandRunner healthCommandRunner;
     private final SpiritRootCommandRunner spiritRootCommandRunner;
+    private final SpiritRootDetectorAdminRunner spiritRootDetectorAdminRunner;
     private final HealthCommandMessages messages;
 
     public ImmortalCommandService(
@@ -21,9 +22,19 @@ public final class ImmortalCommandService {
             HealthCommandRunner healthCommandRunner,
             SpiritRootCommandRunner spiritRootCommandRunner,
             HealthCommandMessages messages) {
+        this(commandHandler, healthCommandRunner, spiritRootCommandRunner, null, messages);
+    }
+
+    public ImmortalCommandService(
+            ImmortalCommandHandler commandHandler,
+            HealthCommandRunner healthCommandRunner,
+            SpiritRootCommandRunner spiritRootCommandRunner,
+            SpiritRootDetectorAdminRunner spiritRootDetectorAdminRunner,
+            HealthCommandMessages messages) {
         this.commandHandler = Objects.requireNonNull(commandHandler, "commandHandler");
         this.healthCommandRunner = Objects.requireNonNull(healthCommandRunner, "healthCommandRunner");
         this.spiritRootCommandRunner = spiritRootCommandRunner;
+        this.spiritRootDetectorAdminRunner = spiritRootDetectorAdminRunner;
         this.messages = Objects.requireNonNull(messages, "messages");
     }
 
@@ -40,6 +51,14 @@ public final class ImmortalCommandService {
         }
         if (action == ImmortalCommandAction.SPIRIT_ROOT && spiritRootCommandRunner != null) {
             spiritRootCommandRunner.run(source, sendMessage);
+            return;
+        }
+        if (action == ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_SET && spiritRootDetectorAdminRunner != null) {
+            spiritRootDetectorAdminRunner.setLookedAtEntityAsDetector(source, sendMessage);
+            return;
+        }
+        if (action == ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_RELOAD && spiritRootDetectorAdminRunner != null) {
+            spiritRootDetectorAdminRunner.reload(sendMessage);
             return;
         }
         sendMessage.accept(messages.usage());

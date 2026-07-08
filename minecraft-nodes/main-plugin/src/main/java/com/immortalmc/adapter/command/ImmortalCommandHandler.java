@@ -13,6 +13,23 @@ public final class ImmortalCommandHandler {
         if ("spirit-root".equals(args[0].toLowerCase(Locale.ROOT))) {
             return ImmortalCommandAction.SPIRIT_ROOT;
         }
+        if ("spirit-root-detector".equals(args[0].toLowerCase(Locale.ROOT))) {
+            return resolveSpiritRootDetector(args);
+        }
+        return ImmortalCommandAction.USAGE;
+    }
+
+    private ImmortalCommandAction resolveSpiritRootDetector(String[] args) {
+        if (args.length < 2) {
+            return ImmortalCommandAction.USAGE;
+        }
+        String action = args[1].toLowerCase(Locale.ROOT);
+        if ("set".equals(action)) {
+            return ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_SET;
+        }
+        if ("reload".equals(action)) {
+            return ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_RELOAD;
+        }
         return ImmortalCommandAction.USAGE;
     }
 }

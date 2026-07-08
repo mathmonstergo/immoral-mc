@@ -579,3 +579,111 @@ detectSpiritRoot.apply(session.account().accountId())
 
 Game Service remains authoritative; the Adapter only identifies the player and
 shows the returned result.
+
+## Scenario: Paper Adapter Spirit Root Detector Entity Interaction
+
+### 1. Scope / Trigger
+
+Trigger: Paper Adapter turns the temporary command-driven spirit-root test into
+a Wynncraft-style in-world interaction bound to a server-authored entity.
+
+### 2. Signatures
+
+* Minecraft player command: `/immortal spirit-root-detector set`
+* Minecraft admin command: `/immortal spirit-root-detector reload`
+* Paper event: `PlayerInteractEntityEvent`
+* Config path: `content.spirit-root.detectors`
+* Config entry fields:
+  * `world`: Bukkit world name
+  * `entity-uuid`: bound detector entity UUID
+* Shared use case:
+  `SpiritRootDetectionUseCase.detectForPlayer(UUID minecraftUuid, String logEventPrefix, Consumer<String> sendMessage, Consumer<SpiritRootDetectionResult> onSuccess)`
+* Presentation planner:
+  `SpiritRootParticlePlanner.plan(SpiritRootSnapshot root)`
+
+### 3. Contracts
+
+Detector authoring:
+
+* `set` requires an in-game player sender.
+* `set` saves the entity the player is looking at, not a block coordinate.
+* `reload` reloads detector bindings from disk-backed config.
+* Saved detector bindings remain reviewable as config data.
+
+Detector interaction:
+
+* Only right-clicking a configured detector entity triggers detection.
+* The Adapter resolves the player through `PlayerSessionCache` and calls Game
+  Service with only the authoritative `account_id`.
+* Successful detection displays the returned result and plays particles around
+  both the player and detector entity.
+* Particle style may use returned `quality`, `elements`, and
+  `variant_element`, but it must not reroll or infer the root.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Console runs `spirit-root-detector set` | Player-only message |
+| Player runs `set` without looking at an entity | Target-missing message and `warn` log |
+| Player runs `set` while looking at an entity | Config binding saved and `info` log records world/entity UUID |
+| Admin runs `reload` | Config is re-read from disk and loaded count is reported |
+| Player right-clicks unbound entity | Event is ignored |
+| Player right-clicks bound detector without login cache | Fail closed with profile-not-loaded feedback |
+| Game Service detection succeeds | Result message plus player/entity particle presentation |
+| Game Service detection fails | Failure message; no particle success callback |
+
+### 5. Good/Base/Bad Cases
+
+* Good: entity listener delegates to a shared use case also used by the
+  temporary command, so Game Service calls, logs, and failure behavior do not
+  drift.
+* Good: particle mapping is a presentation planner over the returned payload,
+  not gameplay generation logic.
+* Base: config contains only stable binding identity such as world and entity
+  UUID.
+* Bad: Adapter stores spirit-root quality, probability, or element-selection
+  rules.
+* Bad: detector bindings live only in a third-party plugin command chain with
+  no reviewable ImmortalMC config.
+
+### 6. Tests Required
+
+Java tests should assert:
+
+* detector registry reloads, matches, saves, and deduplicates entity bindings
+* admin commands reject console/missing target and save looked-at entity
+* command parser resolves `spirit-root-detector set` and `reload`
+* shared detection use case logs success/failure and only runs success callback
+  after authoritative detection succeeds
+* particle planner maps at least celestial, variant, dual/triple, and
+  pseudo-root qualities to distinct visible styles
+* resource tests cover `plugin.yml` usage and default detector config path
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```java
+@EventHandler
+public void onPlayerInteractEntity(PlayerInteractEntityEvent event) {
+    SpiritRoot root = SpiritRootGenerator.roll();
+    spawnParticles(event.getPlayer(), root);
+}
+```
+
+This both invents the root in the Adapter and turns visual feedback into the
+authoritative gameplay decision.
+
+#### Correct
+
+```java
+detectionUseCase.detectForPlayer(
+        player.getUniqueId(),
+        "spirit_root_detector",
+        player::sendMessage,
+        result -> particlePresenter.play(player, detector, result.spiritRoot()));
+```
+
+The Adapter binds and presents the interaction; Game Service remains the
+authority for the detected root.

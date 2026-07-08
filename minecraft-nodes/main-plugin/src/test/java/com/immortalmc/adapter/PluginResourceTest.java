@@ -16,7 +16,7 @@ class PluginResourceTest {
         assertTrue(pluginYml.contains("main: com.immortalmc.adapter.ImmortalMainPlugin"));
         assertTrue(pluginYml.contains("api-version: '1.21.11'"));
         assertTrue(pluginYml.contains("immortal:"));
-        assertTrue(pluginYml.contains("usage: /immortal <health|spirit-root>"));
+        assertTrue(pluginYml.contains("usage: /immortal <health|spirit-root|spirit-root-detector>"));
         assertTrue(pluginYml.contains("com.fasterxml.jackson.core:jackson-databind:2.18.2"));
     }
 
@@ -26,6 +26,8 @@ class PluginResourceTest {
 
         assertTrue(configYml.contains("game-service:"));
         assertTrue(configYml.contains("base-url: \"http://127.0.0.1:8000\""));
+        assertTrue(configYml.contains("spirit-root:"));
+        assertTrue(configYml.contains("detectors: []"));
     }
 
     private static String readResource(String path) throws IOException {

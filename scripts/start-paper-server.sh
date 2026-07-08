@@ -6,6 +6,10 @@ SERVER_DIR="$ROOT_DIR/minecraft-nodes/main-server"
 JAVA_BIN="${JAVA_HOME:-}/bin/java"
 
 if [ ! -x "$JAVA_BIN" ]; then
+  JAVA_BIN="$HOME/.local/jdks/jdk-21/bin/java"
+fi
+
+if [ ! -x "$JAVA_BIN" ]; then
   JAVA_BIN="/tmp/immortal-mc-tools/jdk-21/bin/java"
 fi
 

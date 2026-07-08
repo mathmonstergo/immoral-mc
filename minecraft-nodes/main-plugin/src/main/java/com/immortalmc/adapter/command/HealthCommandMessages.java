@@ -24,6 +24,6 @@ public final class HealthCommandMessages {
     }
 
     public String usage() {
-        return "Usage: /immortal <health|spirit-root>";
+        return "Usage: /immortal <health|spirit-root|spirit-root-detector>";
     }
 }

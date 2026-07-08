@@ -9,7 +9,7 @@ libraries:
 commands:
   immortal:
     description: ImmortalMC adapter operations.
-    usage: /immortal <health|spirit-root>
+    usage: /immortal <health|spirit-root|spirit-root-detector>
     permission: immortalmc.command
 permissions:
   immortalmc.command:
