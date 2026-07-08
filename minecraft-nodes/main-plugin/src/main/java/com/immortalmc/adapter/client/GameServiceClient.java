@@ -63,6 +63,20 @@ public final class GameServiceClient {
                 .thenApply(this::parseLoginResponse);
     }
 
+    public CompletableFuture<SpiritRootDetectionResult> detectSpiritRoot(UUID accountId) {
+        Objects.requireNonNull(accountId, "accountId");
+
+        HttpRequest request = HttpRequest.newBuilder(
+                        baseUri.resolve("/api/v1/players/" + accountId + "/current-life/spirit-root"))
+                .timeout(REQUEST_TIMEOUT)
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+
+        return httpClient
+                .sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenApply(this::parseSpiritRootDetectionResponse);
+    }
+
     private HealthCheckResult parseHealthResponse(HttpResponse<String> response) {
         if (response.statusCode() != 200) {
             throw new CompletionException(
@@ -84,6 +98,19 @@ public final class GameServiceClient {
             return objectMapper.readValue(response.body(), PlayerLoginResult.class);
         } catch (IOException error) {
             throw new CompletionException(new GameServiceException("Game Service login response was invalid", error));
+        }
+    }
+
+    private SpiritRootDetectionResult parseSpiritRootDetectionResponse(HttpResponse<String> response) {
+        if (response.statusCode() != 200) {
+            throw new CompletionException(new GameServiceException(
+                    "Game Service spirit-root detection failed with HTTP " + response.statusCode()));
+        }
+        try {
+            return objectMapper.readValue(response.body(), SpiritRootDetectionResult.class);
+        } catch (IOException error) {
+            throw new CompletionException(
+                    new GameServiceException("Game Service spirit-root detection response was invalid", error));
         }
     }
 

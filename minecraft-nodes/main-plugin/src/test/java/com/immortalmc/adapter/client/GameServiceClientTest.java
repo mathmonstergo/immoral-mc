@@ -8,6 +8,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
@@ -74,6 +75,49 @@ class GameServiceClientTest {
             assertEquals(UUID.fromString("20000000-0000-0000-0000-000000000001"), result.currentLife().lifeId());
             assertEquals(1, result.currentLife().generationNo());
             assertEquals("alive", result.currentLife().status());
+        });
+    }
+
+    @Test
+    void detectSpiritRootPostsAccountScopedRequestAndReturnsDetectionResult() throws Exception {
+        AtomicReference<String> method = new AtomicReference<>();
+        withServer(server -> {
+            server.createContext(
+                    "/api/v1/players/10000000-0000-0000-0000-000000000001/current-life/spirit-root",
+                    exchange -> {
+                        method.set(exchange.getRequestMethod());
+                        byte[] responseBody = """
+                                {
+                                  "life_id": "20000000-0000-0000-0000-000000000001",
+                                  "spirit_root": {
+                                    "quality": "dual",
+                                    "label": "Dual Root",
+                                    "elements": ["fire", "water"],
+                                    "mutated_element": null,
+                                    "variant_element": null
+                                  },
+                                  "already_detected": false
+                                }
+                                """
+                                .getBytes(StandardCharsets.UTF_8);
+                        exchange.getResponseHeaders().add("Content-Type", "application/json");
+                        exchange.sendResponseHeaders(200, responseBody.length);
+                        exchange.getResponseBody().write(responseBody);
+                        exchange.close();
+                    });
+        }, serverUri -> {
+            GameServiceClient client = new GameServiceClient(serverUri, HttpClient.newHttpClient());
+
+            SpiritRootDetectionResult result = client.detectSpiritRoot(
+                            UUID.fromString("10000000-0000-0000-0000-000000000001"))
+                    .get(2, TimeUnit.SECONDS);
+
+            assertEquals("POST", method.get());
+            assertEquals(UUID.fromString("20000000-0000-0000-0000-000000000001"), result.lifeId());
+            assertEquals("dual", result.spiritRoot().quality());
+            assertEquals("Dual Root", result.spiritRoot().label());
+            assertEquals(List.of("fire", "water"), result.spiritRoot().elements());
+            assertEquals(false, result.alreadyDetected());
         });
     }
 

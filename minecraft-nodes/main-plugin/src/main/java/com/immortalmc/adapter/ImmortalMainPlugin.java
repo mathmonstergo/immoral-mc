@@ -6,6 +6,8 @@ import com.immortalmc.adapter.command.HealthCommandRunner;
 import com.immortalmc.adapter.command.ImmortalBukkitCommandExecutor;
 import com.immortalmc.adapter.command.ImmortalCommandHandler;
 import com.immortalmc.adapter.command.ImmortalCommandService;
+import com.immortalmc.adapter.command.SpiritRootCommandMessages;
+import com.immortalmc.adapter.command.SpiritRootCommandRunner;
 import com.immortalmc.adapter.config.PluginSettings;
 import com.immortalmc.adapter.event.ImmortalPlayerJoinListener;
 import com.immortalmc.adapter.event.PlayerJoinLoginService;
@@ -31,8 +33,13 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 gameServiceClient::checkHealth,
                 messages,
                 task -> getServer().getScheduler().runTask(this, task));
-        ImmortalCommandService commandService =
-                new ImmortalCommandService(new ImmortalCommandHandler(), healthCommandRunner, messages);
+        SpiritRootCommandRunner spiritRootCommandRunner = new SpiritRootCommandRunner(
+                gameServiceClient::detectSpiritRoot,
+                sessionCache,
+                new SpiritRootCommandMessages(),
+                task -> getServer().getScheduler().runTask(this, task));
+        ImmortalCommandService commandService = new ImmortalCommandService(
+                new ImmortalCommandHandler(), healthCommandRunner, spiritRootCommandRunner, messages);
         ImmortalBukkitCommandExecutor commandExecutor = new ImmortalBukkitCommandExecutor(commandService);
 
         PluginCommand immortalCommand =

@@ -495,3 +495,86 @@ loginFuture.whenComplete((result, error) -> {
 
 The Game Service owns account/life state; the Adapter stores only the returned
 snapshot for later presentation-layer calls.
+
+## Scenario: Paper Adapter Spirit Root Command
+
+### 1. Scope / Trigger
+
+Trigger: Paper Adapter exposes the first gameplay-facing command that changes
+authoritative player progression state through Game Service.
+
+### 2. Signatures
+
+* Minecraft command: `/immortal spirit-root`
+* Adapter client method: `GameServiceClient.detectSpiritRoot(UUID accountId)`
+* Game Service API: `POST /api/v1/players/{account_id}/current-life/spirit-root`
+* Required local state: successful join-login snapshot in `PlayerSessionCache`
+
+### 3. Contracts
+
+The command must:
+
+* require an in-game player sender for the MVP
+* resolve the sender's Minecraft UUID to cached Game Service `account_id`
+* call Game Service asynchronously
+* display the returned `quality`, `label`, `elements`, and optional
+  `mutated_element` / `variant_element`
+* preserve `/immortal health`
+
+The Adapter must not:
+
+* roll spirit-root quality or elements
+* send client/plugin-provided spirit-root values to Game Service
+* create local fallback progression state when Game Service is unavailable
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Console runs `/immortal spirit-root` | Player-only message |
+| Player has no cached login snapshot | Fail closed with profile-not-loaded message |
+| Game Service returns first detection | Display returned spirit root |
+| Game Service returns already-detected result | Display returned spirit root without rerolling |
+| Game Service returns non-`200` | Display unavailable message |
+| Variant root has `mutated_element` / `variant_element` | Display those returned fields |
+
+### 5. Good/Base/Bad Cases
+
+* Good: command passes only `account_id` to Game Service and displays the
+  returned payload.
+* Base: tests cover command parsing, missing player context, missing cache,
+  successful display, failure display, and HTTP response parsing.
+* Bad: Java command contains probability tables or element-selection logic.
+* Bad: Java command lets the player choose or submit a spirit root.
+
+### 6. Tests Required
+
+Java tests should assert:
+
+* `spirit-root` resolves to a dedicated command action
+* console sender is rejected
+* missing profile cache fails closed
+* successful detection uses cached `account_id`
+* failed detection does not create fallback state
+* variant response fields are displayed when present
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```java
+SpiritRoot root = SpiritRootGenerator.roll();
+player.sendMessage(root.label());
+```
+
+This moves progression-defining random generation into the Adapter.
+
+#### Correct
+
+```java
+detectSpiritRoot.apply(session.account().accountId())
+        .whenComplete((result, error) -> dispatchPresentation(result, error));
+```
+
+Game Service remains authoritative; the Adapter only identifies the player and
+shows the returned result.

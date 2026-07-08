@@ -18,4 +18,11 @@ class ImmortalCommandHandlerTest {
 
         assertEquals(ImmortalCommandAction.HEALTH, handler.resolve(new String[] {"health"}));
     }
+
+    @Test
+    void spiritRootSubcommandRunsSpiritRootDetection() {
+        ImmortalCommandHandler handler = new ImmortalCommandHandler();
+
+        assertEquals(ImmortalCommandAction.SPIRIT_ROOT, handler.resolve(new String[] {"spirit-root"}));
+    }
 }

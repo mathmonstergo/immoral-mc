@@ -40,6 +40,17 @@ Player login sync:
 - caches the returned account/current-life snapshot in memory
 - sends player-facing success/failure feedback on the Paper main thread
 
+Spirit-root command:
+
+```bash
+/immortal spirit-root
+```
+
+This command uses the cached Game Service `account_id`, calls
+`POST /api/v1/players/{account_id}/current-life/spirit-root`, and displays the
+returned spirit-root payload. The Java plugin does not roll spirit roots or
+persist player progression state.
+
 ## Development Flow
 
 1. Write or update automated tests for the adapter behavior.

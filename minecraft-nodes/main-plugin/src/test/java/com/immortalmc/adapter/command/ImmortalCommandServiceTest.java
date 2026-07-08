@@ -23,7 +23,7 @@ class ImmortalCommandServiceTest {
 
         service.execute(new String[] {}, sentMessages::add);
 
-        assertEquals(List.of("Usage: /immortal health"), sentMessages);
+        assertEquals(List.of("Usage: /immortal <health|spirit-root>"), sentMessages);
     }
 
     @Test

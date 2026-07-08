@@ -36,6 +36,6 @@ class HealthCommandMessagesTest {
     void usageMessageShowsOnlySupportedSubcommand() {
         HealthCommandMessages messages = new HealthCommandMessages();
 
-        assertEquals("Usage: /immortal health", messages.usage());
+        assertEquals("Usage: /immortal <health|spirit-root>", messages.usage());
     }
 }
