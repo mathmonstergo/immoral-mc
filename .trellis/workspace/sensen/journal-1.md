@@ -304,3 +304,36 @@ Fixed spirit-root detector set command by selecting entities via bounding-box ra
 ### Next Steps
 
 - None - task complete
+
+
+## Session 10: Entity interaction management
+
+**Date**: 2026-07-08
+**Task**: Entity interaction management
+**Branch**: `main`
+
+### Summary
+
+Added generic entity interaction management for Paper Adapter, with spirit-root detector authoring commands, action routing, protected spawned entities, legacy detector config migration, tests, and updated backend quality specs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `66e1387` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
