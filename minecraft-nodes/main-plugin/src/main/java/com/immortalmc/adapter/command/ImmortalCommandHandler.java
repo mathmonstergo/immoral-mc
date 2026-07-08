@@ -24,6 +24,15 @@ public final class ImmortalCommandHandler {
             return ImmortalCommandAction.USAGE;
         }
         String action = args[1].toLowerCase(Locale.ROOT);
+        if ("create".equals(action)) {
+            return ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_CREATE;
+        }
+        if ("list".equals(action)) {
+            return ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_LIST;
+        }
+        if ("remove".equals(action)) {
+            return ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_REMOVE;
+        }
         if ("set".equals(action)) {
             return ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_SET;
         }

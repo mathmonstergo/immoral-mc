@@ -1,29 +1,55 @@
 package com.immortalmc.adapter.command;
 
-import com.immortalmc.adapter.content.EntityBinding;
+import com.immortalmc.adapter.content.EntityInteractionEntity;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 
-public record ImmortalCommandSource(Optional<UUID> minecraftUuid, Optional<EntityBinding> lookedAtEntity) {
+public record ImmortalCommandSource(
+        Optional<UUID> minecraftUuid,
+        Optional<EntityInteractionEntity> lookedAtEntity,
+        Optional<Function<String, EntityInteractionEntity>> entitySpawner) {
     public ImmortalCommandSource {
         Objects.requireNonNull(minecraftUuid, "minecraftUuid");
         Objects.requireNonNull(lookedAtEntity, "lookedAtEntity");
+        Objects.requireNonNull(entitySpawner, "entitySpawner");
     }
 
     public static ImmortalCommandSource console() {
-        return new ImmortalCommandSource(Optional.empty(), Optional.empty());
+        return new ImmortalCommandSource(Optional.empty(), Optional.empty(), Optional.empty());
     }
 
     public static ImmortalCommandSource player(UUID minecraftUuid) {
         return new ImmortalCommandSource(
                 Optional.of(Objects.requireNonNull(minecraftUuid, "minecraftUuid")),
+                Optional.empty(),
                 Optional.empty());
     }
 
-    public static ImmortalCommandSource player(UUID minecraftUuid, EntityBinding lookedAtEntity) {
+    public static ImmortalCommandSource player(UUID minecraftUuid, EntityInteractionEntity lookedAtEntity) {
         return new ImmortalCommandSource(
                 Optional.of(Objects.requireNonNull(minecraftUuid, "minecraftUuid")),
-                Optional.of(Objects.requireNonNull(lookedAtEntity, "lookedAtEntity")));
+                Optional.of(Objects.requireNonNull(lookedAtEntity, "lookedAtEntity")),
+                Optional.empty());
+    }
+
+    public static ImmortalCommandSource playerWithSpawner(
+            UUID minecraftUuid,
+            Function<String, EntityInteractionEntity> entitySpawner) {
+        return new ImmortalCommandSource(
+                Optional.of(Objects.requireNonNull(minecraftUuid, "minecraftUuid")),
+                Optional.empty(),
+                Optional.of(Objects.requireNonNull(entitySpawner, "entitySpawner")));
+    }
+
+    public static ImmortalCommandSource player(
+            UUID minecraftUuid,
+            Optional<EntityInteractionEntity> lookedAtEntity,
+            Function<String, EntityInteractionEntity> entitySpawner) {
+        return new ImmortalCommandSource(
+                Optional.of(Objects.requireNonNull(minecraftUuid, "minecraftUuid")),
+                Objects.requireNonNull(lookedAtEntity, "lookedAtEntity"),
+                Optional.of(Objects.requireNonNull(entitySpawner, "entitySpawner")));
     }
 }

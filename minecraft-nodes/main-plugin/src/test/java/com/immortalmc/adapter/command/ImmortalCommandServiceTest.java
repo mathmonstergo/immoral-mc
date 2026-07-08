@@ -4,8 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.immortalmc.adapter.client.HealthCheckResult;
 import com.immortalmc.adapter.content.EntityBinding;
-import com.immortalmc.adapter.content.SpiritRootDetectorRegistry;
-import com.immortalmc.adapter.content.SpiritRootDetectorRepository;
+import com.immortalmc.adapter.content.EntityInteractionDefinition;
+import com.immortalmc.adapter.content.EntityInteractionEntity;
+import com.immortalmc.adapter.content.EntityInteractionRegistry;
+import com.immortalmc.adapter.content.EntityInteractionRepository;
 import com.immortalmc.adapter.testsupport.RecordingAdapterLogger;
 import java.util.ArrayList;
 import java.util.List;
@@ -54,18 +56,19 @@ class ImmortalCommandServiceTest {
 
     @Test
     void detectorSetCommandRunsAdminSetter() {
-        InMemorySpiritRootDetectorRepository repository = new InMemorySpiritRootDetectorRepository();
+        InMemoryEntityInteractionRepository repository = new InMemoryEntityInteractionRepository();
         ImmortalCommandService service = new ImmortalCommandService(
                 new ImmortalCommandHandler(),
                 healthRunner(),
                 null,
                 new SpiritRootDetectorAdminRunner(
-                        new SpiritRootDetectorRegistry(repository),
+                        new EntityInteractionRegistry(repository),
                         new SpiritRootDetectorAdminMessages(),
                         new RecordingAdapterLogger()),
                 new HealthCommandMessages());
-        EntityBinding detector = new EntityBinding(
-                "world", UUID.fromString("30000000-0000-0000-0000-000000000001"));
+        EntityInteractionEntity detector = new EntityInteractionEntity(
+                new EntityBinding("world", UUID.fromString("30000000-0000-0000-0000-000000000001")),
+                "VILLAGER");
         List<String> sentMessages = new ArrayList<>();
 
         service.execute(
@@ -74,9 +77,54 @@ class ImmortalCommandServiceTest {
                         UUID.fromString("00000000-0000-0000-0000-000000000010"), detector),
                 sentMessages::add);
 
-        assertEquals(List.of(detector), repository.load());
         assertEquals(
-                List.of("Spirit-root detector saved for entity 30000000-0000-0000-0000-000000000001 in world. Total detectors: 1."),
+                List.of(new EntityInteractionDefinition(
+                        "spirit-root-detect-1", "spirit-root-detect", detector.binding(), "VILLAGER", true)),
+                repository.load());
+        assertEquals(
+                List.of("Spirit-root detector spirit-root-detect-1 saved for entity "
+                        + "30000000-0000-0000-0000-000000000001 in world. Total detectors: 1."),
+                sentMessages);
+    }
+
+    @Test
+    void detectorCreateListAndRemoveCommandsRunAdminActions() {
+        InMemoryEntityInteractionRepository repository = new InMemoryEntityInteractionRepository();
+        ImmortalCommandService service = new ImmortalCommandService(
+                new ImmortalCommandHandler(),
+                healthRunner(),
+                null,
+                new SpiritRootDetectorAdminRunner(
+                        new EntityInteractionRegistry(repository),
+                        new SpiritRootDetectorAdminMessages(),
+                        new RecordingAdapterLogger()),
+                new HealthCommandMessages());
+        EntityInteractionEntity spawned = new EntityInteractionEntity(
+                new EntityBinding("world", UUID.fromString("30000000-0000-0000-0000-000000000010")),
+                "VILLAGER");
+        UUID minecraftUuid = UUID.fromString("00000000-0000-0000-0000-000000000010");
+        List<String> sentMessages = new ArrayList<>();
+
+        service.execute(
+                new String[] {"spirit-root-detector", "create"},
+                ImmortalCommandSource.playerWithSpawner(minecraftUuid, detectorId -> spawned),
+                sentMessages::add);
+        service.execute(
+                new String[] {"spirit-root-detector", "list"},
+                ImmortalCommandSource.player(minecraftUuid),
+                sentMessages::add);
+        service.execute(
+                new String[] {"spirit-root-detector", "remove"},
+                ImmortalCommandSource.player(minecraftUuid, spawned),
+                sentMessages::add);
+
+        assertEquals(List.of(), repository.load());
+        assertEquals(
+                List.of(
+                        "Spirit-root detector spirit-root-detect-1 created as VILLAGER in world. Total detectors: 1.",
+                        "Spirit-root detectors: 1 configured.",
+                        "- spirit-root-detect-1 VILLAGER world/30000000-0000-0000-0000-000000000010 protected=true",
+                        "Spirit-root detector spirit-root-detect-1 removed. Total detectors: 0."),
                 sentMessages);
     }
 
@@ -88,17 +136,17 @@ class ImmortalCommandServiceTest {
                 Runnable::run);
     }
 
-    private static final class InMemorySpiritRootDetectorRepository implements SpiritRootDetectorRepository {
-        private List<EntityBinding> bindings = new ArrayList<>();
+    private static final class InMemoryEntityInteractionRepository implements EntityInteractionRepository {
+        private List<EntityInteractionDefinition> interactions = new ArrayList<>();
 
         @Override
-        public List<EntityBinding> load() {
-            return List.copyOf(bindings);
+        public List<EntityInteractionDefinition> load() {
+            return List.copyOf(interactions);
         }
 
         @Override
-        public void save(List<EntityBinding> bindings) {
-            this.bindings = new ArrayList<>(bindings);
+        public void save(List<EntityInteractionDefinition> interactions) {
+            this.interactions = new ArrayList<>(interactions);
         }
     }
 }

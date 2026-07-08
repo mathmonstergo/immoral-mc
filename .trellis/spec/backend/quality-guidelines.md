@@ -14,6 +14,23 @@ Hard requirements:
 * Any data file or generated content format gets schema validation.
 * Any player lifecycle slice gets at least one integration or end-to-end test.
 
+## Server Development Design Principles
+
+Apply these constraints to Game Service and Paper Adapter work:
+
+* Make small, precise changes and avoid unrelated refactors.
+* Find the business invariant and express it in one place.
+* When shared validation, configuration, permissions, caching, or API contracts change, prefer one unified entry point.
+* Do not use broad `try/catch` blocks to swallow errors.
+* Do not use silent fallbacks to hide problems.
+
+Logic encapsulation rules:
+
+* Avoid fragmentation: do not split code merely for the sake of splitting.
+* Avoid over-design: do not break a complete business flow into many one-off tiny private methods.
+* Prefer readability: the main business flow should remain understandable in the current method where practical.
+* Extract an abstraction only when it has real reuse, reduces complexity, or the method is clearly too long.
+
 ## Forbidden Patterns
 
 * Business logic in FastAPI route handlers.
@@ -580,22 +597,51 @@ detectSpiritRoot.apply(session.account().accountId())
 Game Service remains authoritative; the Adapter only identifies the player and
 shows the returned result.
 
-## Scenario: Paper Adapter Spirit Root Detector Entity Interaction
+## Scenario: Paper Adapter Entity Interaction Actions
 
 ### 1. Scope / Trigger
 
-Trigger: Paper Adapter turns the temporary command-driven spirit-root test into
-a Wynncraft-style in-world interaction bound to a server-authored entity.
+Trigger: Paper Adapter turns command-driven gameplay tests into Wynncraft-style
+in-world interactions bound to server-authored entities. Spirit-root detection
+is the first action on this generic entity-interaction foundation; later NPC
+dialogue, shops, quests, and other entity interactions must reuse the same
+binding/protection/routing layer.
 
 ### 2. Signatures
 
+Generic infrastructure:
+
+* Paper event: `PlayerInteractEntityEvent`
+* Registry: `EntityInteractionRegistry`
+* Config path: `content.entity-interactions.entries`
+* Action router:
+  `EntityInteractionActionRouter<BukkitEntityInteractionContext>`
+
+Spirit-root authoring wrapper:
+
+* Minecraft admin command: `/immortal spirit-root-detector create`
+* Minecraft admin command: `/immortal spirit-root-detector list`
+* Minecraft admin command: `/immortal spirit-root-detector remove`
 * Minecraft player command: `/immortal spirit-root-detector set`
 * Minecraft admin command: `/immortal spirit-root-detector reload`
-* Paper event: `PlayerInteractEntityEvent`
-* Config path: `content.spirit-root.detectors`
-* Config entry fields:
-  * `world`: Bukkit world name
-  * `entity-uuid`: bound detector entity UUID
+
+Config entry fields:
+
+* `id`: stable interaction ID, e.g. `spirit-root-detect-1`
+* `action`: action key, e.g. `spirit-root-detect`, `npc-dialogue`
+* `world`: Bukkit world name
+* `entity-uuid`: bound entity UUID
+* `entity-type`: Bukkit entity type name
+* `protected`: whether protection listeners protect this entity
+
+Legacy migration:
+
+* Old `content.spirit-root.detectors` entries containing only `world` and
+  `entity-uuid` must load as `spirit-root-detect` interactions when the new
+  path is not explicitly set in the disk config.
+
+Spirit-root action:
+
 * Shared use case:
   `SpiritRootDetectionUseCase.detectForPlayer(UUID minecraftUuid, String logEventPrefix, Consumer<String> sendMessage, Consumer<SpiritRootDetectionResult> onSuccess)`
 * Presentation planner:
@@ -603,16 +649,33 @@ a Wynncraft-style in-world interaction bound to a server-authored entity.
 
 ### 3. Contracts
 
-Detector authoring:
+Generic interaction contract:
 
+* Entity binding and protection are generic; do not name the generic layer
+  "detector" or hardcode spirit-root behavior there.
+* Right-clicking a configured entity looks up all interactions for that
+  `world + entity-uuid`, then routes by `action`.
+* Unknown actions are logged as warnings and do not invent gameplay behavior.
+* Protected interactions cancel common entity disruption events such as damage,
+  death, combustion, movement, teleport, transform, and targeting.
+
+Spirit-root detector authoring:
+
+* `create` requires an in-game player sender, spawns a persistent protected
+  entity, and saves it as action `spirit-root-detect`.
+* `list` shows only interactions with action `spirit-root-detect`.
+* `remove` removes only the looked-at entity's `spirit-root-detect`
+  interaction; it must not delete arbitrary existing entities.
 * `set` requires an in-game player sender.
-* `set` saves the entity the player is looking at, not a block coordinate.
-* `reload` reloads detector bindings from disk-backed config.
-* Saved detector bindings remain reviewable as config data.
+* `set` saves the entity the player is looking at as action
+  `spirit-root-detect`, not a block coordinate.
+* `reload` reloads interaction bindings from disk-backed config.
+* Saved interaction bindings remain reviewable as config data.
 
-Detector interaction:
+Spirit-root detector interaction:
 
-* Only right-clicking a configured detector entity triggers detection.
+* Only right-clicking an entity with action `spirit-root-detect` triggers
+  detection.
 * The Adapter resolves the player through `PlayerSessionCache` and calls Game
   Service with only the authoritative `account_id`.
 * Successful detection displays the returned result and plays particles around
@@ -624,26 +687,36 @@ Detector interaction:
 
 | Condition | Expected behavior |
 |---|---|
-| Console runs `spirit-root-detector set` | Player-only message |
+| Disk config has only legacy `content.spirit-root.detectors` and default config has new empty path | Legacy detector entries still load as `spirit-root-detect` interactions |
+| Disk config explicitly has `content.entity-interactions.entries` | New generic path takes precedence over legacy detector path |
+| Console runs `spirit-root-detector create`, `set`, or `remove` | Player-only message |
+| Player runs `create` | Protected persistent entity is spawned and saved as action `spirit-root-detect` |
 | Player runs `set` without looking at an entity | Target-missing message and `warn` log |
-| Player runs `set` while looking at an entity | Config binding saved and `info` log records world/entity UUID |
+| Player runs `set` while looking at an entity | Interaction saved and `info` log records ID/action/world/entity UUID |
+| Player runs `remove` while looking at an unbound entity | Not-bound message and `warn` log |
+| Admin runs `list` | Current `spirit-root-detect` interactions are listed |
 | Admin runs `reload` | Config is re-read from disk and loaded count is reported |
 | Player right-clicks unbound entity | Event is ignored |
-| Player right-clicks bound detector without login cache | Fail closed with profile-not-loaded feedback |
+| Player right-clicks entity with unknown action | Warning log; no gameplay fallback |
+| Player right-clicks `spirit-root-detect` without login cache | Fail closed with profile-not-loaded feedback |
 | Game Service detection succeeds | Result message plus player/entity particle presentation |
 | Game Service detection fails | Failure message; no particle success callback |
 
 ### 5. Good/Base/Bad Cases
 
-* Good: entity listener delegates to a shared use case also used by the
-  temporary command, so Game Service calls, logs, and failure behavior do not
-  drift.
+* Good: entity binding, action routing, and protection are generic, while
+  spirit-root detection is registered as one action handler.
+* Good: the spirit-root action delegates to the shared detection use case also
+  used by the temporary command, so Game Service calls, logs, and failure
+  behavior do not drift.
 * Good: particle mapping is a presentation planner over the returned payload,
   not gameplay generation logic.
 * Good: target selection uses entity bounding boxes or Paper ray tracing, so
   normal body/head aiming works for villagers and other non-point entities.
-* Base: config contains only stable binding identity such as world and entity
-  UUID.
+* Base: config contains stable interaction identity and binding fields:
+  `id`, `action`, `world`, `entity-uuid`, `entity-type`, `protected`.
+* Bad: creating a second hardcoded listener/registry for NPC dialogue or
+  another entity interaction instead of adding an action handler.
 * Bad: Adapter stores spirit-root quality, probability, or element-selection
   rules.
 * Bad: detector bindings live only in a third-party plugin command chain with
@@ -656,16 +729,23 @@ Detector interaction:
 
 Java tests should assert:
 
-* detector registry reloads, matches, saves, and deduplicates entity bindings
-* admin commands reject console/missing target and save looked-at entity
+* entity interaction registry reloads, action-filters, matches, saves,
+  deduplicates, and removes entity bindings
+* config mapper migrates legacy detector entries even when defaults contain
+  the new empty path
+* action router dispatches registered actions and rejects unknown actions
+* admin commands reject console/missing target and create/list/remove/set
+  spirit-root detector interactions
 * target selection can resolve a villager-height entity when the view ray
   crosses its body bounding box rather than its base point
-* command parser resolves `spirit-root-detector set` and `reload`
+* command parser resolves `spirit-root-detector create`, `list`, `remove`,
+  `set`, and `reload`
 * shared detection use case logs success/failure and only runs success callback
   after authoritative detection succeeds
 * particle planner maps at least celestial, variant, dual/triple, and
   pseudo-root qualities to distinct visible styles
-* resource tests cover `plugin.yml` usage and default detector config path
+* resource tests cover `plugin.yml` usage and default generic interaction
+  config path
 
 ### 7. Wrong vs Correct
 
@@ -674,23 +754,28 @@ Java tests should assert:
 ```java
 @EventHandler
 public void onPlayerInteractEntity(PlayerInteractEntityEvent event) {
-    SpiritRoot root = SpiritRootGenerator.roll();
-    spawnParticles(event.getPlayer(), root);
+    if (isDialogueNpc(event.getRightClicked())) {
+        openDialogue(event.getPlayer());
+        return;
+    }
+    if (isSpiritRootDetector(event.getRightClicked())) {
+        SpiritRoot root = SpiritRootGenerator.roll();
+        spawnParticles(event.getPlayer(), root);
+    }
 }
 ```
 
-This both invents the root in the Adapter and turns visual feedback into the
-authoritative gameplay decision.
+This fragments entity interactions into hardcoded branches and invents the
+spirit-root result in the Adapter.
 
 #### Correct
 
 ```java
-detectionUseCase.detectForPlayer(
-        player.getUniqueId(),
-        "spirit_root_detector",
-        player::sendMessage,
-        result -> particlePresenter.play(player, detector, result.spiritRoot()));
+registry.findAll(binding).forEach(definition -> router.route(
+        definition,
+        new BukkitEntityInteractionContext(player, entity)));
 ```
 
-The Adapter binds and presents the interaction; Game Service remains the
-authority for the detected root.
+The Adapter has one entity-interaction entry point. Each action handler owns
+only its presentation/adapter behavior, and Game Service remains the authority
+for progression-defining results.

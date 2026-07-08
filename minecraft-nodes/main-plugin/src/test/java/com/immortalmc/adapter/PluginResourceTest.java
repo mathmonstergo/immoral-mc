@@ -26,8 +26,8 @@ class PluginResourceTest {
 
         assertTrue(configYml.contains("game-service:"));
         assertTrue(configYml.contains("base-url: \"http://127.0.0.1:8000\""));
-        assertTrue(configYml.contains("spirit-root:"));
-        assertTrue(configYml.contains("detectors: []"));
+        assertTrue(configYml.contains("entity-interactions:"));
+        assertTrue(configYml.contains("entries: []"));
     }
 
     private static String readResource(String path) throws IOException {

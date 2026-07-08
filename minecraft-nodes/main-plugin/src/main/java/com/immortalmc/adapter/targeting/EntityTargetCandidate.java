@@ -1,12 +1,12 @@
 package com.immortalmc.adapter.targeting;
 
-import com.immortalmc.adapter.content.EntityBinding;
+import com.immortalmc.adapter.content.EntityInteractionEntity;
 import java.util.Objects;
 import org.bukkit.util.BoundingBox;
 
-public record EntityTargetCandidate(EntityBinding binding, BoundingBox boundingBox) {
+public record EntityTargetCandidate(EntityInteractionEntity entity, BoundingBox boundingBox) {
     public EntityTargetCandidate {
-        Objects.requireNonNull(binding, "binding");
+        Objects.requireNonNull(entity, "entity");
         Objects.requireNonNull(boundingBox, "boundingBox");
     }
 }

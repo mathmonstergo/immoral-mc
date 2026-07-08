@@ -1,6 +1,6 @@
 package com.immortalmc.adapter.targeting;
 
-import com.immortalmc.adapter.content.EntityBinding;
+import com.immortalmc.adapter.content.EntityInteractionEntity;
 import java.util.Collection;
 import java.util.Objects;
 import java.util.Optional;
@@ -20,7 +20,7 @@ public final class EntityTargetSelector {
         this.maxDistance = maxDistance;
     }
 
-    public Optional<EntityBinding> select(
+    public Optional<EntityInteractionEntity> select(
             Vector eyePosition,
             Vector viewDirection,
             Collection<EntityTargetCandidate> candidates) {
@@ -34,7 +34,7 @@ public final class EntityTargetSelector {
         }
         normalizedDirection.normalize();
 
-        EntityBinding selected = null;
+        EntityInteractionEntity selected = null;
         double selectedDistance = Double.MAX_VALUE;
         for (EntityTargetCandidate candidate : candidates) {
             BoundingBox searchBox = candidate.boundingBox().clone().expand(TARGET_TOLERANCE);
@@ -46,7 +46,7 @@ public final class EntityTargetSelector {
             if (hitDistance >= selectedDistance) {
                 continue;
             }
-            selected = candidate.binding();
+            selected = candidate.entity();
             selectedDistance = hitDistance;
         }
 

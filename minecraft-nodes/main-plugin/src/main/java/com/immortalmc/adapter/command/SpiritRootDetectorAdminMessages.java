@@ -1,22 +1,69 @@
 package com.immortalmc.adapter.command;
 
-import com.immortalmc.adapter.content.EntityBinding;
+import com.immortalmc.adapter.content.EntityInteractionDefinition;
 
 public final class SpiritRootDetectorAdminMessages {
     public String playerOnly() {
-        return "Only players can save spirit-root detector bindings.";
+        return "Only players can manage spirit-root detector entities.";
     }
 
     public String targetMissing() {
-        return "Look at an entity within range before saving a spirit-root detector.";
+        return "Look at an entity within range before selecting a spirit-root detector.";
     }
 
-    public String saved(EntityBinding binding, int totalDetectors) {
-        return "Spirit-root detector saved for entity "
-                + binding.entityUuid()
+    public String createUnavailable() {
+        return "This command source cannot create a spirit-root detector entity.";
+    }
+
+    public String created(EntityInteractionDefinition detector, int totalDetectors) {
+        return "Spirit-root detector "
+                + detector.id()
+                + " created as "
+                + detector.entityType()
                 + " in "
-                + binding.worldName()
+                + detector.binding().worldName()
                 + ". Total detectors: "
+                + totalDetectors
+                + ".";
+    }
+
+    public String saved(EntityInteractionDefinition detector, int totalDetectors) {
+        return "Spirit-root detector "
+                + detector.id()
+                + " saved for entity "
+                + detector.binding().entityUuid()
+                + " in "
+                + detector.binding().worldName()
+                + ". Total detectors: "
+                + totalDetectors
+                + ".";
+    }
+
+    public String listHeader(int totalDetectors) {
+        return "Spirit-root detectors: " + totalDetectors + " configured.";
+    }
+
+    public String listEntry(EntityInteractionDefinition detector) {
+        return "- "
+                + detector.id()
+                + " "
+                + detector.entityType()
+                + " "
+                + detector.binding().worldName()
+                + "/"
+                + detector.binding().entityUuid()
+                + " protected="
+                + detector.protectedEntity();
+    }
+
+    public String notBound() {
+        return "The selected entity is not a spirit-root detector.";
+    }
+
+    public String removed(EntityInteractionDefinition detector, int totalDetectors) {
+        return "Spirit-root detector "
+                + detector.id()
+                + " removed. Total detectors: "
                 + totalDetectors
                 + ".";
     }

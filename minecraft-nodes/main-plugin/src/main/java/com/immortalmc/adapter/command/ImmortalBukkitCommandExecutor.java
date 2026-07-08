@@ -1,6 +1,7 @@
 package com.immortalmc.adapter.command;
 
 import com.immortalmc.adapter.content.EntityBinding;
+import com.immortalmc.adapter.content.EntityInteractionEntity;
 import com.immortalmc.adapter.targeting.EntityTargetCandidate;
 import com.immortalmc.adapter.targeting.EntityTargetSelector;
 import java.util.ArrayList;
@@ -8,12 +9,17 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import net.kyori.adventure.text.Component;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Villager;
+import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -45,6 +51,12 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
             @NotNull String label,
             @NotNull String[] args) {
         if (args.length != 1) {
+            if (args.length == 2 && "spirit-root-detector".equals(args[0].toLowerCase(Locale.ROOT))) {
+                String prefix = args[1].toLowerCase(Locale.ROOT);
+                return List.of("create", "list", "remove", "set", "reload").stream()
+                        .filter(subcommand -> subcommand.startsWith(prefix))
+                        .toList();
+            }
             return List.of();
         }
         String prefix = args[0].toLowerCase(Locale.ROOT);
@@ -55,16 +67,15 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
 
     private static ImmortalCommandSource sourceFor(CommandSender sender) {
         if (sender instanceof Player player) {
-            Optional<EntityBinding> lookedAtEntity = findLookedAtEntity(player);
-            if (lookedAtEntity.isPresent()) {
-                return ImmortalCommandSource.player(player.getUniqueId(), lookedAtEntity.orElseThrow());
-            }
-            return ImmortalCommandSource.player(player.getUniqueId());
+            return ImmortalCommandSource.player(
+                    player.getUniqueId(),
+                    findLookedAtEntity(player),
+                    detectorId -> spawnSpiritRootDetector(player, detectorId));
         }
         return ImmortalCommandSource.console();
     }
 
-    private static Optional<EntityBinding> findLookedAtEntity(Player player) {
+    private static Optional<EntityInteractionEntity> findLookedAtEntity(Player player) {
         var eyeLocation = player.getEyeLocation();
         List<EntityTargetCandidate> candidates = new ArrayList<>();
         for (Entity entity : player.getNearbyEntities(
@@ -75,7 +86,9 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
                 continue;
             }
             candidates.add(new EntityTargetCandidate(
-                    new EntityBinding(entity.getWorld().getName(), entity.getUniqueId()),
+                    new EntityInteractionEntity(
+                            new EntityBinding(entity.getWorld().getName(), entity.getUniqueId()),
+                            entity.getType().name()),
                     entity.getBoundingBox()));
         }
 
@@ -83,5 +96,32 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
                 eyeLocation.toVector(),
                 eyeLocation.getDirection(),
                 candidates);
+    }
+
+    private static EntityInteractionEntity spawnSpiritRootDetector(Player player, String detectorId) {
+        Villager villager = player.getWorld().spawn(
+                player.getLocation(),
+                Villager.class,
+                CreatureSpawnEvent.SpawnReason.CUSTOM,
+                false,
+                spawned -> configureSpawnedDetector(spawned, detectorId));
+        return new EntityInteractionEntity(
+                new EntityBinding(villager.getWorld().getName(), villager.getUniqueId()),
+                villager.getType().name());
+    }
+
+    private static void configureSpawnedDetector(LivingEntity entity, String detectorId) {
+        entity.customName(Component.text("Spirit Root Detector " + detectorId));
+        entity.setCustomNameVisible(true);
+        entity.setPersistent(true);
+        entity.setInvulnerable(true);
+        entity.setSilent(true);
+        entity.setGravity(false);
+        entity.setAI(false);
+        if (entity instanceof Mob mob) {
+            mob.setAware(false);
+        }
+        entity.setCollidable(false);
+        entity.setRemoveWhenFarAway(false);
     }
 }

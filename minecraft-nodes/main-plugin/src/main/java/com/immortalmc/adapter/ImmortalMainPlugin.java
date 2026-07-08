@@ -11,18 +11,23 @@ import com.immortalmc.adapter.command.SpiritRootDetectorAdminRunner;
 import com.immortalmc.adapter.command.SpiritRootCommandMessages;
 import com.immortalmc.adapter.command.SpiritRootCommandRunner;
 import com.immortalmc.adapter.config.PluginSettings;
-import com.immortalmc.adapter.content.BukkitConfigSpiritRootDetectorRepository;
-import com.immortalmc.adapter.content.SpiritRootDetectorRegistry;
-import com.immortalmc.adapter.event.ImmortalSpiritRootDetectorListener;
+import com.immortalmc.adapter.content.BukkitConfigEntityInteractionRepository;
+import com.immortalmc.adapter.content.EntityInteractionRegistry;
+import com.immortalmc.adapter.event.EntityInteractionProtectionListener;
+import com.immortalmc.adapter.event.ImmortalEntityInteractionListener;
 import com.immortalmc.adapter.event.ImmortalPlayerJoinListener;
 import com.immortalmc.adapter.event.PlayerJoinLoginService;
+import com.immortalmc.adapter.gameplay.SpiritRootDetectionInteractionAction;
 import com.immortalmc.adapter.gameplay.SpiritRootDetectionUseCase;
+import com.immortalmc.adapter.interaction.BukkitEntityInteractionContext;
+import com.immortalmc.adapter.interaction.EntityInteractionActionRouter;
 import com.immortalmc.adapter.logging.AdapterLogger;
 import com.immortalmc.adapter.logging.PaperAdapterLogger;
 import com.immortalmc.adapter.presentation.BukkitSpiritRootParticlePresenter;
 import com.immortalmc.adapter.presentation.SpiritRootParticlePlanner;
 import com.immortalmc.adapter.session.PlayerSessionCache;
 import java.net.http.HttpClient;
+import java.util.Map;
 import java.util.Objects;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -38,9 +43,9 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         GameServiceClient gameServiceClient =
                 new GameServiceClient(settings.gameServiceBaseUri(), HttpClient.newHttpClient());
         PlayerSessionCache sessionCache = new PlayerSessionCache();
-        SpiritRootDetectorRegistry detectorRegistry = new SpiritRootDetectorRegistry(
-                new BukkitConfigSpiritRootDetectorRepository(this));
-        int loadedDetectors = detectorRegistry.reload();
+        EntityInteractionRegistry entityInteractionRegistry = new EntityInteractionRegistry(
+                new BukkitConfigEntityInteractionRepository(this));
+        int loadedInteractions = entityInteractionRegistry.reload();
         HealthCommandMessages messages = new HealthCommandMessages();
         HealthCommandRunner healthCommandRunner = new HealthCommandRunner(
                 gameServiceClient::checkHealth,
@@ -59,7 +64,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 spiritRootMessages,
                 adapterLogger);
         SpiritRootDetectorAdminRunner detectorAdminRunner = new SpiritRootDetectorAdminRunner(
-                detectorRegistry,
+                entityInteractionRegistry,
                 new SpiritRootDetectorAdminMessages(),
                 adapterLogger);
         ImmortalCommandService commandService = new ImmortalCommandService(
@@ -80,17 +85,28 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 sessionCache,
                 adapterLogger,
                 task -> getServer().getScheduler().runTask(this, task));
+        BukkitSpiritRootParticlePresenter spiritRootParticlePresenter =
+                new BukkitSpiritRootParticlePresenter(new SpiritRootParticlePlanner());
+        EntityInteractionActionRouter<BukkitEntityInteractionContext> interactionRouter =
+                new EntityInteractionActionRouter<>(Map.of(
+                        SpiritRootDetectionInteractionAction.ACTION,
+                        new SpiritRootDetectionInteractionAction(
+                                spiritRootDetectionUseCase,
+                                spiritRootParticlePresenter)));
         getServer().getPluginManager().registerEvents(new ImmortalPlayerJoinListener(playerJoinLoginService), this);
         getServer().getPluginManager().registerEvents(
-                new ImmortalSpiritRootDetectorListener(
-                        detectorRegistry,
-                        spiritRootDetectionUseCase,
-                        new BukkitSpiritRootParticlePresenter(new SpiritRootParticlePlanner())),
+                new ImmortalEntityInteractionListener(
+                        entityInteractionRegistry,
+                        interactionRouter,
+                        adapterLogger),
+                this);
+        getServer().getPluginManager().registerEvents(
+                new EntityInteractionProtectionListener(entityInteractionRegistry),
                 this);
 
         getLogger().info("ImmortalMC adapter enabled; Game Service base URL: "
                 + settings.gameServiceBaseUri()
-                + "; spirit-root detectors loaded: "
-                + loadedDetectors);
+                + "; entity interactions loaded: "
+                + loadedInteractions);
     }
 }

@@ -36,6 +36,33 @@ class ImmortalCommandHandlerTest {
     }
 
     @Test
+    void spiritRootDetectorCreateSubcommandCreatesDetectorEntity() {
+        ImmortalCommandHandler handler = new ImmortalCommandHandler();
+
+        assertEquals(
+                ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_CREATE,
+                handler.resolve(new String[] {"spirit-root-detector", "create"}));
+    }
+
+    @Test
+    void spiritRootDetectorListSubcommandListsDetectorEntities() {
+        ImmortalCommandHandler handler = new ImmortalCommandHandler();
+
+        assertEquals(
+                ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_LIST,
+                handler.resolve(new String[] {"spirit-root-detector", "list"}));
+    }
+
+    @Test
+    void spiritRootDetectorRemoveSubcommandRemovesDetectorEntityBinding() {
+        ImmortalCommandHandler handler = new ImmortalCommandHandler();
+
+        assertEquals(
+                ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_REMOVE,
+                handler.resolve(new String[] {"spirit-root-detector", "remove"}));
+    }
+
+    @Test
     void spiritRootDetectorReloadSubcommandReloadsDetectorContent() {
         ImmortalCommandHandler handler = new ImmortalCommandHandler();
 

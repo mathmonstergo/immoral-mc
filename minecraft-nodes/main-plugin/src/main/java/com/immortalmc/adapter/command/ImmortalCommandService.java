@@ -53,6 +53,18 @@ public final class ImmortalCommandService {
             spiritRootCommandRunner.run(source, sendMessage);
             return;
         }
+        if (action == ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_CREATE && spiritRootDetectorAdminRunner != null) {
+            spiritRootDetectorAdminRunner.createDetector(source, sendMessage);
+            return;
+        }
+        if (action == ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_LIST && spiritRootDetectorAdminRunner != null) {
+            spiritRootDetectorAdminRunner.listDetectors(sendMessage);
+            return;
+        }
+        if (action == ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_REMOVE && spiritRootDetectorAdminRunner != null) {
+            spiritRootDetectorAdminRunner.removeLookedAtDetector(source, sendMessage);
+            return;
+        }
         if (action == ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_SET && spiritRootDetectorAdminRunner != null) {
             spiritRootDetectorAdminRunner.setLookedAtEntityAsDetector(source, sendMessage);
             return;
