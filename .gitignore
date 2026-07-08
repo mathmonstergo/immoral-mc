@@ -38,6 +38,9 @@ node_modules/
 coverage/
 
 # Minecraft server runtime outputs
+minecraft-nodes/main-server/*
+!minecraft-nodes/main-server/README.md
+!minecraft-nodes/main-server/server.properties.example
 minecraft-nodes/**/run/
 minecraft-nodes/**/server/
 minecraft-nodes/**/logs/

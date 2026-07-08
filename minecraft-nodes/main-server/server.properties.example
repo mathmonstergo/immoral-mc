@@ -1,0 +1,16 @@
+# Local Paper test server for ImmortalMC. Copy to server.properties for runtime.
+server-port=25549
+server-ip=
+motd=ImmortalMC Local Test
+online-mode=false
+enforce-secure-profile=false
+prevent-proxy-connections=false
+white-list=false
+allow-flight=true
+view-distance=8
+simulation-distance=6
+spawn-protection=0
+difficulty=normal
+gamemode=survival
+enable-command-block=true
+max-players=10
