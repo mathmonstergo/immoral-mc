@@ -3,6 +3,7 @@ package com.immortalmc.adapter.command;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.immortalmc.adapter.client.HealthCheckResult;
+import com.immortalmc.adapter.testsupport.RecordingAdapterLogger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -17,6 +18,7 @@ class ImmortalCommandServiceTest {
                         () -> CompletableFuture.completedFuture(
                                 new HealthCheckResult("game-service", "ok", "0.1.0")),
                         new HealthCommandMessages(),
+                        new RecordingAdapterLogger(),
                         Runnable::run),
                 new HealthCommandMessages());
         List<String> sentMessages = new ArrayList<>();
@@ -34,6 +36,7 @@ class ImmortalCommandServiceTest {
                         () -> CompletableFuture.completedFuture(
                                 new HealthCheckResult("game-service", "ok", "0.1.0")),
                         new HealthCommandMessages(),
+                        new RecordingAdapterLogger(),
                         Runnable::run),
                 new HealthCommandMessages());
         List<String> sentMessages = new ArrayList<>();

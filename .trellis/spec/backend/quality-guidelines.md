@@ -429,10 +429,10 @@ Adapter response model:
 
 Join behavior:
 
-* sends an immediate loading message
 * calls Game Service asynchronously
 * stores the returned authoritative snapshot in memory only after success
-* dispatches cache writes and player messages back to the Paper main thread
+* dispatches cache writes and operational logs back to the Paper main thread
+* writes success/failure details to Paper logs, not player chat
 * does not kick the player in the MVP when login fails
 
 The Java Adapter may cache returned IDs to support later adapter commands, but
@@ -442,11 +442,11 @@ it must not persist account/life state or generate gameplay state locally.
 
 | Condition | Expected behavior |
 |---|---|
-| New Minecraft UUID joins | Game Service creates account/current life; Adapter caches returned snapshot |
-| Existing Minecraft UUID joins | Game Service returns existing account/current life; Adapter replaces cached snapshot |
-| Game Service returns non-`200` | Adapter reports profile unavailable and leaves cache empty/unchanged for that join |
-| Game Service returns invalid JSON | Adapter reports profile unavailable and does not create fallback state |
-| Game Service is unreachable | Adapter reports profile unavailable; Paper main thread is not blocked |
+| New Minecraft UUID joins | Game Service creates account/current life; Adapter caches returned snapshot and logs `player_login_success` |
+| Existing Minecraft UUID joins | Game Service returns existing account/current life; Adapter replaces cached snapshot and logs `player_login_success` |
+| Game Service returns non-`200` | Adapter logs `player_login_failure` and leaves cache empty/unchanged for that join |
+| Game Service returns invalid JSON | Adapter logs `player_login_failure` and does not create fallback state |
+| Game Service is unreachable | Adapter logs `player_login_failure`; Paper main thread is not blocked |
 
 ### 5. Good/Base/Bad Cases
 
@@ -465,7 +465,8 @@ Java tests should assert:
 * login request JSON uses `minecraft_uuid` and `player_name`
 * login response maps `account` and `current_life` fields correctly
 * successful join-login writes to `PlayerSessionCache` through the dispatcher
-* failed join-login reports an unavailable message and does not cache fallback state
+* successful join-login logs `player_login_success` and sends no lifecycle chat
+* failed join-login logs `player_login_failure`, sends no technical chat, and does not cache fallback state
 * plugin build compiles the Paper listener registration
 
 ### 7. Wrong vs Correct
@@ -488,7 +489,7 @@ This invents authoritative player state in the Adapter.
 loginFuture.whenComplete((result, error) -> {
     scheduler.runTask(plugin, () -> {
         sessionCache.store(result);
-        player.sendMessage("ImmortalMC profile loaded.");
+        logger.info("player_login_success player_name=Steve minecraft_uuid=...");
     });
 });
 ```

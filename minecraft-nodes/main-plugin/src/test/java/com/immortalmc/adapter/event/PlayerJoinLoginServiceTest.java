@@ -8,6 +8,7 @@ import com.immortalmc.adapter.client.GameServiceException;
 import com.immortalmc.adapter.client.LifeSnapshot;
 import com.immortalmc.adapter.client.PlayerLoginResult;
 import com.immortalmc.adapter.session.PlayerSessionCache;
+import com.immortalmc.adapter.testsupport.RecordingAdapterLogger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -21,25 +22,28 @@ class PlayerJoinLoginServiceTest {
         CompletableFuture<PlayerLoginResult> loginFuture = new CompletableFuture<>();
         PlayerSessionCache sessionCache = new PlayerSessionCache();
         RecordingDispatcher dispatcher = new RecordingDispatcher();
+        RecordingAdapterLogger logger = new RecordingAdapterLogger();
         List<String> messages = new ArrayList<>();
         PlayerJoinLoginService service = new PlayerJoinLoginService(
                 (uuid, name) -> loginFuture,
                 sessionCache,
-                new PlayerJoinMessages(),
+                logger,
                 dispatcher::dispatch);
 
         service.loginOnJoin(minecraftUuid, "Sensen", messages::add);
         loginFuture.complete(loginResult(minecraftUuid, "Sensen"));
 
-        assertEquals(List.of("Loading ImmortalMC profile..."), messages);
+        assertEquals(List.of(), messages);
         assertTrue(sessionCache.findByMinecraftUuid(minecraftUuid).isEmpty());
 
         dispatcher.runAll();
 
         assertTrue(sessionCache.findByMinecraftUuid(minecraftUuid).isPresent());
+        assertEquals(List.of(), messages);
         assertEquals(
-                List.of("Loading ImmortalMC profile...", "ImmortalMC profile loaded."),
-                messages);
+                List.of(
+                        "player_login_success player_name=Sensen minecraft_uuid=00000000-0000-0000-0000-000000000010 account_id=10000000-0000-0000-0000-000000000001 life_id=20000000-0000-0000-0000-000000000001"),
+                logger.messagesAt("info"));
     }
 
     @Test
@@ -48,11 +52,12 @@ class PlayerJoinLoginServiceTest {
         CompletableFuture<PlayerLoginResult> loginFuture = new CompletableFuture<>();
         PlayerSessionCache sessionCache = new PlayerSessionCache();
         RecordingDispatcher dispatcher = new RecordingDispatcher();
+        RecordingAdapterLogger logger = new RecordingAdapterLogger();
         List<String> messages = new ArrayList<>();
         PlayerJoinLoginService service = new PlayerJoinLoginService(
                 (uuid, name) -> loginFuture,
                 sessionCache,
-                new PlayerJoinMessages(),
+                logger,
                 dispatcher::dispatch);
 
         service.loginOnJoin(minecraftUuid, "Downstream", messages::add);
@@ -62,9 +67,9 @@ class PlayerJoinLoginServiceTest {
         assertTrue(sessionCache.findByMinecraftUuid(minecraftUuid).isEmpty());
         assertEquals(
                 List.of(
-                        "Loading ImmortalMC profile...",
-                        "ImmortalMC profile unavailable: Game Service login failed with HTTP 503"),
-                messages);
+                        "player_login_failure player_name=Downstream minecraft_uuid=00000000-0000-0000-0000-000000000011 reason=Game Service login failed with HTTP 503"),
+                logger.messagesAt("warn"));
+        assertEquals(List.of(), messages);
     }
 
     private static PlayerLoginResult loginResult(UUID minecraftUuid, String playerName) {

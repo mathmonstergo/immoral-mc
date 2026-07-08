@@ -9,6 +9,7 @@ import com.immortalmc.adapter.client.PlayerLoginResult;
 import com.immortalmc.adapter.client.SpiritRootDetectionResult;
 import com.immortalmc.adapter.client.SpiritRootSnapshot;
 import com.immortalmc.adapter.session.PlayerSessionCache;
+import com.immortalmc.adapter.testsupport.RecordingAdapterLogger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -22,6 +23,7 @@ class SpiritRootCommandRunnerTest {
                 accountId -> CompletableFuture.completedFuture(detectionResult(false)),
                 new PlayerSessionCache(),
                 new SpiritRootCommandMessages(),
+                new RecordingAdapterLogger(),
                 Runnable::run);
         List<String> messages = new ArrayList<>();
 
@@ -37,6 +39,7 @@ class SpiritRootCommandRunnerTest {
                 accountId -> CompletableFuture.completedFuture(detectionResult(false)),
                 new PlayerSessionCache(),
                 new SpiritRootCommandMessages(),
+                new RecordingAdapterLogger(),
                 Runnable::run);
         List<String> messages = new ArrayList<>();
 
@@ -53,6 +56,7 @@ class SpiritRootCommandRunnerTest {
         PlayerSessionCache sessionCache = new PlayerSessionCache();
         sessionCache.store(loginResult(minecraftUuid, accountId));
         RecordingDispatcher dispatcher = new RecordingDispatcher();
+        RecordingAdapterLogger logger = new RecordingAdapterLogger();
         List<UUID> requestedAccountIds = new ArrayList<>();
         SpiritRootCommandRunner runner = new SpiritRootCommandRunner(
                 requestedAccountId -> {
@@ -61,6 +65,7 @@ class SpiritRootCommandRunnerTest {
                 },
                 sessionCache,
                 new SpiritRootCommandMessages(),
+                logger,
                 dispatcher::dispatch);
         List<String> messages = new ArrayList<>();
 
@@ -74,6 +79,10 @@ class SpiritRootCommandRunnerTest {
         assertEquals(
                 List.of("Detecting spirit root...", "Spirit root: Dual Root (dual), elements=fire, water"),
                 messages);
+        assertEquals(
+                List.of(
+                        "spirit_root_test_success minecraft_uuid=00000000-0000-0000-0000-000000000010 account_id=10000000-0000-0000-0000-000000000001 life_id=20000000-0000-0000-0000-000000000001 quality=dual elements=fire,water already_detected=false"),
+                logger.messagesAt("info"));
     }
 
     @Test
@@ -84,10 +93,12 @@ class SpiritRootCommandRunnerTest {
         PlayerSessionCache sessionCache = new PlayerSessionCache();
         sessionCache.store(loginResult(minecraftUuid, accountId));
         RecordingDispatcher dispatcher = new RecordingDispatcher();
+        RecordingAdapterLogger logger = new RecordingAdapterLogger();
         SpiritRootCommandRunner runner = new SpiritRootCommandRunner(
                 requestedAccountId -> detectionFuture,
                 sessionCache,
                 new SpiritRootCommandMessages(),
+                logger,
                 dispatcher::dispatch);
         List<String> messages = new ArrayList<>();
 
@@ -101,6 +112,10 @@ class SpiritRootCommandRunnerTest {
                         "Detecting spirit root...",
                         "Spirit root unavailable: Game Service spirit-root detection failed with HTTP 503"),
                 messages);
+        assertEquals(
+                List.of(
+                        "spirit_root_test_failure minecraft_uuid=00000000-0000-0000-0000-000000000010 account_id=10000000-0000-0000-0000-000000000001 reason=Game Service spirit-root detection failed with HTTP 503"),
+                logger.messagesAt("warn"));
     }
 
     private static PlayerLoginResult loginResult(UUID minecraftUuid, UUID accountId) {

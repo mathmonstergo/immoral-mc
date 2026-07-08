@@ -11,7 +11,8 @@ import com.immortalmc.adapter.command.SpiritRootCommandRunner;
 import com.immortalmc.adapter.config.PluginSettings;
 import com.immortalmc.adapter.event.ImmortalPlayerJoinListener;
 import com.immortalmc.adapter.event.PlayerJoinLoginService;
-import com.immortalmc.adapter.event.PlayerJoinMessages;
+import com.immortalmc.adapter.logging.AdapterLogger;
+import com.immortalmc.adapter.logging.PaperAdapterLogger;
 import com.immortalmc.adapter.session.PlayerSessionCache;
 import java.net.http.HttpClient;
 import java.util.Objects;
@@ -25,6 +26,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
 
         PluginSettings settings = PluginSettings.from(
                 getConfig().getString("game-service.base-url", "http://127.0.0.1:8000"));
+        AdapterLogger adapterLogger = new PaperAdapterLogger(getLogger());
         GameServiceClient gameServiceClient =
                 new GameServiceClient(settings.gameServiceBaseUri(), HttpClient.newHttpClient());
         PlayerSessionCache sessionCache = new PlayerSessionCache();
@@ -32,11 +34,13 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         HealthCommandRunner healthCommandRunner = new HealthCommandRunner(
                 gameServiceClient::checkHealth,
                 messages,
+                adapterLogger,
                 task -> getServer().getScheduler().runTask(this, task));
         SpiritRootCommandRunner spiritRootCommandRunner = new SpiritRootCommandRunner(
                 gameServiceClient::detectSpiritRoot,
                 sessionCache,
                 new SpiritRootCommandMessages(),
+                adapterLogger,
                 task -> getServer().getScheduler().runTask(this, task));
         ImmortalCommandService commandService = new ImmortalCommandService(
                 new ImmortalCommandHandler(), healthCommandRunner, spiritRootCommandRunner, messages);
@@ -50,7 +54,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         PlayerJoinLoginService playerJoinLoginService = new PlayerJoinLoginService(
                 gameServiceClient::loginPlayer,
                 sessionCache,
-                new PlayerJoinMessages(),
+                adapterLogger,
                 task -> getServer().getScheduler().runTask(this, task));
         getServer().getPluginManager().registerEvents(new ImmortalPlayerJoinListener(playerJoinLoginService), this);
 
