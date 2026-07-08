@@ -42,7 +42,8 @@ class EntityInteractionConfigMapperTest {
                 "entity-uuid", "30000000-0000-0000-0000-000000000002",
                 "entity-type", "VILLAGER",
                 "protected", true,
-                "managed-entity", true)));
+                "managed-entity", true,
+                "dialogue-id", "old-man")));
         config.set("content.spirit-root.detectors", List.of(Map.of(
                 "world", "world",
                 "entity-uuid", "30000000-0000-0000-0000-000000000001")));
@@ -56,7 +57,8 @@ class EntityInteractionConfigMapperTest {
                         new EntityBinding("world", UUID.fromString("30000000-0000-0000-0000-000000000002")),
                         "VILLAGER",
                         true,
-                        true)),
+                        true,
+                        Map.of("dialogue-id", "old-man"))),
                 loaded);
     }
 
@@ -89,5 +91,21 @@ class EntityInteractionConfigMapperTest {
         List<Map<String, Object>> dumped = new EntityInteractionConfigMapper().dump(List.of(interaction));
 
         assertEquals(true, dumped.getFirst().get("managed-entity"));
+    }
+
+    @Test
+    void dumpWritesMetadataFieldsAtEntryTopLevel() {
+        EntityInteractionDefinition interaction = new EntityInteractionDefinition(
+                "npc-dialogue-1",
+                "npc-dialogue",
+                new EntityBinding("world", UUID.fromString("30000000-0000-0000-0000-000000000001")),
+                "VILLAGER",
+                true,
+                false,
+                Map.of("dialogue-id", "old-man"));
+
+        List<Map<String, Object>> dumped = new EntityInteractionConfigMapper().dump(List.of(interaction));
+
+        assertEquals("old-man", dumped.getFirst().get("dialogue-id"));
     }
 }

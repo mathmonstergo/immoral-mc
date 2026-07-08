@@ -6,6 +6,8 @@ import com.immortalmc.adapter.command.HealthCommandRunner;
 import com.immortalmc.adapter.command.ImmortalBukkitCommandExecutor;
 import com.immortalmc.adapter.command.ImmortalCommandHandler;
 import com.immortalmc.adapter.command.ImmortalCommandService;
+import com.immortalmc.adapter.command.NpcDialogueAdminMessages;
+import com.immortalmc.adapter.command.NpcDialogueAdminRunner;
 import com.immortalmc.adapter.command.SpiritRootDetectorAdminMessages;
 import com.immortalmc.adapter.command.SpiritRootDetectorAdminRunner;
 import com.immortalmc.adapter.command.SpiritRootCommandMessages;
@@ -13,10 +15,15 @@ import com.immortalmc.adapter.command.SpiritRootCommandRunner;
 import com.immortalmc.adapter.config.PluginSettings;
 import com.immortalmc.adapter.content.BukkitConfigEntityInteractionRepository;
 import com.immortalmc.adapter.content.EntityInteractionRegistry;
+import com.immortalmc.adapter.dialogue.NpcDialogueAudience;
+import com.immortalmc.adapter.dialogue.NpcDialoguePresenter;
+import com.immortalmc.adapter.dialogue.NpcDialogueRegistry;
+import com.immortalmc.adapter.dialogue.YamlNpcDialogueRepository;
 import com.immortalmc.adapter.event.EntityInteractionProtectionListener;
 import com.immortalmc.adapter.event.ImmortalEntityInteractionListener;
 import com.immortalmc.adapter.event.ImmortalPlayerJoinListener;
 import com.immortalmc.adapter.event.PlayerJoinLoginService;
+import com.immortalmc.adapter.gameplay.NpcDialogueInteractionAction;
 import com.immortalmc.adapter.gameplay.SpiritRootDetectionInteractionAction;
 import com.immortalmc.adapter.gameplay.SpiritRootDetectionUseCase;
 import com.immortalmc.adapter.interaction.BukkitEntityInteractionContext;
@@ -27,8 +34,12 @@ import com.immortalmc.adapter.presentation.BukkitSpiritRootParticlePresenter;
 import com.immortalmc.adapter.presentation.SpiritRootParticlePlanner;
 import com.immortalmc.adapter.session.PlayerSessionCache;
 import java.net.http.HttpClient;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Registry;
+import org.bukkit.Sound;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -36,6 +47,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        saveResource("dialogues/old-man.yml", false);
 
         PluginSettings settings = PluginSettings.from(
                 getConfig().getString("game-service.base-url", "http://127.0.0.1:8000"));
@@ -46,6 +58,9 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         EntityInteractionRegistry entityInteractionRegistry = new EntityInteractionRegistry(
                 new BukkitConfigEntityInteractionRepository(this));
         int loadedInteractions = entityInteractionRegistry.reload();
+        NpcDialogueRegistry npcDialogueRegistry = new NpcDialogueRegistry(
+                new YamlNpcDialogueRepository(getDataFolder().toPath().resolve("dialogues").toFile()));
+        int loadedDialogues = npcDialogueRegistry.reload();
         HealthCommandMessages messages = new HealthCommandMessages();
         HealthCommandRunner healthCommandRunner = new HealthCommandRunner(
                 gameServiceClient::checkHealth,
@@ -67,11 +82,17 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 entityInteractionRegistry,
                 new SpiritRootDetectorAdminMessages(),
                 adapterLogger);
+        NpcDialogueAdminRunner npcDialogueAdminRunner = new NpcDialogueAdminRunner(
+                entityInteractionRegistry,
+                npcDialogueRegistry,
+                new NpcDialogueAdminMessages(),
+                adapterLogger);
         ImmortalCommandService commandService = new ImmortalCommandService(
                 new ImmortalCommandHandler(),
                 healthCommandRunner,
                 spiritRootCommandRunner,
                 detectorAdminRunner,
+                npcDialogueAdminRunner,
                 messages);
         ImmortalBukkitCommandExecutor commandExecutor = new ImmortalBukkitCommandExecutor(commandService);
 
@@ -87,12 +108,30 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 task -> getServer().getScheduler().runTask(this, task));
         BukkitSpiritRootParticlePresenter spiritRootParticlePresenter =
                 new BukkitSpiritRootParticlePresenter(new SpiritRootParticlePlanner());
+        NpcDialoguePresenter npcDialoguePresenter = new NpcDialoguePresenter(
+                (delayTicks, task) -> getServer().getScheduler().runTaskLater(this, task, delayTicks));
         EntityInteractionActionRouter<BukkitEntityInteractionContext> interactionRouter =
                 new EntityInteractionActionRouter<>(Map.of(
                         SpiritRootDetectionInteractionAction.ACTION,
                         new SpiritRootDetectionInteractionAction(
                                 spiritRootDetectionUseCase,
-                                spiritRootParticlePresenter)));
+                                spiritRootParticlePresenter),
+                        NpcDialogueInteractionAction.ACTION,
+                        new NpcDialogueInteractionAction(
+                                npcDialogueRegistry,
+                                npcDialoguePresenter,
+                                adapterLogger,
+                                player -> new NpcDialogueAudience() {
+                                    @Override
+                                    public void sendMessage(String message) {
+                                        player.sendMessage(message);
+                                    }
+
+                                    @Override
+                                    public void playSound(String sound, float volume, float pitch) {
+                                        player.playSound(player.getLocation(), resolveSound(sound), volume, pitch);
+                                    }
+                                })));
         getServer().getPluginManager().registerEvents(new ImmortalPlayerJoinListener(playerJoinLoginService), this);
         getServer().getPluginManager().registerEvents(
                 new ImmortalEntityInteractionListener(
@@ -107,6 +146,19 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         getLogger().info("ImmortalMC adapter enabled; Game Service base URL: "
                 + settings.gameServiceBaseUri()
                 + "; entity interactions loaded: "
-                + loadedInteractions);
+                + loadedInteractions
+                + "; NPC dialogues loaded: "
+                + loadedDialogues);
+    }
+
+    private static Sound resolveSound(String sound) {
+        NamespacedKey key = sound.contains(":")
+                ? NamespacedKey.fromString(sound)
+                : NamespacedKey.minecraft(sound.toLowerCase(Locale.ROOT).replace('_', '.'));
+        Sound resolved = key == null ? null : Registry.SOUNDS.get(key);
+        if (resolved == null) {
+            throw new IllegalArgumentException("Unknown sound: " + sound);
+        }
+        return resolved;
     }
 }

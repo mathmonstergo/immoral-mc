@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.bukkit.configuration.file.FileConfiguration;
 
@@ -19,6 +20,14 @@ final class EntityInteractionConfigMapper {
     private static final String ENTITY_TYPE_KEY = "entity-type";
     private static final String PROTECTED_KEY = "protected";
     private static final String MANAGED_ENTITY_KEY = "managed-entity";
+    private static final Set<String> BUILT_IN_KEYS = Set.of(
+            ID_KEY,
+            ACTION_KEY,
+            WORLD_KEY,
+            ENTITY_UUID_KEY,
+            ENTITY_TYPE_KEY,
+            PROTECTED_KEY,
+            MANAGED_ENTITY_KEY);
 
     List<EntityInteractionDefinition> load(FileConfiguration config) {
         if (config.isSet(INTERACTIONS_PATH)) {
@@ -48,7 +57,8 @@ final class EntityInteractionConfigMapper {
                     binding,
                     entityType,
                     protectedEntity,
-                    managedEntity));
+                    managedEntity,
+                    metadataFrom(entry)));
         }
         return List.copyOf(interactions);
     }
@@ -105,6 +115,21 @@ final class EntityInteractionConfigMapper {
         return bool;
     }
 
+    private Map<String, String> metadataFrom(Map<?, ?> entry) {
+        Map<String, String> metadata = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> field : entry.entrySet()) {
+            if (!(field.getKey() instanceof String key) || BUILT_IN_KEYS.contains(key)) {
+                continue;
+            }
+            Object value = field.getValue();
+            if (!(value instanceof String text) || text.isBlank()) {
+                throw new IllegalArgumentException("Invalid entity interaction entry in config.yml: invalid " + key);
+            }
+            metadata.put(key, text);
+        }
+        return Map.copyOf(metadata);
+    }
+
     private Map<String, Object> toConfigEntry(EntityInteractionDefinition interaction) {
         Map<String, Object> entry = new LinkedHashMap<>();
         entry.put(ID_KEY, interaction.id());
@@ -114,6 +139,7 @@ final class EntityInteractionConfigMapper {
         entry.put(ENTITY_TYPE_KEY, interaction.entityType());
         entry.put(PROTECTED_KEY, interaction.protectedEntity());
         entry.put(MANAGED_ENTITY_KEY, interaction.managedEntity());
+        entry.putAll(interaction.metadata());
         return entry;
     }
 }

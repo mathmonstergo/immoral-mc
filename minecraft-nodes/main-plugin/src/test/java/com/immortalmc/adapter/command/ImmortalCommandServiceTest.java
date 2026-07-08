@@ -8,9 +8,13 @@ import com.immortalmc.adapter.content.EntityInteractionDefinition;
 import com.immortalmc.adapter.content.EntityInteractionEntity;
 import com.immortalmc.adapter.content.EntityInteractionRegistry;
 import com.immortalmc.adapter.content.EntityInteractionRepository;
+import com.immortalmc.adapter.dialogue.NpcDialogueDefinition;
+import com.immortalmc.adapter.dialogue.NpcDialogueRegistry;
+import com.immortalmc.adapter.dialogue.NpcDialogueRepository;
 import com.immortalmc.adapter.testsupport.RecordingAdapterLogger;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
@@ -31,7 +35,7 @@ class ImmortalCommandServiceTest {
 
         service.execute(new String[] {}, sentMessages::add);
 
-        assertEquals(List.of("Usage: /immortal <health|spirit-root|spirit-root-detector>"), sentMessages);
+        assertEquals(List.of("Usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue>"), sentMessages);
     }
 
     @Test
@@ -133,6 +137,49 @@ class ImmortalCommandServiceTest {
                 sentMessages);
     }
 
+    @Test
+    void npcDialogueSetCommandBindsLookedAtEntity() {
+        InMemoryEntityInteractionRepository repository = new InMemoryEntityInteractionRepository();
+        NpcDialogueRegistry dialogueRegistry = new NpcDialogueRegistry(new InMemoryNpcDialogueRepository());
+        dialogueRegistry.reload();
+        ImmortalCommandService service = new ImmortalCommandService(
+                new ImmortalCommandHandler(),
+                healthRunner(),
+                null,
+                null,
+                new NpcDialogueAdminRunner(
+                        new EntityInteractionRegistry(repository),
+                        dialogueRegistry,
+                        new NpcDialogueAdminMessages(),
+                        new RecordingAdapterLogger()),
+                new HealthCommandMessages());
+        EntityInteractionEntity npc = new EntityInteractionEntity(
+                new EntityBinding("world", UUID.fromString("30000000-0000-0000-0000-000000000020")),
+                "VILLAGER");
+        List<String> sentMessages = new ArrayList<>();
+
+        service.execute(
+                new String[] {"npc-dialogue", "set", "old-man"},
+                ImmortalCommandSource.player(
+                        UUID.fromString("00000000-0000-0000-0000-000000000010"), npc),
+                sentMessages::add);
+
+        assertEquals(
+                List.of(new EntityInteractionDefinition(
+                        "npc-dialogue-1",
+                        "npc-dialogue",
+                        npc.binding(),
+                        "VILLAGER",
+                        true,
+                        false,
+                        Map.of("dialogue-id", "old-man"))),
+                repository.load());
+        assertEquals(
+                List.of("NPC dialogue npc-dialogue-1 bound to old-man for entity "
+                        + "30000000-0000-0000-0000-000000000020 in world. Total NPC dialogues: 1."),
+                sentMessages);
+    }
+
     private static HealthCommandRunner healthRunner() {
         return new HealthCommandRunner(
                 () -> CompletableFuture.completedFuture(new HealthCheckResult("game-service", "ok", "0.1.0")),
@@ -152,6 +199,23 @@ class ImmortalCommandServiceTest {
         @Override
         public void save(List<EntityInteractionDefinition> interactions) {
             this.interactions = new ArrayList<>(interactions);
+        }
+    }
+
+    private static final class InMemoryNpcDialogueRepository implements NpcDialogueRepository {
+        @Override
+        public Map<String, NpcDialogueDefinition> loadAll() {
+            return Map.of(
+                    "old-man",
+                    new NpcDialogueDefinition(
+                            "old-man",
+                            "初入凡尘",
+                            "老村民",
+                            List.of("§6§l任务开始", "§e初入凡尘"),
+                            List.of("年轻人，你身上有一股未定的气。"),
+                            30,
+                            "entity.villager.ambient",
+                            1.0f));
         }
     }
 }

@@ -16,7 +16,7 @@ class PluginResourceTest {
         assertTrue(pluginYml.contains("main: com.immortalmc.adapter.ImmortalMainPlugin"));
         assertTrue(pluginYml.contains("api-version: '1.21.11'"));
         assertTrue(pluginYml.contains("immortal:"));
-        assertTrue(pluginYml.contains("usage: /immortal <health|spirit-root|spirit-root-detector>"));
+        assertTrue(pluginYml.contains("usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue>"));
         assertTrue(pluginYml.contains("com.fasterxml.jackson.core:jackson-databind:2.18.2"));
     }
 
@@ -28,6 +28,19 @@ class PluginResourceTest {
         assertTrue(configYml.contains("base-url: \"http://127.0.0.1:8000\""));
         assertTrue(configYml.contains("entity-interactions:"));
         assertTrue(configYml.contains("entries: []"));
+    }
+
+    @Test
+    void exampleDialogueYmlDeclaresNpcDialogueShape() throws Exception {
+        String dialogueYml = readResource("dialogues/old-man.yml");
+
+        assertTrue(dialogueYml.contains("id: old-man"));
+        assertTrue(dialogueYml.contains("title: \"初入凡尘\""));
+        assertTrue(dialogueYml.contains("speaker: \"老村民\""));
+        assertTrue(dialogueYml.contains("line-delay-ticks: 30"));
+        assertTrue(dialogueYml.contains("sound: \"entity.villager.ambient\""));
+        assertTrue(dialogueYml.contains("opening-lines:"));
+        assertTrue(dialogueYml.contains("lines:"));
     }
 
     private static String readResource(String path) throws IOException {

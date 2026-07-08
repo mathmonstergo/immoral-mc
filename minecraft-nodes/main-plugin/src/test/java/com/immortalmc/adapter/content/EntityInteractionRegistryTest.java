@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -59,6 +60,24 @@ class EntityInteractionRegistryTest {
 
         assertEquals(List.of(detector, dialogue), registry.list());
         assertEquals(List.of(dialogue), registry.listByAction("npc-dialogue"));
+    }
+
+    @Test
+    void savingInteractionPersistsMetadata() {
+        InMemoryEntityInteractionRepository repository = new InMemoryEntityInteractionRepository();
+        EntityInteractionEntity entity = interactionEntity("world", "30000000-0000-0000-0000-000000000001", "VILLAGER");
+        EntityInteractionRegistry registry = new EntityInteractionRegistry(repository);
+
+        EntityInteractionDefinition saved = registry.saveInteraction(
+                "npc-dialogue-1",
+                "npc-dialogue",
+                entity,
+                false,
+                Map.of("dialogue-id", "old-man"));
+
+        assertEquals("old-man", saved.metadataValue("dialogue-id").orElseThrow());
+        assertEquals(false, saved.managedEntity());
+        assertEquals(List.of(saved), repository.load());
     }
 
     @Test

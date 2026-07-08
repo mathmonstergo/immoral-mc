@@ -38,9 +38,19 @@ public final class EntityInteractionRegistry {
             String action,
             EntityInteractionEntity entity,
             boolean managedEntity) {
+        return saveInteraction(id, action, entity, managedEntity, Map.of());
+    }
+
+    public synchronized EntityInteractionDefinition saveInteraction(
+            String id,
+            String action,
+            EntityInteractionEntity entity,
+            boolean managedEntity,
+            Map<String, String> metadata) {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(action, "action");
         Objects.requireNonNull(entity, "entity");
+        Objects.requireNonNull(metadata, "metadata");
 
         Optional<EntityInteractionDefinition> existing = find(action, entity.binding());
         if (existing.isPresent()) {
@@ -48,7 +58,14 @@ public final class EntityInteractionRegistry {
         }
 
         EntityInteractionDefinition definition =
-                new EntityInteractionDefinition(id, action, entity.binding(), entity.entityType(), true, managedEntity);
+                new EntityInteractionDefinition(
+                        id,
+                        action,
+                        entity.binding(),
+                        entity.entityType(),
+                        true,
+                        managedEntity,
+                        metadata);
         List<EntityInteractionDefinition> updated = new ArrayList<>(interactions);
         updated.add(definition);
         interactions = deduplicate(updated);

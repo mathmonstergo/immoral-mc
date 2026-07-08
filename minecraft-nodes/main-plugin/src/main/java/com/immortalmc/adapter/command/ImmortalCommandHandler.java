@@ -16,6 +16,9 @@ public final class ImmortalCommandHandler {
         if ("spirit-root-detector".equals(args[0].toLowerCase(Locale.ROOT))) {
             return resolveSpiritRootDetector(args);
         }
+        if ("npc-dialogue".equals(args[0].toLowerCase(Locale.ROOT))) {
+            return resolveNpcDialogue(args);
+        }
         return ImmortalCommandAction.USAGE;
     }
 
@@ -38,6 +41,26 @@ public final class ImmortalCommandHandler {
         }
         if ("reload".equals(action)) {
             return ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_RELOAD;
+        }
+        return ImmortalCommandAction.USAGE;
+    }
+
+    private ImmortalCommandAction resolveNpcDialogue(String[] args) {
+        if (args.length < 2) {
+            return ImmortalCommandAction.USAGE;
+        }
+        String action = args[1].toLowerCase(Locale.ROOT);
+        if ("set".equals(action) && args.length >= 3) {
+            return ImmortalCommandAction.NPC_DIALOGUE_SET;
+        }
+        if ("list".equals(action)) {
+            return ImmortalCommandAction.NPC_DIALOGUE_LIST;
+        }
+        if ("remove".equals(action)) {
+            return ImmortalCommandAction.NPC_DIALOGUE_REMOVE;
+        }
+        if ("reload".equals(action)) {
+            return ImmortalCommandAction.NPC_DIALOGUE_RELOAD;
         }
         return ImmortalCommandAction.USAGE;
     }

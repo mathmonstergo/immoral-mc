@@ -70,4 +70,40 @@ class ImmortalCommandHandlerTest {
                 ImmortalCommandAction.SPIRIT_ROOT_DETECTOR_RELOAD,
                 handler.resolve(new String[] {"spirit-root-detector", "reload"}));
     }
+
+    @Test
+    void npcDialogueSetSubcommandBindsLookedAtEntity() {
+        ImmortalCommandHandler handler = new ImmortalCommandHandler();
+
+        assertEquals(
+                ImmortalCommandAction.NPC_DIALOGUE_SET,
+                handler.resolve(new String[] {"npc-dialogue", "set", "old-man"}));
+    }
+
+    @Test
+    void npcDialogueListSubcommandListsBindings() {
+        ImmortalCommandHandler handler = new ImmortalCommandHandler();
+
+        assertEquals(
+                ImmortalCommandAction.NPC_DIALOGUE_LIST,
+                handler.resolve(new String[] {"npc-dialogue", "list"}));
+    }
+
+    @Test
+    void npcDialogueRemoveSubcommandRemovesBinding() {
+        ImmortalCommandHandler handler = new ImmortalCommandHandler();
+
+        assertEquals(
+                ImmortalCommandAction.NPC_DIALOGUE_REMOVE,
+                handler.resolve(new String[] {"npc-dialogue", "remove"}));
+    }
+
+    @Test
+    void npcDialogueReloadSubcommandReloadsBindingsAndYamlContent() {
+        ImmortalCommandHandler handler = new ImmortalCommandHandler();
+
+        assertEquals(
+                ImmortalCommandAction.NPC_DIALOGUE_RELOAD,
+                handler.resolve(new String[] {"npc-dialogue", "reload"}));
+    }
 }

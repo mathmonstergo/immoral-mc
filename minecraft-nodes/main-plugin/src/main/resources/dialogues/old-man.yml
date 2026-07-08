@@ -1,0 +1,13 @@
+id: old-man
+title: "初入凡尘"
+speaker: "老村民"
+line-delay-ticks: 30
+sound: "entity.villager.ambient"
+pitch: 1.0
+opening-lines:
+  - "§6§l任务开始"
+  - "§e初入凡尘"
+  - "§7命数初动，尘缘已起。"
+lines:
+  - "年轻人，你身上有一股未定的气。"
+  - "去村外的灵石旁看看，也许能照出你的根骨。"

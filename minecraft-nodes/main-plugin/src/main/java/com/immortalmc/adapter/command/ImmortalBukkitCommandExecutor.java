@@ -26,7 +26,8 @@ import org.jetbrains.annotations.Nullable;
 public final class ImmortalBukkitCommandExecutor implements CommandExecutor, TabCompleter {
     private static final double MAX_TARGET_DISTANCE = 8.0;
     private static final EntityTargetSelector TARGET_SELECTOR = new EntityTargetSelector(MAX_TARGET_DISTANCE);
-    private static final List<String> ROOT_SUBCOMMANDS = List.of("health", "spirit-root", "spirit-root-detector");
+    private static final List<String> ROOT_SUBCOMMANDS =
+            List.of("health", "spirit-root", "spirit-root-detector", "npc-dialogue");
 
     private final ImmortalCommandService commandService;
 
@@ -54,6 +55,12 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
             if (args.length == 2 && "spirit-root-detector".equals(args[0].toLowerCase(Locale.ROOT))) {
                 String prefix = args[1].toLowerCase(Locale.ROOT);
                 return List.of("create", "list", "remove", "set", "reload").stream()
+                        .filter(subcommand -> subcommand.startsWith(prefix))
+                        .toList();
+            }
+            if (args.length == 2 && "npc-dialogue".equals(args[0].toLowerCase(Locale.ROOT))) {
+                String prefix = args[1].toLowerCase(Locale.ROOT);
+                return List.of("set", "list", "remove", "reload").stream()
                         .filter(subcommand -> subcommand.startsWith(prefix))
                         .toList();
             }

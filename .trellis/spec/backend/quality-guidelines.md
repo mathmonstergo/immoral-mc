@@ -791,3 +791,136 @@ registry.findAll(binding).forEach(definition -> router.route(
 The Adapter has one entity-interaction entry point. Each action handler owns
 only its presentation/adapter behavior, and Game Service remains the authority
 for progression-defining results.
+
+## Scenario: Paper Adapter NPC Dialogue Interaction
+
+### 1. Scope / Trigger
+
+Trigger: add the second concrete entity interaction action, `npc-dialogue`, to
+prove NPCs, quests, shops, and scripted interactions can reuse the generic
+entity interaction layer.
+
+### 2. Signatures
+
+* Minecraft admin command: `/immortal npc-dialogue set <dialogue-id>`
+* Minecraft admin command: `/immortal npc-dialogue list`
+* Minecraft admin command: `/immortal npc-dialogue remove`
+* Minecraft admin command: `/immortal npc-dialogue reload`
+* Entity interaction action key: `npc-dialogue`
+* Interaction metadata key: `dialogue-id`
+* Dialogue content path: `plugins/ImmortalMC/dialogues/<dialogue-id>.yml`
+
+### 3. Contracts
+
+`npc-dialogue` interaction entries are normal
+`content.entity-interactions.entries` items with:
+
+```yaml
+id: "npc-dialogue-1"
+action: "npc-dialogue"
+world: "world"
+entity-uuid: "00000000-0000-0000-0000-000000000000"
+entity-type: "VILLAGER"
+protected: true
+managed-entity: false
+dialogue-id: "old-man"
+```
+
+Dialogue YAML file shape:
+
+```yaml
+id: old-man
+title: "初入凡尘"
+speaker: "老村民"
+line-delay-ticks: 30
+sound: "entity.villager.ambient"
+pitch: 1.0
+opening-lines:
+  - "§6§l任务开始"
+  - "§e初入凡尘"
+lines:
+  - "年轻人，你身上有一股未定的气。"
+```
+
+Rules:
+
+* `set` binds the looked-at entity to an already-loaded dialogue id.
+* `set` always writes `managed-entity: false`; external plugins may own the
+  NPC entity.
+* Right-clicking the bound entity sends a fixed-height stylized opening block,
+  then schedules NPC lines every `line-delay-ticks`.
+* Each NPC line plays the configured sound with slight pitch variation around
+  `pitch`.
+* Optional YAML fields use defaults only when omitted; if an optional field is
+  present with the wrong type, loading must fail instead of silently defaulting.
+* Dialogue presentation is intentional player UX; operational traces use Paper
+  logs.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Console runs `npc-dialogue set` or `remove` | Player-only message |
+| Player runs `set` without looking at an entity | Target-missing message and `warn` log |
+| Player runs `set <missing-id>` | No binding saved; message points to `dialogues/<id>.yml`; `warn` log |
+| Player runs `set <loaded-id>` | Binding saved as action `npc-dialogue` with `dialogue-id` metadata and `managed-entity: false` |
+| Player right-clicks a bound NPC with loaded content | Opening block appears, then delayed lines with sound |
+| Bound interaction has no `dialogue-id` metadata | `warn` log; no fallback dialogue |
+| Bound interaction references missing content | `warn` log; no fallback dialogue |
+| Dialogue YAML has a malformed optional field type | Dialogue loading fails visibly; no silent default is applied |
+| Admin runs `reload` | Entity bindings and dialogue YAML files are reloaded |
+
+### 5. Good/Base/Bad Cases
+
+* Good: NPC dialogue is a registered `EntityInteractionAction`, not a second
+  entity listener.
+* Good: entity binding and dialogue content are separated; multiple NPCs can
+  point at the same `dialogue-id`.
+* Good: dialogue content is data-driven YAML and reviewable in version control.
+* Base: `dialogue-id` is interaction metadata, so future actions can add their
+  own metadata keys without changing the base registry again.
+* Bad: hardcoding NPC text in Java.
+* Bad: deleting the NPC entity on `npc-dialogue remove`; the entity may belong
+  to another plugin.
+* Bad: silently showing placeholder dialogue when YAML content is missing.
+
+### 6. Tests Required
+
+Java tests should assert:
+
+* config mapper reads/writes interaction metadata such as `dialogue-id`
+* `/immortal npc-dialogue set <dialogue-id>` saves action `npc-dialogue` with
+  `managed-entity: false`
+* list/remove/reload operate only on `npc-dialogue` bindings
+* YAML repository loads `dialogues/<id>.yml` and applies defaults
+* YAML repository rejects malformed optional field types instead of applying
+  defaults
+* presenter sends the opening block immediately, schedules lines by ticks, and
+  plays sound with pitch variation
+* action handler logs and sends no fallback content when metadata/content is
+  missing
+* plugin resources include an example dialogue file and command usage
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```java
+if (entity.getName().equals("old-man")) {
+    player.sendMessage("年轻人，你身上有一股未定的气。");
+}
+```
+
+This hardcodes content, bypasses reloadable YAML, and ties behavior to an entity
+name instead of the generic interaction registry.
+
+#### Correct
+
+```java
+definition.metadataValue("dialogue-id")
+        .flatMap(dialogueRegistry::find)
+        .ifPresent(dialogue -> presenter.play(dialogue, audience));
+```
+
+The binding decides which content id to use, the YAML registry owns dialogue
+content, and the action handler owns only presentation behavior.
