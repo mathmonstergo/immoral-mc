@@ -26,6 +26,7 @@ enter game -> spirit root check -> join sect -> learn technique -> kill monster 
 * Add an endpoint to detect the current life spirit root.
 * Preserve the account/life split in data structures even though this MVP only creates generation 1.
 * Spirit root detection must be owned by Game Service, not supplied by the client or future Paper Adapter.
+* Spirit root result must include quality and element composition, not a single flat element string.
 * Repeated spirit root detection for the same current life should return the existing result, not reroll.
 * Use an in-memory repository for this task only, behind a service/repository boundary that can later be replaced with PostgreSQL.
 * Include tests for account creation, idempotent lookup, first-life creation, spirit root detection, and detection idempotency.
@@ -36,6 +37,8 @@ enter game -> spirit root check -> join sect -> learn technique -> kill monster 
 * [ ] `POST /api/v1/players/login` accepts Minecraft player identity and returns account plus current life.
 * [ ] Repeating `POST /api/v1/players/login` with the same Minecraft UUID returns the same account/current life.
 * [ ] `POST /api/v1/players/{account_id}/current-life/spirit-root` returns a spirit root assigned by Game Service.
+* [ ] Spirit root response includes `quality`, `label`, and `elements`.
+* [ ] Tests cover the weighted quality buckets: pseudo (`quad`/`penta`), `triple`, `dual`, `variant`, and `celestial`.
 * [ ] Repeating spirit root detection for the same life returns the existing spirit root.
 * [ ] Unknown account IDs return a structured API error, not a traceback.
 * [ ] Tests cover success and not-found cases.
@@ -81,18 +84,46 @@ Response:
 ```json
 {
   "life_id": "uuid",
-  "spirit_root": "metal",
+  "spirit_root": {
+    "quality": "dual",
+    "label": "双灵根",
+    "elements": ["金", "雷"]
+  },
   "already_detected": false
 }
 ```
 
-Initial spirit roots:
+Spirit root distribution:
 
-```text
-metal, wood, water, fire, earth
+| Type | Probability | Contract |
+|---|---:|---|
+| 伪灵根（4-5系） | 60% | `quality: "quad"` or `quality: "penta"` |
+| 三灵根 | 20% | `quality: "triple"` |
+| 双灵根 | 12% | `quality: "dual"` |
+| 异灵根（变异系） | 5% | `quality: "variant"` |
+| 天灵根（单系） | 3% | `quality: "celestial"` |
+
+Base elements:
+
+```python
+elements = ["金", "木", "水", "火", "土"]
 ```
 
-These are placeholders for the first executable slice; future game-design work can replace the list and weighting.
+Mutated elements:
+
+```python
+mutated_elements = ["火风", "木风", "金雷", "水雷", "火雷", "水冰", "木冰", "金暗", "土暗"]
+```
+
+Generation rules:
+
+* `quad`: choose 4 unique base elements.
+* `penta`: use all 5 base elements.
+* `triple`: choose 3 unique base elements.
+* `dual`: choose 2 unique base elements.
+* `variant`: choose 1 mutated element string from `mutated_elements`.
+* `celestial`: choose 1 base element.
+* 伪灵根's 60% bucket may produce either `quad` or `penta`; implementation may split that bucket evenly unless a later design specifies a different split.
 
 ## Technical Approach
 
@@ -103,7 +134,7 @@ These are placeholders for the first executable slice; future game-design work c
   * Minecraft UUID maps to exactly one account.
   * Account maps to exactly one current generation-1 life.
   * A life with an existing spirit root does not reroll.
-* Use `random.SystemRandom` or an injectable chooser function so tests can make spirit root selection deterministic without trusting client input.
+* Use `random.SystemRandom` or injectable roll/choice functions so tests can make spirit root selection deterministic without trusting client input.
 * Add structured domain error handling for missing accounts.
 
 ## Decision (ADR-lite)
@@ -122,7 +153,7 @@ These are placeholders for the first executable slice; future game-design work c
 * Full reincarnation or multiple lives per account.
 * Zone death behavior.
 * Sect joining, techniques, combat, items, quests, breakthrough, or resource gain.
-* Real spirit root probability design or rare/special roots.
+* Additional rare/special roots beyond the distribution listed in this PRD.
 
 ## Technical Notes
 
