@@ -38,3 +38,36 @@ Initialized Git repository, captured architecture/design docs, filled backend/fr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Scaffold Game Service
+
+**Date**: 2026-07-08
+**Task**: Scaffold Game Service
+**Branch**: `main`
+
+### Summary
+
+Created the first FastAPI Game Service scaffold with health endpoint, README, pytest/Ruff verification, and backend spec updates for the implemented contract.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1131190` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
