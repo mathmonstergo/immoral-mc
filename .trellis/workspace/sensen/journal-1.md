@@ -271,3 +271,36 @@ Added entity-bound spirit-root detector interactions, admin authoring commands, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: Fix detector entity targeting
+
+**Date**: 2026-07-08
+**Task**: Fix detector entity targeting
+**Branch**: `main`
+
+### Summary
+
+Fixed spirit-root detector set command by selecting entities via bounding-box ray hits instead of entity base-point dot matching; rebuilt and redeployed local Paper plugin.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6fea840` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
