@@ -104,3 +104,36 @@ Added player login/current-life API, authoritative spirit root generation with q
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Scaffold Paper adapter plugin
+
+**Date**: 2026-07-08
+**Task**: Scaffold Paper adapter plugin
+**Branch**: `main`
+
+### Summary
+
+Built the Paper 1.21.11 adapter scaffold with /immortal health, async Game Service health checks, Gradle/JUnit verification, and adapter-boundary specs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9a19788` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
