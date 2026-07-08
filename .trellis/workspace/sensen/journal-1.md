@@ -71,3 +71,36 @@ Created the first FastAPI Game Service scaffold with health endpoint, README, py
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Player Account and Spirit Root Slice
+
+**Date**: 2026-07-08
+**Task**: Player Account and Spirit Root Slice
+**Branch**: `main`
+
+### Summary
+
+Added player login/current-life API, authoritative spirit root generation with quality buckets and variant splitting, structured domain errors, tests, and backend code-spec updates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `716da3d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
