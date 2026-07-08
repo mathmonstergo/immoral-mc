@@ -81,3 +81,22 @@ The Adapter should treat Game Service as authoritative:
 * Returning `None` for missing domain objects and letting callers guess what happened.
 * Logging an error but still returning a successful gameplay result.
 * Reusing one generic `bad_request` code for every rule failure.
+
+## Implemented Domain Error Pattern
+
+Domain services raise subclasses of `DomainError` from `game-service/src/immortal_mmo/core/errors.py`.
+FastAPI registers `domain_error_handler` in `game-service/src/immortal_mmo/main.py`.
+
+Current implemented player not-found response:
+
+```json
+{
+  "error": {
+    "code": "player.account_not_found",
+    "message": "Player account was not found.",
+    "retryable": false
+  }
+}
+```
+
+Do not raise `HTTPException` from `player/service.py`. Raise a domain error and let the app-level handler serialize it.

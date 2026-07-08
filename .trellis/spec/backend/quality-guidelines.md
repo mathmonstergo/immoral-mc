@@ -146,3 +146,128 @@ async def health() -> HealthResponse:
 ```
 
 The route stays thin and the response model defines the contract.
+
+## Scenario: Player Login And Spirit Root Detection
+
+### 1. Scope / Trigger
+
+Trigger: first gameplay-facing Adapter contract for account/current-life creation and spirit root detection.
+
+### 2. Signatures
+
+* API signature: `POST /api/v1/players/login`
+* API signature: `POST /api/v1/players/{account_id}/current-life/spirit-root`
+* Service entry points:
+  * `PlayerService.login(minecraft_uuid, player_name)`
+  * `PlayerService.detect_current_life_spirit_root(account_id)`
+
+### 3. Contracts
+
+`POST /api/v1/players/login` request:
+
+```json
+{
+  "minecraft_uuid": "00000000-0000-0000-0000-000000000000",
+  "player_name": "Steve"
+}
+```
+
+Response contains:
+
+* `account.account_id`: generated UUID
+* `account.minecraft_uuid`: request UUID
+* `account.player_name`: request display name
+* `current_life.life_id`: generated UUID
+* `current_life.account_id`: same as `account.account_id`
+* `current_life.generation_no`: `1`
+* `current_life.status`: `"alive"`
+* `current_life.spirit_root`: `null` before detection
+
+`POST /api/v1/players/{account_id}/current-life/spirit-root` response:
+
+```json
+{
+  "life_id": "uuid",
+  "spirit_root": {
+    "quality": "variant",
+    "label": "异灵根",
+    "elements": ["金"],
+    "mutated_element": "金雷",
+    "variant_element": "雷"
+  },
+  "already_detected": false
+}
+```
+
+Spirit root generation is two-stage:
+
+1. Roll quality bucket first:
+   * `quad`: 30%
+   * `penta`: 30%
+   * `triple`: 20%
+   * `dual`: 12%
+   * `variant`: 5%
+   * `celestial`: 3%
+2. Draw elements after quality is known.
+
+Variant roots draw from:
+
+```python
+["火风", "木风", "金雷", "水雷", "火雷", "水冰", "木冰", "金暗", "土暗"]
+```
+
+A variant string is one base five-element plus one variant attribute. Example: `"金雷"` means `elements: ["金"]`, `mutated_element: "金雷"`, `variant_element: "雷"`.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| New Minecraft UUID logs in | Create account and generation-1 life |
+| Existing Minecraft UUID logs in again | Return same account and current life |
+| Current life has no spirit root | Generate root and persist on current life |
+| Current life already has spirit root | Return existing root with `already_detected: true` |
+| Unknown account ID detects spirit root | `404` with `player.account_not_found` |
+| Invalid UUID in path/body | FastAPI/Pydantic validation error |
+
+### 5. Good/Base/Bad Cases
+
+* Good: service owns the spirit root roll and stores the result on the current life.
+* Base: API route is thin and delegates to `PlayerService`.
+* Bad: Adapter or client sends `quality`/`elements`; Game Service trusts it.
+* Bad: variant root returns `["金", "雷"]` as ordinary elements instead of splitting base and variant attributes.
+
+### 6. Tests Required
+
+API tests must assert:
+
+* login creates account/current life
+* login is idempotent by Minecraft UUID
+* spirit root detection returns structured result
+* repeated detection does not reroll
+* unknown account returns structured domain error
+
+Unit tests must assert:
+
+* all quality buckets map to the intended labels and element counts
+* variant root splits `mutated_element` into base `elements` and `variant_element`
+* quality is chosen before element composition
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+root = request.spirit_root
+life.spirit_root = root
+```
+
+This trusts client/plugin input for a progression-defining result.
+
+#### Correct
+
+```python
+spirit_root = self._spirit_root_generator.generate()
+updated_life = self._repository.set_current_life_spirit_root(account_id, spirit_root)
+```
+
+Game Service generates and stores the authoritative result.

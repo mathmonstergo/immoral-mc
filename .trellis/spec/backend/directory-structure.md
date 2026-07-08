@@ -28,10 +28,17 @@ game-service/
 │       ├── cultivation/
 │       ├── item/
 │       ├── player/
+│       │   ├── api.py
+│       │   ├── repository.py
+│       │   ├── schemas.py
+│       │   └── service.py
 │       └── quest/
 └── tests/
-    └── integration/
-        └── test_health.py
+    ├── integration/
+    │   ├── test_health.py
+    │   └── test_player_api.py
+    └── unit/
+        └── test_spirit_root_generation.py
 ```
 
 When a game module gains real behavior, use this internal file pattern where relevant:
@@ -121,3 +128,14 @@ async def detect_spirit_root(
 ```
 
 Keep the route small. Any random roll, account/life lookup, persistence, or audit event belongs in service/repository code.
+
+## Player Slice Pattern
+
+The current player module follows:
+
+* `player/api.py`: FastAPI routes and dependency lookup from `app.state`
+* `player/service.py`: account/life orchestration and spirit root generation
+* `player/repository.py`: temporary in-memory persistence behind a repository boundary
+* `player/schemas.py`: Pydantic API and service contract models
+
+The in-memory repository is an MVP adapter only. Preserve the service/repository boundary so PostgreSQL can replace it without changing API routes.

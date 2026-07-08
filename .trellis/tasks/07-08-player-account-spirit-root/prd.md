@@ -34,17 +34,17 @@ enter game -> spirit root check -> join sect -> learn technique -> kill monster 
 
 ## Acceptance Criteria
 
-* [ ] `POST /api/v1/players/login` accepts Minecraft player identity and returns account plus current life.
-* [ ] Repeating `POST /api/v1/players/login` with the same Minecraft UUID returns the same account/current life.
-* [ ] `POST /api/v1/players/{account_id}/current-life/spirit-root` returns a spirit root assigned by Game Service.
-* [ ] Spirit root response includes `quality`, `label`, `elements`, `mutated_element`, and `variant_element`.
-* [ ] Tests cover the weighted quality buckets: pseudo (`quad`/`penta`), `triple`, `dual`, `variant`, and `celestial`.
-* [ ] Tests prove variant roots split `mutated_element` into one base five-element and one variant attribute.
-* [ ] Repeating spirit root detection for the same life returns the existing spirit root.
-* [ ] Unknown account IDs return a structured API error, not a traceback.
-* [ ] Tests cover success and not-found cases.
-* [ ] `pytest` and `ruff` pass.
-* [ ] `/docs` shows the new endpoints.
+* [x] `POST /api/v1/players/login` accepts Minecraft player identity and returns account plus current life.
+* [x] Repeating `POST /api/v1/players/login` with the same Minecraft UUID returns the same account/current life.
+* [x] `POST /api/v1/players/{account_id}/current-life/spirit-root` returns a spirit root assigned by Game Service.
+* [x] Spirit root response includes `quality`, `label`, `elements`, `mutated_element`, and `variant_element`.
+* [x] Tests cover the weighted quality buckets: pseudo (`quad`/`penta`), `triple`, `dual`, `variant`, and `celestial`.
+* [x] Tests prove variant roots split `mutated_element` into one base five-element and one variant attribute.
+* [x] Repeating spirit root detection for the same life returns the existing spirit root.
+* [x] Unknown account IDs return a structured API error, not a traceback.
+* [x] Tests cover success and not-found cases.
+* [x] `pytest` and `ruff` pass.
+* [x] `/docs` shows the new endpoints.
 
 ## Proposed API Contract
 
