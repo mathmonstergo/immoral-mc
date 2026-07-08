@@ -1,6 +1,7 @@
 package com.immortalmc.adapter.client;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -32,9 +33,15 @@ class GameServiceClientTest {
     void loginPlayerPostsMinecraftIdentityAndReturnsAccountSnapshot() throws Exception {
         AtomicReference<String> method = new AtomicReference<>();
         AtomicReference<String> requestBody = new AtomicReference<>();
+        AtomicReference<String> connectionHeader = new AtomicReference<>();
+        AtomicReference<String> upgradeHeader = new AtomicReference<>();
+        AtomicReference<String> http2SettingsHeader = new AtomicReference<>();
         withServer(server -> {
             server.createContext("/api/v1/players/login", exchange -> {
                 method.set(exchange.getRequestMethod());
+                connectionHeader.set(exchange.getRequestHeaders().getFirst("Connection"));
+                upgradeHeader.set(exchange.getRequestHeaders().getFirst("Upgrade"));
+                http2SettingsHeader.set(exchange.getRequestHeaders().getFirst("HTTP2-Settings"));
                 requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
                 byte[] responseBody = """
                         {
@@ -69,6 +76,9 @@ class GameServiceClientTest {
             assertEquals(
                     "{\"minecraft_uuid\":\"00000000-0000-0000-0000-000000000010\",\"player_name\":\"Sensen\"}",
                     requestBody.get());
+            assertNull(connectionHeader.get());
+            assertNull(upgradeHeader.get());
+            assertNull(http2SettingsHeader.get());
             assertEquals(UUID.fromString("10000000-0000-0000-0000-000000000001"), result.account().accountId());
             assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000010"), result.account().minecraftUuid());
             assertEquals("Sensen", result.account().playerName());

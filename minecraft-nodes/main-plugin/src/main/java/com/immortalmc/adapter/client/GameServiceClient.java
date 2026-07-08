@@ -31,8 +31,7 @@ public final class GameServiceClient {
     }
 
     public CompletableFuture<HealthCheckResult> checkHealth() {
-        HttpRequest request = HttpRequest.newBuilder(baseUri.resolve("/health"))
-                .timeout(REQUEST_TIMEOUT)
+        HttpRequest request = newRequestBuilder("/health")
                 .GET()
                 .build();
 
@@ -48,8 +47,7 @@ public final class GameServiceClient {
         HttpRequest request;
         try {
             String requestBody = objectMapper.writeValueAsString(new PlayerLoginRequest(minecraftUuid, playerName));
-            request = HttpRequest.newBuilder(baseUri.resolve("/api/v1/players/login"))
-                    .timeout(REQUEST_TIMEOUT)
+            request = newRequestBuilder("/api/v1/players/login")
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                     .build();
@@ -66,9 +64,7 @@ public final class GameServiceClient {
     public CompletableFuture<SpiritRootDetectionResult> detectSpiritRoot(UUID accountId) {
         Objects.requireNonNull(accountId, "accountId");
 
-        HttpRequest request = HttpRequest.newBuilder(
-                        baseUri.resolve("/api/v1/players/" + accountId + "/current-life/spirit-root"))
-                .timeout(REQUEST_TIMEOUT)
+        HttpRequest request = newRequestBuilder("/api/v1/players/" + accountId + "/current-life/spirit-root")
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
 
@@ -117,6 +113,12 @@ public final class GameServiceClient {
     private static URI normalizeBaseUri(URI uri) {
         String value = uri.toString();
         return value.endsWith("/") ? uri : URI.create(value + "/");
+    }
+
+    private HttpRequest.Builder newRequestBuilder(String path) {
+        return HttpRequest.newBuilder(baseUri.resolve(path))
+                .version(HttpClient.Version.HTTP_1_1)
+                .timeout(REQUEST_TIMEOUT);
     }
 
     private record PlayerLoginRequest(UUID minecraftUuid, String playerName) {}
