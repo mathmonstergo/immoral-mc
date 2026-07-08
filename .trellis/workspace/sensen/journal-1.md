@@ -137,3 +137,36 @@ Built the Paper 1.21.11 adapter scaffold with /immortal health, async Game Servi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Sync Paper joins with Game Service
+
+**Date**: 2026-07-08
+**Task**: Sync Paper joins with Game Service
+**Branch**: `main`
+
+### Summary
+
+Added PlayerJoinEvent login sync to the Paper adapter, mapping /api/v1/players/login into Java records, async join handling, in-memory session cache, tests, README updates, and adapter login code-spec notes.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4961b27` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
