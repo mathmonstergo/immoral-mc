@@ -70,7 +70,8 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
             return ImmortalCommandSource.player(
                     player.getUniqueId(),
                     findLookedAtEntity(player),
-                    detectorId -> spawnSpiritRootDetector(player, detectorId));
+                    detectorId -> spawnSpiritRootDetector(player, detectorId),
+                    binding -> removeEntity(player, binding));
         }
         return ImmortalCommandSource.console();
     }
@@ -108,6 +109,19 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
         return new EntityInteractionEntity(
                 new EntityBinding(villager.getWorld().getName(), villager.getUniqueId()),
                 villager.getType().name());
+    }
+
+    private static boolean removeEntity(Player player, EntityBinding binding) {
+        var world = player.getServer().getWorld(binding.worldName());
+        if (world == null) {
+            return false;
+        }
+        Entity entity = world.getEntity(binding.entityUuid());
+        if (entity == null) {
+            return false;
+        }
+        entity.remove();
+        return true;
     }
 
     private static void configureSpawnedDetector(LivingEntity entity, String detectorId) {

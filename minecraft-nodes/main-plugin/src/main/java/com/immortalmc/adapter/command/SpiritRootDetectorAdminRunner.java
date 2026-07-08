@@ -43,7 +43,7 @@ public final class SpiritRootDetectorAdminRunner {
         String id = registry.nextId(SpiritRootDetectionInteractionAction.ACTION);
         EntityInteractionEntity spawned = source.entitySpawner().orElseThrow().apply(id);
         EntityInteractionDefinition saved =
-                registry.saveInteraction(id, SpiritRootDetectionInteractionAction.ACTION, spawned);
+                registry.saveInteraction(id, SpiritRootDetectionInteractionAction.ACTION, spawned, true);
         logger.info("spirit_root_detector_created minecraft_uuid="
                 + source.minecraftUuid().orElseThrow()
                 + " interaction_id="
@@ -140,6 +140,46 @@ public final class SpiritRootDetectorAdminRunner {
         }
 
         int totalDetectors = registry.listByAction(SpiritRootDetectionInteractionAction.ACTION).size();
+        if (removed.managedEntity()) {
+            if (source.entityRemover().isEmpty()) {
+                logger.warn("spirit_root_detector_entity_delete_unavailable minecraft_uuid="
+                        + source.minecraftUuid().orElseThrow()
+                        + " interaction_id="
+                        + removed.id()
+                        + " world="
+                        + removed.binding().worldName()
+                        + " entity_uuid="
+                        + removed.binding().entityUuid());
+                sendMessage.accept(messages.removedEntityDeleteUnavailable(removed, totalDetectors));
+                return;
+            }
+
+            boolean entityDeleted = source.entityRemover().orElseThrow().apply(removed.binding());
+            if (!entityDeleted) {
+                logger.warn("spirit_root_detector_entity_missing minecraft_uuid="
+                        + source.minecraftUuid().orElseThrow()
+                        + " interaction_id="
+                        + removed.id()
+                        + " world="
+                        + removed.binding().worldName()
+                        + " entity_uuid="
+                        + removed.binding().entityUuid());
+                sendMessage.accept(messages.removedEntityMissing(removed, totalDetectors));
+                return;
+            }
+
+            logger.info("spirit_root_detector_entity_deleted minecraft_uuid="
+                    + source.minecraftUuid().orElseThrow()
+                    + " interaction_id="
+                    + removed.id()
+                    + " world="
+                    + removed.binding().worldName()
+                    + " entity_uuid="
+                    + removed.binding().entityUuid());
+            sendMessage.accept(messages.removedManaged(removed, totalDetectors));
+            return;
+        }
+
         logger.info("spirit_root_detector_removed minecraft_uuid="
                 + source.minecraftUuid().orElseThrow()
                 + " interaction_id="

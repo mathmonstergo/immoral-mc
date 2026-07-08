@@ -23,13 +23,21 @@ public final class EntityInteractionRegistry {
 
     public synchronized EntityInteractionDefinition saveInteraction(String action, EntityInteractionEntity entity) {
         Objects.requireNonNull(action, "action");
-        return saveInteraction(nextId(action), action, entity);
+        return saveInteraction(nextId(action), action, entity, false);
     }
 
     public synchronized EntityInteractionDefinition saveInteraction(
             String id,
             String action,
             EntityInteractionEntity entity) {
+        return saveInteraction(id, action, entity, false);
+    }
+
+    public synchronized EntityInteractionDefinition saveInteraction(
+            String id,
+            String action,
+            EntityInteractionEntity entity,
+            boolean managedEntity) {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(action, "action");
         Objects.requireNonNull(entity, "entity");
@@ -40,7 +48,7 @@ public final class EntityInteractionRegistry {
         }
 
         EntityInteractionDefinition definition =
-                new EntityInteractionDefinition(id, action, entity.binding(), entity.entityType(), true);
+                new EntityInteractionDefinition(id, action, entity.binding(), entity.entityType(), true, managedEntity);
         List<EntityInteractionDefinition> updated = new ArrayList<>(interactions);
         updated.add(definition);
         interactions = deduplicate(updated);

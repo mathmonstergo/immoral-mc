@@ -68,6 +68,30 @@ public final class SpiritRootDetectorAdminMessages {
                 + ".";
     }
 
+    public String removedManaged(EntityInteractionDefinition detector, int totalDetectors) {
+        return "Spirit-root detector "
+                + detector.id()
+                + " removed and entity deleted. Total detectors: "
+                + totalDetectors
+                + ".";
+    }
+
+    public String removedEntityMissing(EntityInteractionDefinition detector, int totalDetectors) {
+        return "Spirit-root detector "
+                + detector.id()
+                + " removed, but the entity was already missing. Total detectors: "
+                + totalDetectors
+                + ".";
+    }
+
+    public String removedEntityDeleteUnavailable(EntityInteractionDefinition detector, int totalDetectors) {
+        return "Spirit-root detector "
+                + detector.id()
+                + " removed, but this command source cannot delete the entity. Total detectors: "
+                + totalDetectors
+                + ".";
+    }
+
     public String reloaded(int totalDetectors) {
         return "Spirit-root detector content reloaded: " + totalDetectors + " detector(s).";
     }

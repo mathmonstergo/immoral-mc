@@ -27,7 +27,8 @@ class EntityInteractionConfigMapperTest {
                         "spirit-root-detect",
                         new EntityBinding("world", UUID.fromString("30000000-0000-0000-0000-000000000001")),
                         "UNKNOWN",
-                        true)),
+                        true,
+                        false)),
                 loaded);
     }
 
@@ -40,7 +41,8 @@ class EntityInteractionConfigMapperTest {
                 "world", "world",
                 "entity-uuid", "30000000-0000-0000-0000-000000000002",
                 "entity-type", "VILLAGER",
-                "protected", true)));
+                "protected", true,
+                "managed-entity", true)));
         config.set("content.spirit-root.detectors", List.of(Map.of(
                 "world", "world",
                 "entity-uuid", "30000000-0000-0000-0000-000000000001")));
@@ -53,7 +55,39 @@ class EntityInteractionConfigMapperTest {
                         "npc-dialogue",
                         new EntityBinding("world", UUID.fromString("30000000-0000-0000-0000-000000000002")),
                         "VILLAGER",
+                        true,
                         true)),
                 loaded);
+    }
+
+    @Test
+    void missingManagedEntityDefaultsToFalse() {
+        YamlConfiguration config = new YamlConfiguration();
+        config.set("content.entity-interactions.entries", List.of(Map.of(
+                "id", "npc-dialogue-1",
+                "action", "npc-dialogue",
+                "world", "world",
+                "entity-uuid", "30000000-0000-0000-0000-000000000002",
+                "entity-type", "VILLAGER",
+                "protected", true)));
+
+        List<EntityInteractionDefinition> loaded = new EntityInteractionConfigMapper().load(config);
+
+        assertEquals(false, loaded.getFirst().managedEntity());
+    }
+
+    @Test
+    void dumpWritesManagedEntityFlag() {
+        EntityInteractionDefinition interaction = new EntityInteractionDefinition(
+                "spirit-root-detect-1",
+                "spirit-root-detect",
+                new EntityBinding("world", UUID.fromString("30000000-0000-0000-0000-000000000001")),
+                "VILLAGER",
+                true,
+                true);
+
+        List<Map<String, Object>> dumped = new EntityInteractionConfigMapper().dump(List.of(interaction));
+
+        assertEquals(true, dumped.getFirst().get("managed-entity"));
     }
 }

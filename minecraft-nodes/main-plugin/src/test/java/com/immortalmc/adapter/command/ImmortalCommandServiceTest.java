@@ -79,7 +79,7 @@ class ImmortalCommandServiceTest {
 
         assertEquals(
                 List.of(new EntityInteractionDefinition(
-                        "spirit-root-detect-1", "spirit-root-detect", detector.binding(), "VILLAGER", true)),
+                        "spirit-root-detect-1", "spirit-root-detect", detector.binding(), "VILLAGER", true, false)),
                 repository.load());
         assertEquals(
                 List.of("Spirit-root detector spirit-root-detect-1 saved for entity "
@@ -104,6 +104,7 @@ class ImmortalCommandServiceTest {
                 "VILLAGER");
         UUID minecraftUuid = UUID.fromString("00000000-0000-0000-0000-000000000010");
         List<String> sentMessages = new ArrayList<>();
+        List<EntityBinding> deletedEntities = new ArrayList<>();
 
         service.execute(
                 new String[] {"spirit-root-detector", "create"},
@@ -115,16 +116,20 @@ class ImmortalCommandServiceTest {
                 sentMessages::add);
         service.execute(
                 new String[] {"spirit-root-detector", "remove"},
-                ImmortalCommandSource.player(minecraftUuid, spawned),
+                ImmortalCommandSource.player(minecraftUuid, spawned, binding -> {
+                    deletedEntities.add(binding);
+                    return true;
+                }),
                 sentMessages::add);
 
         assertEquals(List.of(), repository.load());
+        assertEquals(List.of(spawned.binding()), deletedEntities);
         assertEquals(
                 List.of(
                         "Spirit-root detector spirit-root-detect-1 created as VILLAGER in world. Total detectors: 1.",
                         "Spirit-root detectors: 1 configured.",
                         "- spirit-root-detect-1 VILLAGER world/30000000-0000-0000-0000-000000000010 protected=true",
-                        "Spirit-root detector spirit-root-detect-1 removed. Total detectors: 0."),
+                        "Spirit-root detector spirit-root-detect-1 removed and entity deleted. Total detectors: 0."),
                 sentMessages);
     }
 

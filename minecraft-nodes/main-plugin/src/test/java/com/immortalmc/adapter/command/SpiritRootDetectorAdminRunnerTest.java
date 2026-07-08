@@ -81,7 +81,7 @@ class SpiritRootDetectorAdminRunnerTest {
 
         assertEquals(
                 List.of(new EntityInteractionDefinition(
-                        "spirit-root-detect-1", "spirit-root-detect", spawned.binding(), "VILLAGER", true)),
+                        "spirit-root-detect-1", "spirit-root-detect", spawned.binding(), "VILLAGER", true, true)),
                 repository.load());
         assertEquals(
                 List.of("Spirit-root detector spirit-root-detect-1 created as VILLAGER in world. Total detectors: 1."),
@@ -109,7 +109,7 @@ class SpiritRootDetectorAdminRunnerTest {
     }
 
     @Test
-    void removeLookedAtDetectorPersistsRemainingDefinitions() {
+    void removeManagedLookedAtDetectorDeletesEntityAndPersistsRemainingDefinitions() {
         InMemoryEntityInteractionRepository repository = new InMemoryEntityInteractionRepository();
         EntityInteractionEntity first = interactionEntity(
                 "world", "30000000-0000-0000-0000-000000000001", "VILLAGER");
@@ -120,16 +120,85 @@ class SpiritRootDetectorAdminRunnerTest {
                         "spirit-root-detect-2", "spirit-root-detect", second.binding(), "ARMOR_STAND", true);
         repository.replaceWith(List.of(
                 new EntityInteractionDefinition(
-                        "spirit-root-detect-1", "spirit-root-detect", first.binding(), "VILLAGER", true),
+                        "spirit-root-detect-1", "spirit-root-detect", first.binding(), "VILLAGER", true, true),
                 secondDefinition));
         SpiritRootDetectorAdminRunner runner = runnerWith(repository);
         List<String> messages = new ArrayList<>();
+        List<EntityBinding> deletedEntities = new ArrayList<>();
 
         runner.reload(ignored -> {});
-        runner.removeLookedAtDetector(ImmortalCommandSource.player(MINECRAFT_UUID, first), messages::add);
+        runner.removeLookedAtDetector(
+                ImmortalCommandSource.player(MINECRAFT_UUID, first, binding -> {
+                    deletedEntities.add(binding);
+                    return true;
+                }),
+                messages::add);
 
         assertEquals(List.of(secondDefinition), repository.load());
-        assertEquals(List.of("Spirit-root detector spirit-root-detect-1 removed. Total detectors: 1."), messages);
+        assertEquals(List.of(first.binding()), deletedEntities);
+        assertEquals(
+                List.of("Spirit-root detector spirit-root-detect-1 removed and entity deleted. Total detectors: 1."),
+                messages);
+    }
+
+    @Test
+    void removeUnmanagedLookedAtDetectorOnlyUnbindsEntity() {
+        InMemoryEntityInteractionRepository repository = new InMemoryEntityInteractionRepository();
+        EntityInteractionEntity target = interactionEntity(
+                "world", "30000000-0000-0000-0000-000000000001", "VILLAGER");
+        repository.replaceWith(List.of(new EntityInteractionDefinition(
+                "spirit-root-detect-1", "spirit-root-detect", target.binding(), "VILLAGER", true, false)));
+        SpiritRootDetectorAdminRunner runner = runnerWith(repository);
+        List<String> messages = new ArrayList<>();
+        List<EntityBinding> deletedEntities = new ArrayList<>();
+
+        runner.reload(ignored -> {});
+        runner.removeLookedAtDetector(
+                ImmortalCommandSource.player(MINECRAFT_UUID, target, binding -> {
+                    deletedEntities.add(binding);
+                    return true;
+                }),
+                messages::add);
+
+        assertEquals(List.of(), repository.load());
+        assertEquals(List.of(), deletedEntities);
+        assertEquals(List.of("Spirit-root detector spirit-root-detect-1 removed. Total detectors: 0."), messages);
+    }
+
+    @Test
+    void removeManagedLookedAtDetectorStillUnbindsWhenEntityIsMissing() {
+        InMemoryEntityInteractionRepository repository = new InMemoryEntityInteractionRepository();
+        EntityInteractionEntity target = interactionEntity(
+                "world", "30000000-0000-0000-0000-000000000001", "VILLAGER");
+        repository.replaceWith(List.of(new EntityInteractionDefinition(
+                "spirit-root-detect-1", "spirit-root-detect", target.binding(), "VILLAGER", true, true)));
+        RecordingAdapterLogger logger = new RecordingAdapterLogger();
+        SpiritRootDetectorAdminRunner runner = new SpiritRootDetectorAdminRunner(
+                new EntityInteractionRegistry(repository),
+                new SpiritRootDetectorAdminMessages(),
+                logger);
+        List<String> messages = new ArrayList<>();
+        List<EntityBinding> deletionAttempts = new ArrayList<>();
+
+        runner.reload(ignored -> {});
+        runner.removeLookedAtDetector(
+                ImmortalCommandSource.player(MINECRAFT_UUID, target, binding -> {
+                    deletionAttempts.add(binding);
+                    return false;
+                }),
+                messages::add);
+
+        assertEquals(List.of(), repository.load());
+        assertEquals(List.of(target.binding()), deletionAttempts);
+        assertEquals(
+                List.of("Spirit-root detector spirit-root-detect-1 removed, but the entity was already missing. Total detectors: 0."),
+                messages);
+        assertEquals(
+                List.of("spirit_root_detector_entity_missing minecraft_uuid="
+                        + MINECRAFT_UUID
+                        + " interaction_id=spirit-root-detect-1 world=world entity_uuid="
+                        + target.binding().entityUuid()),
+                logger.messagesAt("warn"));
     }
 
     @Test

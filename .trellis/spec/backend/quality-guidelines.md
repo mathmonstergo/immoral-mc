@@ -633,12 +633,15 @@ Config entry fields:
 * `entity-uuid`: bound entity UUID
 * `entity-type`: Bukkit entity type name
 * `protected`: whether protection listeners protect this entity
+* `managed-entity`: whether ImmortalMC owns the underlying entity and should
+  delete it when the interaction is removed
 
 Legacy migration:
 
 * Old `content.spirit-root.detectors` entries containing only `world` and
   `entity-uuid` must load as `spirit-root-detect` interactions when the new
-  path is not explicitly set in the disk config.
+  path is not explicitly set in the disk config. They default to
+  `managed-entity: false`.
 
 Spirit-root action:
 
@@ -662,13 +665,16 @@ Generic interaction contract:
 Spirit-root detector authoring:
 
 * `create` requires an in-game player sender, spawns a persistent protected
-  entity, and saves it as action `spirit-root-detect`.
+  entity, and saves it as action `spirit-root-detect` with
+  `managed-entity: true`.
 * `list` shows only interactions with action `spirit-root-detect`.
 * `remove` removes only the looked-at entity's `spirit-root-detect`
-  interaction; it must not delete arbitrary existing entities.
+  interaction. If the interaction has `managed-entity: true`, it also deletes
+  the underlying entity. If it has `managed-entity: false`, it only unbinds
+  and must not delete arbitrary existing entities.
 * `set` requires an in-game player sender.
 * `set` saves the entity the player is looking at as action
-  `spirit-root-detect`, not a block coordinate.
+  `spirit-root-detect` with `managed-entity: false`, not a block coordinate.
 * `reload` reloads interaction bindings from disk-backed config.
 * Saved interaction bindings remain reviewable as config data.
 
@@ -690,9 +696,12 @@ Spirit-root detector interaction:
 | Disk config has only legacy `content.spirit-root.detectors` and default config has new empty path | Legacy detector entries still load as `spirit-root-detect` interactions |
 | Disk config explicitly has `content.entity-interactions.entries` | New generic path takes precedence over legacy detector path |
 | Console runs `spirit-root-detector create`, `set`, or `remove` | Player-only message |
-| Player runs `create` | Protected persistent entity is spawned and saved as action `spirit-root-detect` |
+| Player runs `create` | Protected persistent entity is spawned and saved as action `spirit-root-detect` with `managed-entity: true` |
 | Player runs `set` without looking at an entity | Target-missing message and `warn` log |
-| Player runs `set` while looking at an entity | Interaction saved and `info` log records ID/action/world/entity UUID |
+| Player runs `set` while looking at an entity | Interaction saved with `managed-entity: false`; `info` log records ID/action/world/entity UUID |
+| Player runs `remove` on a managed detector | Interaction is removed from config and the entity is deleted from the world |
+| Player runs `remove` on an unmanaged detector | Interaction is removed from config and the entity remains in the world |
+| Player runs `remove` on a managed detector whose entity is already missing | Interaction is removed; `warn` log records missing entity |
 | Player runs `remove` while looking at an unbound entity | Not-bound message and `warn` log |
 | Admin runs `list` | Current `spirit-root-detect` interactions are listed |
 | Admin runs `reload` | Config is re-read from disk and loaded count is reported |
@@ -714,7 +723,8 @@ Spirit-root detector interaction:
 * Good: target selection uses entity bounding boxes or Paper ray tracing, so
   normal body/head aiming works for villagers and other non-point entities.
 * Base: config contains stable interaction identity and binding fields:
-  `id`, `action`, `world`, `entity-uuid`, `entity-type`, `protected`.
+  `id`, `action`, `world`, `entity-uuid`, `entity-type`, `protected`,
+  `managed-entity`.
 * Bad: creating a second hardcoded listener/registry for NPC dialogue or
   another entity interaction instead of adding an action handler.
 * Bad: Adapter stores spirit-root quality, probability, or element-selection
@@ -732,10 +742,12 @@ Java tests should assert:
 * entity interaction registry reloads, action-filters, matches, saves,
   deduplicates, and removes entity bindings
 * config mapper migrates legacy detector entries even when defaults contain
-  the new empty path
+  the new empty path, and defaults missing `managed-entity` to false
 * action router dispatches registered actions and rejects unknown actions
 * admin commands reject console/missing target and create/list/remove/set
   spirit-root detector interactions
+* removing a managed detector deletes the underlying entity through the Paper
+  adapter; removing an unmanaged detector only unbinds it
 * target selection can resolve a villager-height entity when the view ray
   crosses its body bounding box rather than its base point
 * command parser resolves `spirit-root-detector create`, `list`, `remove`,

@@ -18,6 +18,7 @@ final class EntityInteractionConfigMapper {
     private static final String ENTITY_UUID_KEY = "entity-uuid";
     private static final String ENTITY_TYPE_KEY = "entity-type";
     private static final String PROTECTED_KEY = "protected";
+    private static final String MANAGED_ENTITY_KEY = "managed-entity";
 
     List<EntityInteractionDefinition> load(FileConfiguration config) {
         if (config.isSet(INTERACTIONS_PATH)) {
@@ -40,7 +41,14 @@ final class EntityInteractionConfigMapper {
             EntityBinding binding = bindingFrom(entry);
             String entityType = optionalString(entry, ENTITY_TYPE_KEY, UNKNOWN_ENTITY_TYPE);
             boolean protectedEntity = optionalBoolean(entry, PROTECTED_KEY, true);
-            interactions.add(new EntityInteractionDefinition(id, action, binding, entityType, protectedEntity));
+            boolean managedEntity = optionalBoolean(entry, MANAGED_ENTITY_KEY, false);
+            interactions.add(new EntityInteractionDefinition(
+                    id,
+                    action,
+                    binding,
+                    entityType,
+                    protectedEntity,
+                    managedEntity));
         }
         return List.copyOf(interactions);
     }
@@ -54,7 +62,8 @@ final class EntityInteractionConfigMapper {
                     LEGACY_SPIRIT_ROOT_ACTION,
                     bindingFrom(entry),
                     UNKNOWN_ENTITY_TYPE,
-                    true));
+                    true,
+                    false));
             index++;
         }
         return List.copyOf(interactions);
@@ -104,6 +113,7 @@ final class EntityInteractionConfigMapper {
         entry.put(ENTITY_UUID_KEY, interaction.binding().entityUuid().toString());
         entry.put(ENTITY_TYPE_KEY, interaction.entityType());
         entry.put(PROTECTED_KEY, interaction.protectedEntity());
+        entry.put(MANAGED_ENTITY_KEY, interaction.managedEntity());
         return entry;
     }
 }

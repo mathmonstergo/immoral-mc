@@ -7,7 +7,17 @@ public record EntityInteractionDefinition(
         String action,
         EntityBinding binding,
         String entityType,
-        boolean protectedEntity) {
+        boolean protectedEntity,
+        boolean managedEntity) {
+    public EntityInteractionDefinition(
+            String id,
+            String action,
+            EntityBinding binding,
+            String entityType,
+            boolean protectedEntity) {
+        this(id, action, binding, entityType, protectedEntity, false);
+    }
+
     public EntityInteractionDefinition {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(action, "action");
