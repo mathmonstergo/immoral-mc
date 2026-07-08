@@ -1,0 +1,54 @@
+# Local secrets and environment
+.env
+.env.*
+!.env.example
+
+# Python / FastAPI
+__pycache__/
+*.py[cod]
+*.pyo
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Java / Gradle / Maven
+.gradle/
+target/
+out/
+*.class
+*.jar
+*.war
+*.ear
+
+# Node / admin panel
+node_modules/
+.npm/
+.pnpm-store/
+.turbo/
+.next/
+coverage/
+
+# Minecraft server runtime outputs
+minecraft-nodes/**/run/
+minecraft-nodes/**/server/
+minecraft-nodes/**/logs/
+minecraft-nodes/**/crash-reports/
+minecraft-nodes/**/world*/
+minecraft-nodes/**/plugins/
+minecraft-nodes/**/eula.txt
+
+# Logs and editor/system files
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
