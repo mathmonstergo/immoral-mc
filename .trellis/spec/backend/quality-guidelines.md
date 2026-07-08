@@ -63,13 +63,86 @@ Before marking backend work complete, verify:
 
 ## Initial Verification Commands
 
-No backend project exists yet. The first scaffold task must add concrete commands here, such as:
+Run these from `game-service/`:
 
 ```bash
-cd game-service
-ruff check .
-pyright .
-pytest
+.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/python -m ruff check .
+.venv/bin/python -m pytest
 ```
 
-Until those tools exist, verification for spec-only changes is documentation review plus consistency checks.
+The first scaffold uses `httpx2` in dev dependencies because current FastAPI/Starlette emits a deprecation warning when `TestClient` uses legacy `httpx`. Keep test output warning-free.
+
+## Scenario: Health Endpoint Scaffold
+
+### 1. Scope / Trigger
+
+Trigger: backend scaffold creates the first Adapter-facing API contract.
+
+### 2. Signatures
+
+* Runtime command: `.venv/bin/python -m uvicorn immortal_mmo.main:app --reload`
+* Test command: `.venv/bin/python -m pytest`
+* Lint command: `.venv/bin/python -m ruff check .`
+* API signature: `GET /health`
+
+### 3. Contracts
+
+`GET /health` response:
+
+```json
+{
+  "service": "game-service",
+  "status": "ok",
+  "version": "0.1.0"
+}
+```
+
+Fields:
+
+* `service`: literal `"game-service"`
+* `status`: literal `"ok"` while the process is accepting requests
+* `version`: package/service version string
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Service running | `200` with the contract above |
+| Unknown path | FastAPI default `404` |
+| App import failure | Tests fail before deployment; do not hide import errors |
+
+### 5. Good/Base/Bad Cases
+
+* Good: `/health` returns the exact JSON contract and `/docs` returns HTTP 200.
+* Base: health test imports `immortal_mmo.main:app` from the installed package.
+* Bad: route returns plain text, omits version, or constructs a response shape outside a Pydantic model.
+
+### 6. Tests Required
+
+`game-service/tests/integration/test_health.py` must assert:
+
+* HTTP status is `200`
+* JSON payload equals the exact health contract
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+@app.get("/health")
+def health():
+    return {"ok": True}
+```
+
+This skips the versioned response model and produces an unstable shape for Adapter checks.
+
+#### Correct
+
+```python
+@api_router.get("/health", response_model=HealthResponse)
+async def health() -> HealthResponse:
+    return get_health()
+```
+
+The route stays thin and the response model defines the contract.

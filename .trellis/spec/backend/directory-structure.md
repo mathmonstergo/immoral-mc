@@ -4,51 +4,37 @@
 
 ## Current Status
 
-No backend code exists yet. This file defines the initial structure future code should create. Update it with real file references after the first implementation slice lands.
+The initial backend scaffold exists under `game-service/`.
 
 ## Target Layout
 
 ```text
 game-service/
 ├── pyproject.toml
+├── README.md
 ├── src/
 │   └── immortal_mmo/
 │       ├── main.py
 │       ├── api/
-│       │   ├── deps.py
 │       │   └── v1/
 │       │       ├── router.py
-│       │       ├── player_routes.py
-│       │       ├── item_routes.py
-│       │       ├── quest_routes.py
-│       │       ├── combat_routes.py
-│       │       └── cultivation_routes.py
+│       │       └── health.py
 │       ├── core/
 │       │   ├── config.py
 │       │   ├── errors.py
 │       │   ├── logging.py
 │       │   └── time.py
-│       ├── db/
-│       │   ├── session.py
-│       │   ├── base.py
-│       │   └── migrations/
-│       ├── player/
-│       │   ├── models.py
-│       │   ├── schemas.py
-│       │   ├── repository.py
-│       │   ├── service.py
-│       │   └── api.py
-│       ├── item/
-│       ├── quest/
 │       ├── combat/
-│       └── cultivation/
+│       ├── cultivation/
+│       ├── item/
+│       ├── player/
+│       └── quest/
 └── tests/
-    ├── unit/
-    ├── integration/
-    └── e2e/
+    └── integration/
+        └── test_health.py
 ```
 
-Use the same internal file pattern for each game module when relevant:
+When a game module gains real behavior, use this internal file pattern where relevant:
 
 * `models.py`: persistence models for that module only
 * `schemas.py`: Pydantic request/response/data-transfer schemas
@@ -97,9 +83,33 @@ The adapter may report facts such as "player used skill X on target Y" or "playe
 * Service functions: verb phrases, e.g. `create_life`, `resolve_player_death`, `calculate_damage`
 * API routes: resource-oriented nouns, e.g. `/api/v1/players/{account_id}/current-life`
 
-## Initial Example Pattern
+## Implemented Example Pattern
 
-This is a target pattern for the first implementation, not existing code:
+The current app factory lives in `game-service/src/immortal_mmo/main.py`:
+
+```python
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="Immortal MMO Game Service",
+        version="0.1.0",
+        docs_url="/docs",
+        redoc_url="/redoc",
+    )
+    app.include_router(api_router)
+    return app
+```
+
+Keep `main.py` responsible for application assembly only. Put route behavior under `api/v1/`.
+
+The current health route lives in `game-service/src/immortal_mmo/api/v1/router.py`:
+
+```python
+@api_router.get("/health", response_model=HealthResponse)
+async def health() -> HealthResponse:
+    return get_health()
+```
+
+Future gameplay routes should stay similarly thin:
 
 ```python
 @router.post("/players/{account_id}/spirit-root", response_model=SpiritRootResult)

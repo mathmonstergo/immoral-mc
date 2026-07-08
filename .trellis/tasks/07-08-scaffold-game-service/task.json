@@ -1,13 +1,13 @@
 {
-  "id": "initial-development-entry",
-  "name": "initial-development-entry",
-  "title": "brainstorm: initial development entry",
+  "id": "scaffold-game-service",
+  "name": "scaffold-game-service",
+  "title": "Scaffold Game Service",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
-  "priority": "P2",
+  "priority": "P1",
   "creator": "sensen",
   "assignee": "sensen",
   "createdAt": "2026-07-08",
@@ -18,10 +18,8 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [
-    "07-08-scaffold-game-service"
-  ],
-  "parent": null,
+  "children": [],
+  "parent": "07-08-initial-development-entry",
   "relatedFiles": [],
   "notes": "",
   "meta": {}

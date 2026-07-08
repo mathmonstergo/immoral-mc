@@ -6,7 +6,7 @@
 
 These rules apply to the Python FastAPI `game-service/`, database schema and migrations, backend test code, and backend-facing tooling. The Java Paper Adapter is covered here only at the boundary level: it may translate Minecraft events into HTTP requests, but it must not own MMORPG business rules.
 
-This repository currently has architecture documents but no backend implementation. The rules below are initial project conventions inferred from `architecture-v2.md` and `game-design-reincarnation-inheritance.md`. When real code lands, update these files to reference actual examples.
+The first backend scaffold now exists under `game-service/`. The rules below combine the architecture decisions from `architecture-v2.md` and `game-design-reincarnation-inheritance.md` with the initial concrete FastAPI implementation.
 
 ## Pre-Development Checklist
 
@@ -23,10 +23,10 @@ Before editing backend code, read:
 
 | Guide | Description | Status |
 |-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Game Service module layout and Adapter boundary | Initial |
+| [Directory Structure](./directory-structure.md) | Game Service module layout and Adapter boundary | Active |
 | [Database Guidelines](./database-guidelines.md) | PostgreSQL, Redis, repository, and migration rules | Initial |
 | [Error Handling](./error-handling.md) | Domain errors and adapter-facing API failures | Initial |
-| [Quality Guidelines](./quality-guidelines.md) | Server authority, tests, and review checks | Initial |
+| [Quality Guidelines](./quality-guidelines.md) | Server authority, tests, and review checks | Active |
 | [Logging Guidelines](./logging-guidelines.md) | Structured operational logging | Initial |
 
 ## Hard Architecture Rules
