@@ -170,3 +170,36 @@ Added PlayerJoinEvent login sync to the Paper adapter, mapping /api/v1/players/l
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: Add Paper spirit root command
+
+**Date**: 2026-07-08
+**Task**: Add Paper spirit root command
+**Branch**: `main`
+
+### Summary
+
+Added /immortal spirit-root as a Paper adapter command that uses cached Game Service account state, calls the authoritative spirit-root endpoint asynchronously, displays returned variant fields, and keeps generation logic out of Java.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f5a47b1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
