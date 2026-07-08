@@ -203,3 +203,38 @@ Added /immortal spirit-root as a Paper adapter command that uses cached Game Ser
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: Local Paper test server setup
+
+**Date**: 2026-07-08
+**Task**: Local Paper test server setup
+**Branch**: `main`
+
+### Summary
+
+Set up local Paper 1.21.11 testing on port 25549, fixed Adapter HTTP/1.1 Game Service calls, and moved plugin debug/status feedback into Paper logs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6437bd7` | (see git log) |
+| `a87a826` | (see git log) |
+| `a8a2db9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
