@@ -14,6 +14,7 @@ dependencies {
 
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.2")
 
+    testImplementation("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.4")
 }

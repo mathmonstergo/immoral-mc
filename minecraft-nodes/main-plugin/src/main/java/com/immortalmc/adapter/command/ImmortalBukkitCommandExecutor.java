@@ -1,6 +1,9 @@
 package com.immortalmc.adapter.command;
 
 import com.immortalmc.adapter.content.EntityBinding;
+import com.immortalmc.adapter.targeting.EntityTargetCandidate;
+import com.immortalmc.adapter.targeting.EntityTargetSelector;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -16,7 +19,7 @@ import org.jetbrains.annotations.Nullable;
 
 public final class ImmortalBukkitCommandExecutor implements CommandExecutor, TabCompleter {
     private static final double MAX_TARGET_DISTANCE = 8.0;
-    private static final double MIN_TARGET_DOT = 0.95;
+    private static final EntityTargetSelector TARGET_SELECTOR = new EntityTargetSelector(MAX_TARGET_DISTANCE);
     private static final List<String> ROOT_SUBCOMMANDS = List.of("health", "spirit-root", "spirit-root-detector");
 
     private final ImmortalCommandService commandService;
@@ -62,29 +65,23 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
     }
 
     private static Optional<EntityBinding> findLookedAtEntity(Player player) {
-        Entity bestEntity = null;
-        double bestDistance = Double.MAX_VALUE;
         var eyeLocation = player.getEyeLocation();
-        var eyeVector = eyeLocation.toVector();
-        var direction = eyeLocation.getDirection().normalize();
-
-        for (Entity entity : player.getNearbyEntities(MAX_TARGET_DISTANCE, MAX_TARGET_DISTANCE, MAX_TARGET_DISTANCE)) {
-            var toEntity = entity.getLocation().toVector().subtract(eyeVector);
-            double distance = toEntity.length();
-            if (distance <= 0.0 || distance > MAX_TARGET_DISTANCE) {
+        List<EntityTargetCandidate> candidates = new ArrayList<>();
+        for (Entity entity : player.getNearbyEntities(
+                MAX_TARGET_DISTANCE,
+                MAX_TARGET_DISTANCE,
+                MAX_TARGET_DISTANCE)) {
+            if (entity.equals(player) || !player.canSee(entity)) {
                 continue;
             }
-            double dot = direction.dot(toEntity.normalize());
-            if (dot < MIN_TARGET_DOT || distance >= bestDistance) {
-                continue;
-            }
-            bestEntity = entity;
-            bestDistance = distance;
+            candidates.add(new EntityTargetCandidate(
+                    new EntityBinding(entity.getWorld().getName(), entity.getUniqueId()),
+                    entity.getBoundingBox()));
         }
 
-        if (bestEntity == null) {
-            return Optional.empty();
-        }
-        return Optional.of(new EntityBinding(bestEntity.getWorld().getName(), bestEntity.getUniqueId()));
+        return TARGET_SELECTOR.select(
+                eyeLocation.toVector(),
+                eyeLocation.getDirection(),
+                candidates);
     }
 }

@@ -640,12 +640,17 @@ Detector interaction:
   drift.
 * Good: particle mapping is a presentation planner over the returned payload,
   not gameplay generation logic.
+* Good: target selection uses entity bounding boxes or Paper ray tracing, so
+  normal body/head aiming works for villagers and other non-point entities.
 * Base: config contains only stable binding identity such as world and entity
   UUID.
 * Bad: Adapter stores spirit-root quality, probability, or element-selection
   rules.
 * Bad: detector bindings live only in a third-party plugin command chain with
   no reviewable ImmortalMC config.
+* Bad: target selection compares the player's view direction only to
+  `entity.getLocation()`; that point is often at the entity base, so looking at
+  the visible body can falsely report "no target".
 
 ### 6. Tests Required
 
@@ -653,6 +658,8 @@ Java tests should assert:
 
 * detector registry reloads, matches, saves, and deduplicates entity bindings
 * admin commands reject console/missing target and save looked-at entity
+* target selection can resolve a villager-height entity when the view ray
+  crosses its body bounding box rather than its base point
 * command parser resolves `spirit-root-detector set` and `reload`
 * shared detection use case logs success/failure and only runs success callback
   after authoritative detection succeeds
