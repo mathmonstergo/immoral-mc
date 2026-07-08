@@ -238,3 +238,36 @@ Set up local Paper 1.21.11 testing on port 25549, fixed Adapter HTTP/1.1 Game Se
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: Spirit root detector interaction
+
+**Date**: 2026-07-08
+**Task**: Spirit root detector interaction
+**Branch**: `main`
+
+### Summary
+
+Added entity-bound spirit-root detector interactions, admin authoring commands, particle presentation planning, stable local Java tooling path, tests, and Adapter spec notes.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `016ee9c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
