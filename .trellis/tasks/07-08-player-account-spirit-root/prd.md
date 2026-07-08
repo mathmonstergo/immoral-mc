@@ -37,8 +37,9 @@ enter game -> spirit root check -> join sect -> learn technique -> kill monster 
 * [ ] `POST /api/v1/players/login` accepts Minecraft player identity and returns account plus current life.
 * [ ] Repeating `POST /api/v1/players/login` with the same Minecraft UUID returns the same account/current life.
 * [ ] `POST /api/v1/players/{account_id}/current-life/spirit-root` returns a spirit root assigned by Game Service.
-* [ ] Spirit root response includes `quality`, `label`, and `elements`.
+* [ ] Spirit root response includes `quality`, `label`, `elements`, `mutated_element`, and `variant_element`.
 * [ ] Tests cover the weighted quality buckets: pseudo (`quad`/`penta`), `triple`, `dual`, `variant`, and `celestial`.
+* [ ] Tests prove variant roots split `mutated_element` into one base five-element and one variant attribute.
 * [ ] Repeating spirit root detection for the same life returns the existing spirit root.
 * [ ] Unknown account IDs return a structured API error, not a traceback.
 * [ ] Tests cover success and not-found cases.
@@ -87,7 +88,25 @@ Response:
   "spirit_root": {
     "quality": "dual",
     "label": "双灵根",
-    "elements": ["金", "雷"]
+    "elements": ["金", "水"],
+    "mutated_element": null,
+    "variant_element": null
+  },
+  "already_detected": false
+}
+```
+
+Variant example:
+
+```json
+{
+  "life_id": "uuid",
+  "spirit_root": {
+    "quality": "variant",
+    "label": "异灵根",
+    "elements": ["金"],
+    "mutated_element": "金雷",
+    "variant_element": "雷"
   },
   "already_detected": false
 }
@@ -117,13 +136,21 @@ mutated_elements = ["火风", "木风", "金雷", "水雷", "火雷", "水冰", 
 
 Generation rules:
 
+* Random generation must happen in two stages:
+  1. Roll the spirit root type/quality bucket first: 天灵根 / 双灵根 / 三灵根 / 异灵根 / 伪灵根.
+  2. After quality is known, draw the specific element composition for that quality.
 * `quad`: choose 4 unique base elements.
 * `penta`: use all 5 base elements.
+* The 伪灵根 60% bucket is split evenly unless redesigned later:
+  * `quad`: 30% total probability.
+  * `penta`: 30% total probability.
 * `triple`: choose 3 unique base elements.
 * `dual`: choose 2 unique base elements.
 * `variant`: choose 1 mutated element string from `mutated_elements`.
+  * The mutated string contains one base five-element plus one variant attribute.
+  * Example: `"金雷"` means base `elements: ["金"]`, `variant_element: "雷"`, `mutated_element: "金雷"`.
+  * It must not be treated as two ordinary five-element roots.
 * `celestial`: choose 1 base element.
-* 伪灵根's 60% bucket may produce either `quad` or `penta`; implementation may split that bucket evenly unless a later design specifies a different split.
 
 ## Technical Approach
 
