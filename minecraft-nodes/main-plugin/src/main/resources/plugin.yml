@@ -1,0 +1,17 @@
+name: ImmortalMC
+version: 0.1.0-SNAPSHOT
+main: com.immortalmc.adapter.ImmortalMainPlugin
+description: Adapter plugin for the ImmortalMC Game Service.
+author: sensen
+api-version: '1.21.11'
+libraries:
+  - com.fasterxml.jackson.core:jackson-databind:2.18.2
+commands:
+  immortal:
+    description: ImmortalMC adapter operations.
+    usage: /immortal health
+    permission: immortalmc.command
+permissions:
+  immortalmc.command:
+    description: Allows use of ImmortalMC adapter commands.
+    default: op

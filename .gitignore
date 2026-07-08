@@ -25,6 +25,7 @@ target/
 out/
 *.class
 *.jar
+!minecraft-nodes/main-plugin/gradle/wrapper/gradle-wrapper.jar
 *.war
 *.ear
 
@@ -51,4 +52,3 @@ minecraft-nodes/**/eula.txt
 Thumbs.db
 .idea/
 .vscode/
-

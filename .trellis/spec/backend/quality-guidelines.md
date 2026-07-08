@@ -270,4 +270,123 @@ spirit_root = self._spirit_root_generator.generate()
 updated_life = self._repository.set_current_life_spirit_root(account_id, spirit_root)
 ```
 
+## Scenario: Paper Adapter Health Command Scaffold
+
+### 1. Scope / Trigger
+
+Trigger: first Minecraft-side Paper Adapter plugin scaffold and first
+operator-facing command that talks to Game Service.
+
+### 2. Signatures
+
+* Plugin module: `minecraft-nodes/main-plugin/`
+* Gradle dependency: `io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT`
+* Plugin descriptor: `src/main/resources/plugin.yml`
+* Runtime config: `src/main/resources/config.yml`
+* Minecraft command: `/immortal health`
+* Game Service API called by the Adapter: `GET /health`
+
+### 3. Contracts
+
+`plugin.yml` must declare:
+
+```yaml
+name: ImmortalMC
+main: com.immortalmc.adapter.ImmortalMainPlugin
+api-version: '1.21.11'
+commands:
+  immortal:
+    usage: /immortal health
+```
+
+`config.yml` must declare:
+
+```yaml
+game-service:
+  base-url: "http://127.0.0.1:8000"
+```
+
+`/immortal health` behavior:
+
+* sends an immediate "checking" message
+* calls `GET /health` asynchronously
+* sends success/failure back to the command sender on the Paper main thread
+* never computes gameplay state or fallback gameplay results locally
+
+The plugin may use `plugin.yml` `libraries:` for runtime-only Maven Central
+libraries instead of shading them into the jar. Gradle still needs matching
+dependencies on the compile/test classpath.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Game Service returns `200` health payload | Command reports service, status, and version |
+| Game Service returns non-`200` | Command reports unavailable with HTTP status |
+| Game Service returns invalid JSON | Command reports unavailable with invalid-response message |
+| Game Service is unreachable | Command reports unavailable; plugin must not block the main thread |
+| Unknown `/immortal` subcommand | Command reports `Usage: /immortal health` |
+| Missing command in `plugin.yml` | Plugin enable fails loudly instead of silently running without the command |
+
+### 5. Good/Base/Bad Cases
+
+* Good: `JavaPlugin` only wires lifecycle/config/commands; HTTP access lives
+  in a client class; command behavior is testable without Paper runtime.
+* Base: automated tests cover command parsing, message formatting, HTTP health
+  parsing, resource descriptors, and main-thread dispatch handoff.
+* Bad: command executor calls `HttpClient.send(...)` on the Paper main thread.
+* Bad: Adapter returns default success when Game Service is down.
+* Bad: Adapter starts implementing cultivation, combat, loot, economy, or
+  player progression rules in Java.
+
+### 6. Tests Required
+
+Java tests should assert:
+
+* `/immortal health` resolves to the health action
+* empty/unknown commands show usage
+* health success and failure messages are stable
+* health HTTP client parses the `/health` contract and rejects non-success
+* async command runner dispatches final messages through the main-thread
+  dispatcher
+* `plugin.yml` declares the entrypoint, API version, command, and runtime
+  libraries
+* `config.yml` declares the default Game Service base URL
+
+Build verification should include:
+
+```bash
+./gradlew --no-daemon --max-workers=1 test
+./gradlew --no-daemon --max-workers=1 build
+```
+
+If the wrapper cannot download Gradle because of WSL/network constraints, use a
+local Gradle `9.6.1` with the same tasks and document the wrapper download
+failure separately from code/build failures.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```java
+public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+    HttpResponse<String> response = httpClient.send(request, BodyHandlers.ofString());
+    sender.sendMessage(response.body());
+    return true;
+}
+```
+
+This blocks the Paper main thread and exposes raw API output to the player.
+
+#### Correct
+
+```java
+healthCheckFuture.whenComplete((result, error) -> {
+    scheduler.runTask(plugin, () -> sender.sendMessage(format(result, error)));
+});
+```
+
+The HTTP request completes off-thread, then presentation returns to the Paper
+main thread.
+
 Game Service generates and stores the authoritative result.
