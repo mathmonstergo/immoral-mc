@@ -50,6 +50,99 @@ Logic encapsulation rules:
 * Tests written with readable examples, e.g. "100 attack vs 50 defense produces expected damage".
 * Data-driven content where practical: items, mobs, quests, skills, and techniques should be schemas plus interpreters, not scattered `if id == ...` branches.
 
+## Scenario: Mature Minecraft Plugin Ownership Boundaries
+
+### 1. Scope / Trigger
+
+Trigger: adding or integrating a third-party Paper plugin that overlaps with
+NPCs, mobs, quests, combat, loot, or player progression.
+
+### 2. Signatures
+
+Approved runtime plugins and entry points:
+
+* Citizens: `/npc` administration and the Citizens API for NPC identity,
+  spawning, skins, names, navigation, and entity lifecycle.
+* MythicMobs: `/mm` administration and the MythicMobs API/events for mob
+  spawning, AI, mechanics, animation, and effects.
+* ImmortalMC Adapter: Paper events and interaction actions that translate
+  Minecraft-side facts to Game Service requests and present results.
+* Game Service `quest` module: authoritative quest state, conditions,
+  objectives, progression, and rewards.
+
+Third-party quest engines are not the authoritative task system. The project
+implements its own quest system through the Game Service and ImmortalMC
+Adapter.
+
+### 3. Contracts
+
+* Citizens owns how an NPC exists in Minecraft. It must not own quest state,
+  dialogue decisions, rewards, cultivation state, or account progression.
+* Citizens integrations should persist the stable Citizens NPC ID when the API
+  is available. A transient Bukkit entity UUID is not the long-term identity
+  contract for a Citizens NPC.
+* MythicMobs owns how a mob spawns, moves, targets, and presents skills. It may
+  emit an attack or death fact, but it does not decide authoritative combat
+  damage, loot eligibility, progression rewards, or cultivation outcomes.
+* Game Service remains authoritative for quest, combat, loot, cultivation,
+  reincarnation, and player progression data.
+* Plugin-local YAML may configure presentation and mechanism details. Any state
+  shared with another system must have an authoritative Game Service record.
+* MMOCore is not an approved default dependency. Introducing it requires a
+  separate design decision that identifies the exact engine capability being
+  reused without adopting its class, mana, quest, or progression authority.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Citizens is absent | ImmortalMC core startup remains valid; Citizens-specific integration is disabled visibly |
+| Citizens NPC respawns or server restarts | Business binding resolves by stable Citizens NPC ID, not a stale entity UUID |
+| MythicMobs is absent | Non-Mythic ImmortalMC behavior remains valid; Mythic integration is disabled visibly |
+| Mythic mob attacks or dies | Adapter reports facts; Game Service calculates trusted results |
+| Plugin API/version is incompatible | Test server startup fails visibly; do not suppress the error or silently downgrade behavior |
+| Authoritative Game Service data is unavailable | Do not substitute plugin-local progression, damage, or reward values |
+
+### 5. Good/Base/Bad Cases
+
+* Good: Citizens creates a named, skinned NPC; ImmortalMC binds it to a custom
+  quest/dialogue action; Game Service owns the player's quest state.
+* Base: MythicMobs creates and animates a configured monster while ImmortalMC
+  only observes Minecraft events until an authoritative gameplay slice is
+  connected.
+* Bad: a Citizens trait or third-party quest plugin becomes the only record of
+  quest completion and rewards.
+* Bad: MythicMobs configuration directly grants authoritative cultivation
+  resources without Game Service validation.
+
+### 6. Tests Required
+
+* Test-server boot must prove Citizens, MythicMobs, and ImmortalMC enable
+  without severe errors on the pinned Paper and Java versions.
+* Citizens integration must test that an NPC binding survives a server restart
+  and resolves after the backing Bukkit entity is recreated.
+* MythicMobs integration must test that reported combat/kill facts cannot inject
+  trusted damage, loot, or reward values into Game Service.
+* Quest slices must test state transitions and reward idempotency in Game
+  Service independently of Citizens or MythicMobs availability.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+MythicMobs kill mechanic -> directly grant cultivation reward
+Citizens/quest-plugin YAML -> only source of quest completion state
+```
+
+#### Correct
+
+```text
+Citizens NPC interaction -> ImmortalMC Adapter -> Game Service quest command
+MythicMobs combat/death fact -> ImmortalMC Adapter -> Game Service calculation
+Game Service result -> ImmortalMC presentation/reward delivery
+```
+
 ## Testing Requirements
 
 Follow the architecture document's three-layer strategy:
