@@ -439,3 +439,36 @@ Researched Citizens, MythicMobs, and MMOCore; selected Citizens and MythicMobs a
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: Citizens NPC adapter
+
+**Date**: 2026-07-13
+**Task**: Citizens NPC adapter
+**Branch**: `main`
+
+### Summary
+
+Integrated Citizens as an optional NPC identity and click layer with persistent UUID bindings, legacy fallback, protected NPC handling, duplicate-click debounce, tests, deployment, and client restart verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eea08f7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

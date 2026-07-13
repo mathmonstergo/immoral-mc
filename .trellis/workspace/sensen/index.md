@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 13
+- **Total Sessions**: 14
 - **Last Active**: 2026-07-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~441 | Active |
+| `journal-1.md` | ~474 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 14 | 2026-07-13 | Citizens NPC adapter | `eea08f7` | `main` |
 | 13 | 2026-07-13 | Plugin integration research | `3a6a842` | `main` |
 | 12 | 2026-07-13 | NPC dialogue MVP and plugin strategy | `04efec8`, `fd46b17`, `40405d3`, `5497178` | `main` |
 | 11 | 2026-07-08 | Managed detector removal | `5c959d7` | `main` |
