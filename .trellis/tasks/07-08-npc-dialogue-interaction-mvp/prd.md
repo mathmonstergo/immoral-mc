@@ -73,7 +73,7 @@ Add the first non-spirit-root entity interaction action: right-clicking a config
 * [x] Config/resource test covers the separate dialogue YAML content shape.
 * [x] Full main-plugin Gradle build passes.
 * [x] Updated plugin jar is deployed and Paper starts.
-* [ ] Manual server test confirms right-clicking the NPC displays the stylized sequence and plays sounds.
+* [x] Manual server test confirms right-clicking the NPC displays the stylized sequence and plays sounds (confirmed 2026-07-13).
 
 ## Definition of Done
 
