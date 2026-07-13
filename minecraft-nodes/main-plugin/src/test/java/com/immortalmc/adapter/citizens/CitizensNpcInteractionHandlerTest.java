@@ -11,6 +11,7 @@ import com.immortalmc.adapter.content.EntityInteractionRepository;
 import com.immortalmc.adapter.interaction.BukkitEntityInteractionContext;
 import com.immortalmc.adapter.interaction.EntityInteractionActionRouter;
 import com.immortalmc.adapter.interaction.InteractionDebouncer;
+import com.immortalmc.adapter.gameplay.QuestProviderInteractionAction;
 import com.immortalmc.adapter.testsupport.RecordingAdapterLogger;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
@@ -87,6 +88,35 @@ class CitizensNpcInteractionHandlerTest {
 
         assertTrue(handler.handle(CITIZENS_UUID, player(), entity("world", currentEntityUuid)));
         assertTrue(routed.get() == 1);
+    }
+
+    @Test
+    void questProviderBindingSuppressesLegacyUnconditionalDialogueForSameNpc() {
+        AtomicInteger questRoutes = new AtomicInteger();
+        AtomicInteger dialogueRoutes = new AtomicInteger();
+        EntityInteractionDefinition questProvider = new EntityInteractionDefinition(
+                "old-man-quests",
+                QuestProviderInteractionAction.ACTION,
+                new EntityBinding("old-world", UUID.fromString("30000000-0000-0000-0000-000000000002")),
+                "PLAYER",
+                true,
+                false,
+                Map.of(
+                        NpcDialogueAdminRunner.TARGET_PROVIDER_KEY, NpcDialogueAdminRunner.CITIZENS_PROVIDER,
+                        NpcDialogueAdminRunner.CITIZENS_NPC_UUID_KEY, CITIZENS_UUID.toString(),
+                        QuestProviderInteractionAction.PROVIDER_ID_KEY, "old-man"));
+        CitizensNpcInteractionHandler handler = handlerWith(
+                List.of(citizensDialogue("30000000-0000-0000-0000-000000000001"), questProvider),
+                new EntityInteractionActionRouter<>(Map.of(
+                        "npc-dialogue", (definition, context) -> dialogueRoutes.incrementAndGet(),
+                        QuestProviderInteractionAction.ACTION,
+                                (definition, context) -> questRoutes.incrementAndGet())),
+                new InteractionDebouncer(Duration.ofMillis(500), () -> 0L));
+
+        assertTrue(handler.handle(CITIZENS_UUID, player(), entity()));
+
+        assertTrue(questRoutes.get() == 1);
+        assertTrue(dialogueRoutes.get() == 0);
     }
 
     private static CitizensNpcInteractionHandler handlerWith(

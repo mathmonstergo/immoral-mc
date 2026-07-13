@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class NpcDialoguePresenterTest {
@@ -41,6 +43,32 @@ class NpcDialoguePresenterTest {
         assertEquals(List.of("entity.villager.ambient", "entity.villager.ambient"), audience.sounds());
         assertEquals(2, audience.pitches().size());
         assertNotEquals(audience.pitches().get(0), audience.pitches().get(1));
+    }
+
+    @Test
+    void sessionAwarePlaybackSkipsCancelledLinesAndCompletion() {
+        RecordingScheduler scheduler = new RecordingScheduler();
+        NpcDialoguePresenter presenter = new NpcDialoguePresenter(scheduler);
+        RecordingAudience audience = new RecordingAudience();
+        AtomicBoolean active = new AtomicBoolean(true);
+        AtomicInteger completions = new AtomicInteger();
+        NpcDialogueDefinition dialogue = new NpcDialogueDefinition(
+                "offer",
+                "Offer",
+                "老村民",
+                List.of("opening"),
+                List.of("first", "second"),
+                10,
+                "entity.villager.ambient",
+                1.0f);
+
+        presenter.play(dialogue, audience, active::get, completions::incrementAndGet);
+        active.set(false);
+        scheduler.runAll();
+
+        assertEquals(10, audience.messages().size());
+        assertTrue(audience.sounds().isEmpty());
+        assertEquals(0, completions.get());
     }
 
     private static final class RecordingScheduler implements NpcDialogueScheduler {

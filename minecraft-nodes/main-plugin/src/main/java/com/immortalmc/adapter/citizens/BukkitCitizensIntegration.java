@@ -12,7 +12,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 public final class BukkitCitizensIntegration {
     private BukkitCitizensIntegration() {}
 
-    public static CitizensNpcResolver enable(
+    public static CitizensIntegrationHandle enable(
             JavaPlugin plugin,
             EntityInteractionRegistry registry,
             EntityInteractionActionRouter<BukkitEntityInteractionContext> router,
@@ -27,6 +27,6 @@ public final class BukkitCitizensIntegration {
         plugin.getServer().getPluginManager().registerEvents(
                 new CitizensNpcInteractionListener(handler),
                 plugin);
-        return resolver;
+        return new CitizensIntegrationHandle(resolver, new BukkitQuestNpcSource(registry));
     }
 }

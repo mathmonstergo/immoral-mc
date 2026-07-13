@@ -1,0 +1,10 @@
+id: first-steps.completed
+title: "初入凡尘"
+speaker: "老村民"
+line-delay-ticks: 20
+sound: "entity.villager.ambient"
+pitch: 1.0
+opening-lines:
+  - "§7旧事已了"
+lines:
+  - "修行之路才刚刚开始，往后还需谨慎。"

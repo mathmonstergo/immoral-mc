@@ -5,6 +5,7 @@ from uuid import UUID
 from immortal_mmo.core.errors import NotFoundError
 from immortal_mmo.player.repository import InMemoryPlayerRepository
 from immortal_mmo.player.schemas import (
+    CurrentLifeQuestFacts,
     PlayerLoginResponse,
     SpiritRoot,
     SpiritRootDetectionResponse,
@@ -134,3 +135,11 @@ class PlayerService:
             spirit_root=spirit_root,
             already_detected=False,
         )
+
+    def get_current_life_facts(self, account_id: UUID) -> CurrentLifeQuestFacts:
+        account = self._repository.get_account(account_id)
+        if account is None:
+            raise PlayerAccountNotFoundError()
+
+        self._repository.get_or_create_current_life(account.account_id)
+        return self._repository.get_current_life_quest_facts(account.account_id)

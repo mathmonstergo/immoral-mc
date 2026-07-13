@@ -14,16 +14,27 @@ public final class PlayerJoinLoginService {
     private final PlayerSessionCache sessionCache;
     private final AdapterLogger logger;
     private final Consumer<Runnable> mainThreadDispatcher;
+    private final Consumer<PlayerLoginResult> onSuccess;
 
     public PlayerJoinLoginService(
             BiFunction<UUID, String, CompletableFuture<PlayerLoginResult>> loginPlayer,
             PlayerSessionCache sessionCache,
             AdapterLogger logger,
             Consumer<Runnable> mainThreadDispatcher) {
+        this(loginPlayer, sessionCache, logger, mainThreadDispatcher, ignored -> {});
+    }
+
+    public PlayerJoinLoginService(
+            BiFunction<UUID, String, CompletableFuture<PlayerLoginResult>> loginPlayer,
+            PlayerSessionCache sessionCache,
+            AdapterLogger logger,
+            Consumer<Runnable> mainThreadDispatcher,
+            Consumer<PlayerLoginResult> onSuccess) {
         this.loginPlayer = Objects.requireNonNull(loginPlayer, "loginPlayer");
         this.sessionCache = Objects.requireNonNull(sessionCache, "sessionCache");
         this.logger = Objects.requireNonNull(logger, "logger");
         this.mainThreadDispatcher = Objects.requireNonNull(mainThreadDispatcher, "mainThreadDispatcher");
+        this.onSuccess = Objects.requireNonNull(onSuccess, "onSuccess");
     }
 
     public void loginOnJoin(UUID minecraftUuid, String playerName, Consumer<String> sendMessage) {
@@ -44,6 +55,7 @@ public final class PlayerJoinLoginService {
             if (error == null) {
                 mainThreadDispatcher.accept(() -> {
                     sessionCache.store(result);
+                    onSuccess.accept(result);
                     logger.info("player_login_success player_name="
                             + result.account().playerName()
                             + " minecraft_uuid="

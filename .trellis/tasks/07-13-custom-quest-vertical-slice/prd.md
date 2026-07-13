@@ -82,6 +82,9 @@ quest engine.
 * Derive readiness from authoritative current-life spirit-root state.
 * Return dialogue/presentation state that the Adapter can map to NPC text.
 * Prevent duplicate acceptance, completion, and reward delivery.
+* Require accept and turn-in requests to identify the clicked
+  `quest-provider-id`; Game Service rejects providers not bound to that quest or
+  action instead of trusting quest ID alone.
 * Treat the completed `first-steps` record as the prerequisite/reward that makes
   future quest definitions available; do not store a redundant unlock flag.
 * First right-click on an available quest starts a local presentation session

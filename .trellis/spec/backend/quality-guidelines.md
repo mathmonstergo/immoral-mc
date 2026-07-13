@@ -1021,3 +1021,99 @@ definition.metadataValue("dialogue-id")
 
 The binding decides which content id to use, the YAML registry owns dialogue
 content, and the action handler owns only presentation behavior.
+
+## Scenario: Authoritative Quest NPC Presentation
+
+### 1. Scope / Trigger
+
+Trigger: Paper presents Game Service quest state through Citizens proximity,
+dialogue sessions, private labels, titles, particles, or scoreboards.
+
+### 2. Signatures
+
+```http
+POST /api/v1/players/{account_id}/current-life/quest-interaction-state
+PUT /api/v1/players/{account_id}/current-life/quests/{quest_id}/accept
+PUT /api/v1/players/{account_id}/current-life/quests/{quest_id}/turn-in
+```
+
+Mutation requests require `Idempotency-Key: <UUID>` and JSON
+`{"provider_id":"<quest-provider-id>"}`. Paper refreshes through a
+`CompletableFuture<QuestInteractionState>` whose published completion runs on
+the Bukkit main thread.
+
+### 3. Contracts
+
+* Game Service owns quest state, objective evaluation, revisions, and mutation
+  idempotency. Paper owns only short-lived presentation state.
+* A Citizens quest NPC is identified by persistent NPC UUID plus stable
+  `quest-provider-id`; transient Bukkit entity UUIDs are not quest identity.
+* Proximity scanning runs from an indexed, bounded coordinator. Cache misses
+  use the shared single-flight refresh path and never block the server thread.
+* Record the current inside-NPC set before starting enter callbacks. A supplied
+  future may already be complete and execute its completion inline.
+* A refresh completion may speak only when its life ID matches the entering
+  life, the player is still inside that NPC, and the response still contains
+  the provider and bark.
+* Offer sessions are cancelled when the player leaves range/world, disappears,
+  expires, or the persistent Citizens NPC disappears from the current index.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Fresh provider cache | Send at most one private bark on the outside-to-inside edge; no HTTP |
+| Missing/stale cache | Start or join one refresh; speak on completion only if context remains valid |
+| Player leaves before refresh completes | Drop the bark without changing cooldown state |
+| Response life differs | Drop the response as stale |
+| Provider/bark absent from response | Send nothing; do not invent fallback quest text |
+| Citizens NPC disappears | Cancel its pending offer label/session on the next shared scan |
+| Game Service mutation fails | Keep authoritative quest/sidebar state unchanged and show retry feedback |
+
+### 5. Good/Base/Bad Cases
+
+* Good: cache miss -> coalesced async refresh -> main-thread context validation
+  -> private bark through the same state-key cooldown path as cache hits.
+* Base: a 10-tick scan checks only current/adjacent chunks and carries excess
+  players to a later scan.
+* Bad: send a bark directly from an HTTP completion thread or after the player
+  has left the NPC.
+* Bad: keep a pending private label after the Citizens NPC despawns.
+
+### 6. Tests Required
+
+* A completed refresh future speaks immediately when the player is still in
+  range. This specifically proves inside state is committed before callbacks.
+* Cache-hit entry performs zero HTTP and remaining inside does not repeat bark.
+* State-key changes bypass an old bark cooldown; unchanged state does not.
+* Range, world, timeout, missing player, and missing NPC each remove an offer
+  label exactly once.
+* A 100-player/25-NPC fixture asserts bounded candidates and scan carryover.
+* Full Game Service tests and a clean Paper build pass before deployment; the
+  runtime log must contain no `SEVERE`, `ERROR`, or unexpected exception.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```java
+refresher.refresh(...).thenAccept(state -> barkSink.send(playerId, bark(state)));
+insideNpcIdsByPlayer.put(playerId, current);
+```
+
+An already-completed future runs inline before the player is recorded inside,
+and an incomplete future can speak after the context becomes stale.
+
+#### Correct
+
+```java
+insideNpcIdsByPlayer.put(playerId, current);
+refresher.refresh(...).whenComplete((state, error) -> {
+    if (error == null && sameLife(state) && isStillInside(playerId, npcId)) {
+        sendThroughStateCooldown(state);
+    }
+});
+```
+
+Commit scan state first, then validate every asynchronous completion before
+touching player-visible presentation.

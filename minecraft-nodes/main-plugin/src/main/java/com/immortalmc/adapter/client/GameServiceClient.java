@@ -8,6 +8,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -73,6 +74,100 @@ public final class GameServiceClient {
                 .thenApply(this::parseSpiritRootDetectionResponse);
     }
 
+    public CompletableFuture<QuestInteractionState> fetchQuestInteractionState(
+            UUID accountId, List<String> providerIds) {
+        Objects.requireNonNull(accountId, "accountId");
+        List<String> providers = List.copyOf(providerIds);
+
+        return sendJson(
+                newRequestBuilder("/api/v1/players/" + accountId + "/current-life/quest-interaction-state"),
+                "POST",
+                new QuestInteractionStateRequest(providers),
+                QuestInteractionState.class,
+                "quest interaction state");
+    }
+
+    public CompletableFuture<QuestMutationResult> acceptQuest(
+            UUID accountId, String questId, String providerId, UUID operationId) {
+        return mutateQuest(accountId, questId, providerId, operationId, "accept");
+    }
+
+    public CompletableFuture<QuestMutationResult> turnInQuest(
+            UUID accountId, String questId, String providerId, UUID operationId) {
+        return mutateQuest(accountId, questId, providerId, operationId, "turn-in");
+    }
+
+    private CompletableFuture<QuestMutationResult> mutateQuest(
+            UUID accountId, String questId, String providerId, UUID operationId, String operation) {
+        Objects.requireNonNull(accountId, "accountId");
+        Objects.requireNonNull(questId, "questId");
+        Objects.requireNonNull(providerId, "providerId");
+        Objects.requireNonNull(operationId, "operationId");
+
+        return sendJson(
+                newRequestBuilder("/api/v1/players/" + accountId + "/current-life/quests/" + questId + "/"
+                                + operation)
+                        .header("Idempotency-Key", operationId.toString()),
+                "PUT",
+                new QuestMutationRequest(providerId),
+                QuestMutationResult.class,
+                "quest " + operation);
+    }
+
+    private <T> CompletableFuture<T> sendJson(
+            HttpRequest.Builder requestBuilder,
+            String method,
+            Object body,
+            Class<T> responseType,
+            String operationName) {
+        HttpRequest request;
+        try {
+            request = requestBuilder
+                    .header("Content-Type", "application/json")
+                    .method(method, HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+                    .build();
+        } catch (IOException error) {
+            return CompletableFuture.failedFuture(
+                    new GameServiceException("Game Service " + operationName + " request was invalid", error));
+        }
+
+        return httpClient
+                .sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenApply(response -> parseJsonResponse(response, responseType, operationName));
+    }
+
+    private <T> T parseJsonResponse(HttpResponse<String> response, Class<T> responseType, String operationName) {
+        if (response.statusCode() != 200) {
+            throw new CompletionException(parseErrorResponse(response, operationName));
+        }
+        try {
+            return objectMapper.readValue(response.body(), responseType);
+        } catch (IOException error) {
+            throw new CompletionException(
+                    new GameServiceException("Game Service " + operationName + " response was invalid", error));
+        }
+    }
+
+    private GameServiceException parseErrorResponse(HttpResponse<String> response, String operationName) {
+        try {
+            ErrorEnvelope envelope = objectMapper.readValue(response.body(), ErrorEnvelope.class);
+            if (envelope.error() != null) {
+                return new GameServiceException(
+                        response.statusCode(),
+                        envelope.error().code(),
+                        envelope.error().message(),
+                        envelope.error().retryable());
+            }
+        } catch (IOException ignored) {
+            // Fall through to a stable HTTP-level error when the response is not a domain envelope.
+        }
+        return new GameServiceException(
+                response.statusCode(),
+                "http." + response.statusCode(),
+                "Game Service " + operationName + " failed with HTTP " + response.statusCode(),
+                response.statusCode() == 429 || response.statusCode() >= 500);
+    }
+
     private HealthCheckResult parseHealthResponse(HttpResponse<String> response) {
         if (response.statusCode() != 200) {
             throw new CompletionException(
@@ -122,4 +217,12 @@ public final class GameServiceClient {
     }
 
     private record PlayerLoginRequest(UUID minecraftUuid, String playerName) {}
+
+    private record QuestInteractionStateRequest(List<String> providerIds) {}
+
+    private record QuestMutationRequest(String providerId) {}
+
+    private record ErrorEnvelope(ErrorBody error) {}
+
+    private record ErrorBody(String code, String message, boolean retryable) {}
 }

@@ -28,6 +28,9 @@ class PluginResourceTest {
         assertTrue(configYml.contains("base-url: \"http://127.0.0.1:8000\""));
         assertTrue(configYml.contains("entity-interactions:"));
         assertTrue(configYml.contains("entries: []"));
+        assertTrue(configYml.contains("scan-interval-ticks: 10"));
+        assertTrue(configYml.contains("proximity-radius: 6.0"));
+        assertTrue(configYml.contains("max-players-per-scan: 100"));
     }
 
     @Test

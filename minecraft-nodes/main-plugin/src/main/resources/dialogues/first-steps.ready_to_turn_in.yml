@@ -1,0 +1,10 @@
+id: first-steps.ready_to_turn_in
+title: "初入凡尘"
+speaker: "老村民"
+line-delay-ticks: 20
+sound: "entity.villager.ambient"
+pitch: 1.0
+opening-lines:
+  - "§6§l任务完成"
+lines:
+  - "看来你已经有所收获。"

@@ -3,6 +3,7 @@ package com.immortalmc.adapter.dialogue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 
 public final class NpcDialoguePresenter {
     private static final int OPENING_BLOCK_HEIGHT = 10;
@@ -15,8 +16,26 @@ public final class NpcDialoguePresenter {
     }
 
     public void play(NpcDialogueDefinition dialogue, NpcDialogueAudience audience) {
+        playInternal(dialogue, audience, () -> true, null);
+    }
+
+    public void play(
+            NpcDialogueDefinition dialogue,
+            NpcDialogueAudience audience,
+            BooleanSupplier sessionActive,
+            Runnable onComplete) {
+        Objects.requireNonNull(onComplete, "onComplete");
+        playInternal(dialogue, audience, sessionActive, onComplete);
+    }
+
+    private void playInternal(
+            NpcDialogueDefinition dialogue,
+            NpcDialogueAudience audience,
+            BooleanSupplier sessionActive,
+            Runnable onComplete) {
         Objects.requireNonNull(dialogue, "dialogue");
         Objects.requireNonNull(audience, "audience");
+        Objects.requireNonNull(sessionActive, "sessionActive");
 
         for (String line : openingBlock(dialogue)) {
             audience.sendMessage(line);
@@ -25,8 +44,18 @@ public final class NpcDialoguePresenter {
             int lineIndex = index;
             String line = dialogue.lines().get(index);
             scheduler.runLater(dialogue.lineDelayTicks() * (index + 1), () -> {
+                if (!sessionActive.getAsBoolean()) {
+                    return;
+                }
                 audience.sendMessage(formatNpcLine(dialogue.speaker(), line));
                 audience.playSound(dialogue.sound(), 1.0f, pitchFor(dialogue.pitch(), lineIndex));
+            });
+        }
+        if (onComplete != null) {
+            scheduler.runLater(dialogue.lineDelayTicks() * dialogue.lines().size(), () -> {
+                if (sessionActive.getAsBoolean()) {
+                    onComplete.run();
+                }
             });
         }
     }

@@ -15,14 +15,14 @@ public final class CitizensIntegrationLoader {
 
     private CitizensIntegrationLoader() {}
 
-    public static CitizensNpcResolver enableIfAvailable(
+    public static CitizensIntegrationHandle enableIfAvailable(
             JavaPlugin plugin,
             EntityInteractionRegistry registry,
             EntityInteractionActionRouter<BukkitEntityInteractionContext> router,
             AdapterLogger logger) {
         Objects.requireNonNull(plugin, "plugin");
         if (!plugin.getServer().getPluginManager().isPluginEnabled("Citizens")) {
-            return CitizensNpcResolver.unavailable();
+            return CitizensIntegrationHandle.unavailable();
         }
 
         try {
@@ -36,7 +36,7 @@ public final class CitizensIntegrationLoader {
                     EntityInteractionRegistry.class,
                     EntityInteractionActionRouter.class,
                     AdapterLogger.class);
-            return (CitizensNpcResolver) enable.invoke(null, plugin, registry, router, logger);
+            return (CitizensIntegrationHandle) enable.invoke(null, plugin, registry, router, logger);
         } catch (InvocationTargetException exception) {
             throw new IllegalStateException("Citizens integration failed to enable", exception.getCause());
         } catch (ReflectiveOperationException exception) {

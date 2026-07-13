@@ -1,6 +1,11 @@
 game-service:
   base-url: "http://127.0.0.1:8000"
 
+quest:
+  scan-interval-ticks: 10
+  proximity-radius: 6.0
+  max-players-per-scan: 100
+
 content:
   entity-interactions:
     entries: []

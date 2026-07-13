@@ -122,7 +122,9 @@ PUT /api/v1/players/{account_id}/current-life/quests/{quest_id}/accept
 PUT /api/v1/players/{account_id}/current-life/quests/{quest_id}/turn-in
 ```
 
-- [ ] Test provider-list de-duplication, the 32-provider cap, UUID `Idempotency-Key`, repeated mutation no-ops, and operation conflict.
+- [ ] Test provider-list de-duplication, the 32-provider cap, required mutation
+  body `{"provider_id":"old-man"}`, UUID `Idempotency-Key`, provider mismatch,
+  repeated mutation no-ops, and operation conflict.
 - [ ] Add the full integration loop: login -> inspect available -> accept -> detect spirit root -> inspect ready -> turn in -> inspect completed/no tracked quest.
 - [ ] Run `.venv/bin/python -m pytest tests/integration/test_quest_api.py -q`; expect 404s for missing routes.
 - [ ] Add thin FastAPI handlers that resolve `QuestService` from `app.state`, validate the idempotency header, and return typed response models.
@@ -143,7 +145,9 @@ PUT /api/v1/players/{account_id}/current-life/quests/{quest_id}/turn-in
 - Modify: `minecraft-nodes/main-plugin/src/main/java/com/immortalmc/adapter/client/GameServiceClient.java`
 - Test: `minecraft-nodes/main-plugin/src/test/java/com/immortalmc/adapter/client/GameServiceClientQuestTest.java`
 
-- [ ] Write local-HTTP-server tests proving snake_case decoding, provider-list request JSON, exact routes, `Idempotency-Key`, and complete mutation projections.
+- [ ] Write local-HTTP-server tests proving snake_case decoding, provider-list
+  request JSON, mutation `provider_id` JSON, exact routes, `Idempotency-Key`, and
+  complete mutation projections.
 - [ ] Test non-200 responses become `GameServiceException`, 4xx is not marked retryable by the caller, and the existing two-second request timeout remains configured.
 - [ ] Run the focused test with the existing local toolchain; expect missing records/methods:
 

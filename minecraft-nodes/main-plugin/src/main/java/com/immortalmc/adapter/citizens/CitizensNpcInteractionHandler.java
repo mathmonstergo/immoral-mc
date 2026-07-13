@@ -4,6 +4,7 @@ import com.immortalmc.adapter.command.NpcDialogueAdminRunner;
 import com.immortalmc.adapter.content.EntityBinding;
 import com.immortalmc.adapter.content.EntityInteractionDefinition;
 import com.immortalmc.adapter.content.EntityInteractionRegistry;
+import com.immortalmc.adapter.gameplay.QuestProviderInteractionAction;
 import com.immortalmc.adapter.interaction.BukkitEntityInteractionContext;
 import com.immortalmc.adapter.interaction.EntityInteractionActionRouter;
 import com.immortalmc.adapter.interaction.InteractionDebouncer;
@@ -51,6 +52,12 @@ public final class CitizensNpcInteractionHandler {
         }
         if (interactions.isEmpty()) {
             return false;
+        }
+
+        if (interactions.stream().anyMatch(definition -> QuestProviderInteractionAction.ACTION.equals(definition.action()))) {
+            interactions = interactions.stream()
+                    .filter(definition -> QuestProviderInteractionAction.ACTION.equals(definition.action()))
+                    .toList();
         }
 
         String debounceKey = player.getUniqueId() + ":" + citizensNpcUuid;

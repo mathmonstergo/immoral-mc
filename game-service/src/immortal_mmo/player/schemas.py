@@ -29,6 +29,14 @@ class Life(BaseModel):
     spirit_root: SpiritRoot | None
 
 
+class CurrentLifeQuestFacts(BaseModel):
+    account_id: UUID
+    life_id: UUID
+    generation_no: int
+    spirit_root: SpiritRoot | None
+    revision: int
+
+
 class PlayerLoginRequest(BaseModel):
     minecraft_uuid: UUID
     player_name: str
@@ -43,4 +51,3 @@ class SpiritRootDetectionResponse(BaseModel):
     life_id: UUID
     spirit_root: SpiritRoot
     already_detected: bool
-

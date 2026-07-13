@@ -160,15 +160,25 @@ does not render a fake second quest.
 ```http
 PUT /api/v1/players/{account_id}/current-life/quests/{quest_id}/accept
 Idempotency-Key: <operation UUID>
+Content-Type: application/json
+
+{"provider_id":"old-man"}
 
 PUT /api/v1/players/{account_id}/current-life/quests/{quest_id}/turn-in
 Idempotency-Key: <operation UUID>
+Content-Type: application/json
+
+{"provider_id":"old-man"}
 ```
 
 Both commands re-evaluate current authoritative state. A successful response
 contains `changed`, the canonical quest state, revisions, and the updated
 interaction/tracked-quest projection. Paper therefore does not issue an
 immediate follow-up scoreboard request.
+
+Game Service validates that `provider_id` is bound to the quest and is allowed
+for the requested accept or turn-in action. A click at an unrelated NPC cannot
+mutate the quest merely by knowing its ID.
 
 Repeating accept or turn-in is a successful no-op with `changed=false`.
 Replaying the same operation ID returns the stored result. Reusing an operation
