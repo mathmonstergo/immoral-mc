@@ -146,6 +146,7 @@ def test_aggregate_derives_available_state_with_one_facts_and_bulk_read() -> Non
     assert provider.actionable_quest_ids == ["first-steps"]
     assert provider.proximity_bark.model_dump() == {
         "key": "first-steps:available",
+        "speaker": "老村民",
         "text": "最近太不太平了...",
         "cooldown_seconds": 60,
     }

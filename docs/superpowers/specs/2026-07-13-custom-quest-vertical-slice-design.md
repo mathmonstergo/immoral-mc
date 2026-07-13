@@ -200,6 +200,10 @@ Speech occurs only on an outside-to-inside edge. It is sent directly to the
 player and uses a 60-second cooldown keyed by player, NPC, and authoritative
 state key. A state change can speak immediately.
 
+The proximity bark contract includes a provider `speaker` display name. Paper
+formats it through the same `speaker: content` helper used by scheduled dialogue
+lines, so passive and formal NPC speech have consistent attribution.
+
 The scan hot path reads cache only. A cache miss schedules at most one
 coalesced asynchronous refresh for that player/provider and skips speech for
 that scan. Remaining in range never causes polling.
@@ -215,6 +219,10 @@ playing_offer -> awaiting_confirmation -> accepted | cancelled
 One non-persistent TextDisplay is hidden by default and shown only to the
 interacting player. It displays `任务接取中...` during playback and changes to
 `右键接取任务` afterward.
+
+The display anchor uses the spawned Citizens backing entity's runtime height
+plus nameplate clearance. This supports different Bukkit entity types without
+assuming player height and keeps the private status above Citizens' own name.
 
 The session cancels without calling Game Service when the player:
 
@@ -265,6 +273,9 @@ The renderer keeps stable entries/teams and a last-rendered immutable model. It
 updates changed lines only and performs no work when the model is equal. It is
 event-driven by login, accept, detection, turn-in, and explicit refresh, never
 by polling or proximity scans.
+
+The sidebar objective uses Paper `NumberFormat.blank()` so internal ordering
+scores do not render as `3`, `2`, and `1` on the right side.
 
 ## Concurrency and Stale Responses
 

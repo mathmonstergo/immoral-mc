@@ -1055,8 +1055,12 @@ the Bukkit main thread.
 * A refresh completion may speak only when its life ID matches the entering
   life, the player is still inside that NPC, and the response still contains
   the provider and bark.
+* `proximity_bark` includes non-empty `speaker` and `text` fields. Format them
+  through the same shared speaker-line helper used by formal NPC dialogue.
 * Offer sessions are cancelled when the player leaves range/world, disappears,
   expires, or the persistent Citizens NPC disappears from the current index.
+* Private offer-label Y position is backing-entity `getHeight()` plus nameplate
+  clearance. Sidebar objectives use `NumberFormat.blank()` to hide order scores.
 * Accept/turn-in retries are owned by the request coordinator. Retry at most
   once for I/O failures or `GameServiceException.retryable() == true`, using the
   same request closure and therefore the same operation UUID.
@@ -1070,6 +1074,7 @@ the Bukkit main thread.
 | Player leaves before refresh completes | Drop the bark without changing cooldown state |
 | Response life differs | Drop the response as stale |
 | Provider/bark absent from response | Send nothing; do not invent fallback quest text |
+| Bark speaker missing/invalid | Reject the Adapter DTO instead of showing unattributed dialogue |
 | Citizens NPC disappears | Cancel its pending offer label/session on the next shared scan |
 | Retryable mutation transport failure | Retry once with the same `Idempotency-Key` |
 | Non-retryable/domain mutation failure | Do not retry; preserve confirmed cosmetic state |
@@ -1089,6 +1094,10 @@ the Bukkit main thread.
 
 * A completed refresh future speaks immediately when the player is still in
   range. This specifically proves inside state is committed before callbacks.
+* Client decoding preserves bark `speaker`; coordinator output includes the
+  colored speaker prefix and formal dialogue formatting remains unchanged.
+* Bukkit boundary tests assert blank sidebar number format and label placement
+  at runtime entity height plus clearance.
 * Cache-hit entry performs zero HTTP and remaining inside does not repeat bark.
 * State-key changes bypass an old bark cooldown; unchanged state does not.
 * Range, world, timeout, missing player, and missing NPC each remove an offer

@@ -55,6 +55,7 @@ class GameServiceClientQuestTest {
                     assertEquals(2000, result.cacheTtlMs());
                     assertEquals("first-steps:ready_to_turn_in", result.providers().getFirst().stateKey());
                     assertEquals("first-steps", result.providers().getFirst().directActionQuestId());
+                    assertEquals("老村民", result.providers().getFirst().proximityBark().speaker());
                     assertEquals("看来你已经有所收获。", result.providers().getFirst().proximityBark().text());
                     assertEquals("ready_to_turn_in", result.providers().getFirst().quests().getFirst().state());
                     assertEquals("first-steps.ready", result.providers().getFirst().quests().getFirst().dialogueKey());
@@ -172,7 +173,7 @@ class GameServiceClientQuestTest {
                   """.formatted(state, objectiveJson(current, completed), current == 0 ? "前往鉴灵师处" : "返回老村民处")
                 : "null";
         String bark = state.equals("ready_to_turn_in")
-                ? "{\"key\":\"first-steps:ready_to_turn_in\",\"text\":\"看来你已经有所收获。\",\"cooldown_seconds\":60}"
+                ? "{\"key\":\"first-steps:ready_to_turn_in\",\"speaker\":\"老村民\",\"text\":\"看来你已经有所收获。\",\"cooldown_seconds\":60}"
                 : "null";
         return """
                 {

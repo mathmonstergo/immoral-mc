@@ -79,6 +79,7 @@ def test_inspect_returns_exact_available_interaction_contract_and_deduplicates()
                 "direct_action_quest_id": "first-steps",
                 "proximity_bark": {
                     "key": "first-steps:available",
+                    "speaker": "老村民",
                     "text": "最近太不太平了...",
                     "cooldown_seconds": 60,
                 },

@@ -47,7 +47,7 @@ public final class NpcDialoguePresenter {
                 if (!sessionActive.getAsBoolean()) {
                     return;
                 }
-                audience.sendMessage(formatNpcLine(dialogue.speaker(), line));
+                audience.sendMessage(NpcDialogueText.formatSpeakerLine(dialogue.speaker(), line));
                 audience.playSound(dialogue.sound(), 1.0f, pitchFor(dialogue.pitch(), lineIndex));
             });
         }
@@ -69,10 +69,6 @@ public final class NpcDialoguePresenter {
         }
         block.add("§8§m                                                    ");
         return List.copyOf(block);
-    }
-
-    private static String formatNpcLine(String speaker, String line) {
-        return "§6" + speaker + "§7: §f" + line;
     }
 
     private static float pitchFor(float basePitch, int lineIndex) {

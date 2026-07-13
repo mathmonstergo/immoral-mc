@@ -17,9 +17,10 @@ public record QuestProviderSnapshot(
         actionableQuestIds = List.copyOf(actionableQuestIds);
     }
 
-    public record ProximityBarkSnapshot(String key, String text, int cooldownSeconds) {
+    public record ProximityBarkSnapshot(String key, String speaker, String text, int cooldownSeconds) {
         public ProximityBarkSnapshot {
             Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(speaker, "speaker");
             Objects.requireNonNull(text, "text");
         }
     }

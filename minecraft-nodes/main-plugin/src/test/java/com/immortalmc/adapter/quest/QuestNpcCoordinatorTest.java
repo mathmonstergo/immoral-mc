@@ -36,7 +36,7 @@ class QuestNpcCoordinatorTest {
         coordinator.tick(List.of(player(1, 0, 1)), NOW.plusMillis(500));
         coordinator.tick(List.of(player(1, 0, 1)), NOW.plusSeconds(1));
 
-        assertEquals(List.of("最近太不太平了..."), barks);
+        assertEquals(List.of("§6老村民§7: §f最近太不太平了..."), barks);
         assertEquals(0, refresher.calls.get());
     }
 
@@ -55,7 +55,7 @@ class QuestNpcCoordinatorTest {
         coordinator.tick(List.of(player(20, 0, 20)), NOW.plusSeconds(1));
         coordinator.tick(List.of(player(1, 0, 1)), NOW.plusMillis(1500));
 
-        assertEquals(List.of("去找鉴灵师看看吧。"), barks);
+        assertEquals(List.of("§6老村民§7: §f去找鉴灵师看看吧。"), barks);
     }
 
     @Test
@@ -69,7 +69,7 @@ class QuestNpcCoordinatorTest {
 
         coordinator.tick(List.of(player(1, 0, 1)), NOW);
 
-        assertEquals(List.of("最近太不太平了..."), barks);
+        assertEquals(List.of("§6老村民§7: §f最近太不太平了..."), barks);
     }
 
     @Test
@@ -200,7 +200,7 @@ class QuestNpcCoordinatorTest {
         ProviderQuestSnapshot quest = new ProviderQuestSnapshot(
                 "first-steps", "初入凡尘", "main", questState, "remind", null, List.of());
         QuestProviderSnapshot.ProximityBarkSnapshot bark =
-                new QuestProviderSnapshot.ProximityBarkSnapshot(key, text, 60);
+                new QuestProviderSnapshot.ProximityBarkSnapshot(key, "老村民", text, 60);
         QuestProviderSnapshot provider = new QuestProviderSnapshot(
                 "old-man", key, List.of(quest), List.of("first-steps"), "first-steps", bark);
         return new QuestInteractionState(

@@ -2,6 +2,7 @@ package com.immortalmc.adapter.quest;
 
 import com.immortalmc.adapter.client.QuestInteractionState;
 import com.immortalmc.adapter.client.QuestProviderSnapshot;
+import com.immortalmc.adapter.dialogue.NpcDialogueText;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -134,7 +135,7 @@ public final class QuestNpcCoordinator {
                 ? Duration.ofSeconds(bark.cooldownSeconds())
                 : fallbackCooldown;
         cooldowns.put(key, now.plus(cooldown));
-        barkSink.send(playerId, bark.text());
+        barkSink.send(playerId, NpcDialogueText.formatSpeakerLine(bark.speaker(), bark.text()));
     }
 
     private boolean isInside(UUID playerId, UUID npcId) {

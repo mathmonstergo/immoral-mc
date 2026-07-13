@@ -57,6 +57,7 @@ class ProviderQuestState(BaseModel):
 
 class ProximityBark(BaseModel):
     key: str
+    speaker: str
     text: str
     cooldown_seconds: int
 

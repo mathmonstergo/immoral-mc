@@ -107,6 +107,8 @@ quest engine.
   relevant quest is available.
 * Proximity speech must use direct player chat delivery, not Bukkit broadcast or
   Citizens global speech.
+* Proximity speech must prefix the content with the authoritative provider
+  display name, using the same speaker-line format as formal NPC dialogue.
 * Proximity speech must have a per-player/NPC/state cooldown and must not issue an
   HTTP request every server tick; use cached authoritative interaction state.
 * Use a 60-second proximity-speech cooldown keyed by player, provider NPC, and
@@ -133,6 +135,10 @@ quest engine.
 * Allow at most one in-flight quest refresh/mutation per player/provider and
   discard stale out-of-order responses using a monotonic state revision.
 * Update scoreboard and private NPC labels only when rendered content changes.
+* Hide sidebar score numbers with Paper's blank number format; the numeric score
+  remains only an internal line-order mechanism.
+* Place private offer labels above the Citizens nameplate using the backing
+  entity's runtime height plus a fixed clearance, not a hardcoded player height.
 * Clean up player caches, proximity state, pending offer sessions, scheduled
   tasks, and TextDisplay entities on quit/plugin disable.
 * Keep the existing 2-second HTTP timeout as the failure ceiling. A retryable

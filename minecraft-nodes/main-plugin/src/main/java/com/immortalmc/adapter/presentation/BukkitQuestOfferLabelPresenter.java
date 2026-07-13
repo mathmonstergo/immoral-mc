@@ -10,12 +10,14 @@ import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.TextDisplay;
-import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.plugin.Plugin;
 
 public final class BukkitQuestOfferLabelPresenter implements QuestOfferLabelPresenter {
-    private final JavaPlugin plugin;
+    private static final double LABEL_CLEARANCE = 0.9;
 
-    public BukkitQuestOfferLabelPresenter(JavaPlugin plugin) {
+    private final Plugin plugin;
+
+    public BukkitQuestOfferLabelPresenter(Plugin plugin) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
     }
 
@@ -23,7 +25,7 @@ public final class BukkitQuestOfferLabelPresenter implements QuestOfferLabelPres
     public QuestOfferLabel show(Player player, Entity npc) {
         Objects.requireNonNull(player, "player");
         Objects.requireNonNull(npc, "npc");
-        Location location = npc.getLocation().add(0.0, npc.getHeight() + 0.35, 0.0);
+        Location location = npc.getLocation().add(0.0, npc.getHeight() + LABEL_CLEARANCE, 0.0);
         TextDisplay display = npc.getWorld().spawn(location, TextDisplay.class, entity -> {
             entity.text(Component.text("任务接取中...", NamedTextColor.YELLOW));
             entity.setBillboard(Display.Billboard.CENTER);

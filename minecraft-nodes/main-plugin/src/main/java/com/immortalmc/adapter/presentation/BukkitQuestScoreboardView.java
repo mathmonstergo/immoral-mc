@@ -1,5 +1,6 @@
 package com.immortalmc.adapter.presentation;
 
+import io.papermc.paper.scoreboard.numbers.NumberFormat;
 import java.util.Objects;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -25,14 +26,20 @@ public final class BukkitQuestScoreboardView implements QuestScoreboardView {
     private boolean hidden;
 
     public BukkitQuestScoreboardView(Player player) {
+        this(player, Bukkit.getScoreboardManager(), NumberFormat.blank());
+    }
+
+    BukkitQuestScoreboardView(Player player, ScoreboardManager manager, NumberFormat numberFormat) {
         this.player = Objects.requireNonNull(player, "player");
-        ScoreboardManager manager = Objects.requireNonNull(Bukkit.getScoreboardManager(), "scoreboardManager");
+        Objects.requireNonNull(manager, "scoreboardManager");
+        Objects.requireNonNull(numberFormat, "numberFormat");
         previous = player.getScoreboard();
         scoreboard = manager.getNewScoreboard();
         Objective objective = scoreboard.registerNewObjective(
                 "immortal_quest",
                 "dummy",
                 Component.text("修仙纪事", NamedTextColor.GOLD));
+        objective.numberFormat(numberFormat);
         objective.setDisplaySlot(DisplaySlot.SIDEBAR);
         questTeam = registerLine("quest_title", QUEST_ENTRY, 3, objective);
         objectiveTeam = registerLine("quest_objective", OBJECTIVE_ENTRY, 2, objective);

@@ -434,7 +434,7 @@ class QuestService:
             quests=quests,
             actionable_quest_ids=actionable,
             direct_action_quest_id=actionable[0] if len(actionable) == 1 else None,
-            proximity_bark=self._project_proximity_bark(lead),
+            proximity_bark=self._project_proximity_bark(provider, lead),
         )
 
     def _project_quest(
@@ -545,7 +545,11 @@ class QuestService:
             next_action_hint=next_action,
         )
 
-    def _project_proximity_bark(self, quest: ProviderQuestState | None) -> ProximityBark | None:
+    def _project_proximity_bark(
+        self,
+        provider: QuestProviderDefinition,
+        quest: ProviderQuestState | None,
+    ) -> ProximityBark | None:
         if quest is None or quest.state not in {"available", "active", "ready_to_turn_in"}:
             return None
         definition = self._catalog.get_quest(quest.quest_id)
@@ -556,6 +560,7 @@ class QuestService:
         }
         return ProximityBark(
             key=f"{quest.quest_id}:{quest.state}",
+            speaker=provider.display_name,
             text=text_by_state[quest.state],
             cooldown_seconds=60,
         )
