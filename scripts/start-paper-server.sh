@@ -10,6 +10,10 @@ if [ ! -x "$JAVA_BIN" ]; then
 fi
 
 if [ ! -x "$JAVA_BIN" ]; then
+  JAVA_BIN="$HOME/.local/share/jdks/temurin-21/bin/java"
+fi
+
+if [ ! -x "$JAVA_BIN" ]; then
   JAVA_BIN="/tmp/immortal-mc-tools/jdk-21/bin/java"
 fi
 
