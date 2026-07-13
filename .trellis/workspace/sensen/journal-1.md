@@ -370,3 +370,39 @@ Fixed spirit-root detector remove to delete ImmortalMC-created entities while pr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: NPC dialogue MVP and plugin strategy
+
+**Date**: 2026-07-13
+**Task**: NPC dialogue MVP and plugin strategy
+**Branch**: `main`
+
+### Summary
+
+Completed and manually verified the NPC dialogue interaction MVP, documented mature plugin ownership boundaries, and validated Citizens/MythicMobs on the local Paper server.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `04efec8` | (see git log) |
+| `fd46b17` | (see git log) |
+| `40405d3` | (see git log) |
+| `5497178` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

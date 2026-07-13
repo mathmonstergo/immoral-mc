@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
-- **Last Active**: 2026-07-08
+- **Total Sessions**: 12
+- **Last Active**: 2026-07-13
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~372 | Active |
+| `journal-1.md` | ~408 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-07-13 | NPC dialogue MVP and plugin strategy | `04efec8`, `fd46b17`, `40405d3`, `5497178` | `main` |
 | 11 | 2026-07-08 | Managed detector removal | `5c959d7` | `main` |
 | 10 | 2026-07-08 | Entity interaction management | `66e1387` | `main` |
 | 9 | 2026-07-08 | Fix detector entity targeting | `6fea840` | `main` |
