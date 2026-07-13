@@ -1,8 +1,10 @@
 package com.immortalmc.adapter.quest;
 
 import com.immortalmc.adapter.client.GameServiceClient;
+import com.immortalmc.adapter.client.GameServiceException;
 import com.immortalmc.adapter.client.QuestInteractionState;
 import com.immortalmc.adapter.client.QuestMutationResult;
+import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -187,11 +189,32 @@ public final class QuestRequestCoordinator implements QuestInteractionService {
     }
 
     private static CompletableFuture<QuestMutationResult> callMutation(FutureSupplier<QuestMutationResult> request) {
+        return callMutationOnce(request)
+                .handle((result, error) -> {
+                    if (error == null) {
+                        return CompletableFuture.completedFuture(result);
+                    }
+                    Throwable cause = unwrap(error);
+                    if (!isRetryableMutationFailure(cause)) {
+                        return CompletableFuture.<QuestMutationResult>failedFuture(cause);
+                    }
+                    return callMutationOnce(request);
+                })
+                .thenCompose(future -> future);
+    }
+
+    private static CompletableFuture<QuestMutationResult> callMutationOnce(
+            FutureSupplier<QuestMutationResult> request) {
         try {
             return request.get();
         } catch (Throwable error) {
             return CompletableFuture.failedFuture(error);
         }
+    }
+
+    private static boolean isRetryableMutationFailure(Throwable error) {
+        return error instanceof IOException
+                || (error instanceof GameServiceException serviceError && serviceError.retryable());
     }
 
     private void dispatchRefreshCompletion(

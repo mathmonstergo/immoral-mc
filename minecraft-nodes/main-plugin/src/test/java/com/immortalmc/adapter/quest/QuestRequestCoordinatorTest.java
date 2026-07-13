@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.immortalmc.adapter.client.GameServiceException;
 import com.immortalmc.adapter.client.ProviderQuestSnapshot;
 import com.immortalmc.adapter.client.QuestInteractionState;
 import com.immortalmc.adapter.client.QuestMutationResult;
@@ -18,6 +19,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
 import java.util.UUID;
@@ -248,6 +250,44 @@ class QuestRequestCoordinatorTest {
     }
 
     @Test
+    void retryableMutationFailureRetriesOnceWithSameOperationId() {
+        FakeGateway gateway = new FakeGateway();
+        QuestInteractionState acceptedState = state(1, 2, "active");
+        gateway.accepts.add(CompletableFuture.failedFuture(new GameServiceException("connection reset")));
+        gateway.accepts.add(CompletableFuture.completedFuture(new QuestMutationResult(
+                OPERATION_ID,
+                true,
+                acceptedState.providers().getFirst().quests().getFirst(),
+                acceptedState)));
+        QuestRequestCoordinator coordinator = coordinator(gateway, Runnable::run, new MutableClock(NOW));
+
+        QuestMutationResult result = coordinator.accept(
+                        PLAYER_ID, ACCOUNT_ID, LIFE_ID, "first-steps", "old-man", OPERATION_ID)
+                .join();
+
+        assertEquals(acceptedState, result.interactionState());
+        assertEquals(2, gateway.acceptCalls.get());
+        assertEquals(List.of(OPERATION_ID, OPERATION_ID), gateway.acceptOperationIds);
+    }
+
+    @Test
+    void nonRetryableMutationFailureIsNotRetried() {
+        FakeGateway gateway = new FakeGateway();
+        gateway.accepts.add(CompletableFuture.failedFuture(
+                new GameServiceException(409, "quest.not_ready", "Quest objectives are not complete.", false)));
+        QuestRequestCoordinator coordinator = coordinator(gateway, Runnable::run, new MutableClock(NOW));
+
+        assertThrows(
+                CompletionException.class,
+                () -> coordinator.accept(
+                                PLAYER_ID, ACCOUNT_ID, LIFE_ID, "first-steps", "old-man", OPERATION_ID)
+                        .join());
+
+        assertEquals(1, gateway.acceptCalls.get());
+        assertEquals(List.of(OPERATION_ID), gateway.acceptOperationIds);
+    }
+
+    @Test
     void successfulTurnInWritesThroughCompletedProjection() {
         FakeGateway gateway = new FakeGateway();
         QuestInteractionState completedState = state(2, 3, "completed");
@@ -423,6 +463,7 @@ class QuestRequestCoordinatorTest {
         private final AtomicInteger refreshCalls = new AtomicInteger();
         private final AtomicInteger acceptCalls = new AtomicInteger();
         private final AtomicInteger turnInCalls = new AtomicInteger();
+        private final List<UUID> acceptOperationIds = new ArrayList<>();
         private final Queue<CompletableFuture<QuestInteractionState>> refreshes = new ArrayDeque<>();
         private final Queue<CompletableFuture<QuestMutationResult>> accepts = new ArrayDeque<>();
         private final Queue<CompletableFuture<QuestMutationResult>> turnIns = new ArrayDeque<>();
@@ -438,6 +479,7 @@ class QuestRequestCoordinatorTest {
         public CompletableFuture<QuestMutationResult> acceptQuest(
                 UUID accountId, String questId, String providerId, UUID operationId) {
             acceptCalls.incrementAndGet();
+            acceptOperationIds.add(operationId);
             return accepts.remove();
         }
 

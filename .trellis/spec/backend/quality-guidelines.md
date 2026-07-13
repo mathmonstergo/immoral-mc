@@ -1057,6 +1057,9 @@ the Bukkit main thread.
   the provider and bark.
 * Offer sessions are cancelled when the player leaves range/world, disappears,
   expires, or the persistent Citizens NPC disappears from the current index.
+* Accept/turn-in retries are owned by the request coordinator. Retry at most
+  once for I/O failures or `GameServiceException.retryable() == true`, using the
+  same request closure and therefore the same operation UUID.
 
 ### 4. Validation & Error Matrix
 
@@ -1068,6 +1071,8 @@ the Bukkit main thread.
 | Response life differs | Drop the response as stale |
 | Provider/bark absent from response | Send nothing; do not invent fallback quest text |
 | Citizens NPC disappears | Cancel its pending offer label/session on the next shared scan |
+| Retryable mutation transport failure | Retry once with the same `Idempotency-Key` |
+| Non-retryable/domain mutation failure | Do not retry; preserve confirmed cosmetic state |
 | Game Service mutation fails | Keep authoritative quest/sidebar state unchanged and show retry feedback |
 
 ### 5. Good/Base/Bad Cases
@@ -1089,6 +1094,8 @@ the Bukkit main thread.
 * Range, world, timeout, missing player, and missing NPC each remove an offer
   label exactly once.
 * A 100-player/25-NPC fixture asserts bounded candidates and scan carryover.
+* A retryable mutation failure causes exactly two gateway calls carrying the
+  same operation UUID; a non-retryable domain failure causes exactly one.
 * Full Game Service tests and a clean Paper build pass before deployment; the
   runtime log must contain no `SEVERE`, `ERROR`, or unexpected exception.
 
