@@ -21,10 +21,8 @@ public final class NpcDialogueAdminMessages {
                 + dialogue.id()
                 + " bound to "
                 + dialogue.metadataValue(NpcDialogueInteractionAction.DIALOGUE_ID_KEY).orElse("unknown")
-                + " for entity "
-                + dialogue.binding().entityUuid()
-                + " in "
-                + dialogue.binding().worldName()
+                + " for "
+                + targetDescription(dialogue)
                 + ". Total NPC dialogues: "
                 + totalDialogues
                 + ".";
@@ -42,9 +40,7 @@ public final class NpcDialogueAdminMessages {
                 + " "
                 + dialogue.entityType()
                 + " "
-                + dialogue.binding().worldName()
-                + "/"
-                + dialogue.binding().entityUuid()
+                + listTargetDescription(dialogue)
                 + " protected="
                 + dialogue.protectedEntity();
     }
@@ -67,5 +63,20 @@ public final class NpcDialogueAdminMessages {
                 + " binding(s), "
                 + totalDialogueFiles
                 + " dialogue file(s).";
+    }
+
+    private static String targetDescription(EntityInteractionDefinition dialogue) {
+        return dialogue.metadataValue(NpcDialogueAdminRunner.CITIZENS_NPC_UUID_KEY)
+                .map(uuid -> "Citizens NPC " + uuid)
+                .orElseGet(() -> "entity "
+                        + dialogue.binding().entityUuid()
+                        + " in "
+                        + dialogue.binding().worldName());
+    }
+
+    private static String listTargetDescription(EntityInteractionDefinition dialogue) {
+        return dialogue.metadataValue(NpcDialogueAdminRunner.CITIZENS_NPC_UUID_KEY)
+                .map(uuid -> "citizens/" + uuid)
+                .orElseGet(() -> dialogue.binding().worldName() + "/" + dialogue.binding().entityUuid());
     }
 }

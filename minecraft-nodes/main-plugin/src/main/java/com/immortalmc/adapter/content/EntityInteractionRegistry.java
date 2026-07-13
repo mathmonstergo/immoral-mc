@@ -123,6 +123,44 @@ public final class EntityInteractionRegistry {
                 .toList();
     }
 
+    public synchronized List<EntityInteractionDefinition> findAllByMetadata(
+            String action,
+            String metadataKey,
+            String metadataValue) {
+        Objects.requireNonNull(action, "action");
+        return findAllByMetadata(metadataKey, metadataValue).stream()
+                .filter(definition -> definition.action().equals(action))
+                .toList();
+    }
+
+    public synchronized List<EntityInteractionDefinition> findAllByMetadata(
+            String metadataKey,
+            String metadataValue) {
+        Objects.requireNonNull(metadataKey, "metadataKey");
+        Objects.requireNonNull(metadataValue, "metadataValue");
+        return interactions.stream()
+                .filter(definition -> definition.metadataValue(metadataKey)
+                        .filter(metadataValue::equals)
+                        .isPresent())
+                .toList();
+    }
+
+    public synchronized List<EntityInteractionDefinition> removeInteractionsByMetadata(
+            String action,
+            String metadataKey,
+            String metadataValue) {
+        List<EntityInteractionDefinition> removed = findAllByMetadata(action, metadataKey, metadataValue);
+        if (removed.isEmpty()) {
+            return List.of();
+        }
+
+        interactions = interactions.stream()
+                .filter(definition -> !removed.contains(definition))
+                .toList();
+        repository.save(interactions);
+        return removed;
+    }
+
     public synchronized boolean matches(EntityBinding binding) {
         return find(binding).isPresent();
     }

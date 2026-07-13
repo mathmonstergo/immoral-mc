@@ -1,6 +1,8 @@
 package com.immortalmc.adapter;
 
 import com.immortalmc.adapter.client.GameServiceClient;
+import com.immortalmc.adapter.citizens.CitizensIntegrationLoader;
+import com.immortalmc.adapter.citizens.CitizensNpcResolver;
 import com.immortalmc.adapter.command.HealthCommandMessages;
 import com.immortalmc.adapter.command.HealthCommandRunner;
 import com.immortalmc.adapter.command.ImmortalBukkitCommandExecutor;
@@ -66,6 +68,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         NpcDialogueRegistry npcDialogueRegistry = new NpcDialogueRegistry(
                 new YamlNpcDialogueRepository(getDataFolder().toPath().resolve("dialogues").toFile()));
         int loadedDialogues = npcDialogueRegistry.reload();
+        boolean citizensEnabled = getServer().getPluginManager().isPluginEnabled("Citizens");
         HealthCommandMessages messages = new HealthCommandMessages();
         HealthCommandRunner healthCommandRunner = new HealthCommandRunner(
                 gameServiceClient::checkHealth,
@@ -99,13 +102,6 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 detectorAdminRunner,
                 npcDialogueAdminRunner,
                 messages);
-        ImmortalBukkitCommandExecutor commandExecutor = new ImmortalBukkitCommandExecutor(commandService);
-
-        PluginCommand immortalCommand =
-                Objects.requireNonNull(getCommand("immortal"), "Command 'immortal' is missing from plugin.yml");
-        immortalCommand.setExecutor(commandExecutor);
-        immortalCommand.setTabCompleter(commandExecutor);
-
         PlayerJoinLoginService playerJoinLoginService = new PlayerJoinLoginService(
                 gameServiceClient::loginPlayer,
                 sessionCache,
@@ -137,15 +133,28 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                                         player.playSound(player.getLocation(), resolveSound(sound), volume, pitch);
                                     }
                                 })));
+        CitizensNpcResolver citizensNpcResolver = CitizensIntegrationLoader.enableIfAvailable(
+                this,
+                entityInteractionRegistry,
+                interactionRouter,
+                adapterLogger);
+        ImmortalBukkitCommandExecutor commandExecutor =
+                new ImmortalBukkitCommandExecutor(commandService, citizensNpcResolver);
+        PluginCommand immortalCommand =
+                Objects.requireNonNull(getCommand("immortal"), "Command 'immortal' is missing from plugin.yml");
+        immortalCommand.setExecutor(commandExecutor);
+        immortalCommand.setTabCompleter(commandExecutor);
+
         getServer().getPluginManager().registerEvents(new ImmortalPlayerJoinListener(playerJoinLoginService), this);
         getServer().getPluginManager().registerEvents(
                 new ImmortalEntityInteractionListener(
                         entityInteractionRegistry,
                         interactionRouter,
-                        adapterLogger),
+                        adapterLogger,
+                        citizensNpcResolver),
                 this);
         getServer().getPluginManager().registerEvents(
-                new EntityInteractionProtectionListener(entityInteractionRegistry),
+                new EntityInteractionProtectionListener(entityInteractionRegistry, citizensNpcResolver),
                 this);
 
         getLogger().info("ImmortalMC adapter enabled; Game Service base URL: "
@@ -153,7 +162,9 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 + "; entity interactions loaded: "
                 + loadedInteractions
                 + "; NPC dialogues loaded: "
-                + loadedDialogues);
+                + loadedDialogues
+                + "; Citizens integration: "
+                + (citizensEnabled ? "enabled" : "unavailable"));
     }
 
     private static Sound resolveSound(String sound) {

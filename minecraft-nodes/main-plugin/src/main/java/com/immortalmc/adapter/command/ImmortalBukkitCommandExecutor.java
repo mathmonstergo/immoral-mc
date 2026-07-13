@@ -1,5 +1,6 @@
 package com.immortalmc.adapter.command;
 
+import com.immortalmc.adapter.citizens.CitizensNpcResolver;
 import com.immortalmc.adapter.content.EntityBinding;
 import com.immortalmc.adapter.content.EntityInteractionEntity;
 import com.immortalmc.adapter.targeting.EntityTargetCandidate;
@@ -9,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import net.kyori.adventure.text.Component;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -30,9 +32,17 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
             List.of("health", "spirit-root", "spirit-root-detector", "npc-dialogue");
 
     private final ImmortalCommandService commandService;
+    private final CitizensNpcResolver citizensNpcResolver;
 
     public ImmortalBukkitCommandExecutor(ImmortalCommandService commandService) {
+        this(commandService, CitizensNpcResolver.unavailable());
+    }
+
+    public ImmortalBukkitCommandExecutor(
+            ImmortalCommandService commandService,
+            CitizensNpcResolver citizensNpcResolver) {
         this.commandService = Objects.requireNonNull(commandService, "commandService");
+        this.citizensNpcResolver = Objects.requireNonNull(citizensNpcResolver, "citizensNpcResolver");
     }
 
     @Override
@@ -72,15 +82,26 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
                 .toList();
     }
 
-    private static ImmortalCommandSource sourceFor(CommandSender sender) {
+    private ImmortalCommandSource sourceFor(CommandSender sender) {
         if (sender instanceof Player player) {
+            Optional<EntityInteractionEntity> lookedAtEntity = findLookedAtEntity(player);
             return ImmortalCommandSource.player(
                     player.getUniqueId(),
-                    findLookedAtEntity(player),
+                    lookedAtEntity,
+                    lookedAtEntity.flatMap(entity -> resolveCitizensNpcUuid(player, entity)),
                     detectorId -> spawnSpiritRootDetector(player, detectorId),
                     binding -> removeEntity(player, binding));
         }
         return ImmortalCommandSource.console();
+    }
+
+    private Optional<UUID> resolveCitizensNpcUuid(Player player, EntityInteractionEntity target) {
+        var world = player.getServer().getWorld(target.binding().worldName());
+        if (world == null) {
+            return Optional.empty();
+        }
+        Entity entity = world.getEntity(target.binding().entityUuid());
+        return entity == null ? Optional.empty() : citizensNpcResolver.persistentNpcUuid(entity);
     }
 
     private static Optional<EntityInteractionEntity> findLookedAtEntity(Player player) {

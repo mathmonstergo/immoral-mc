@@ -7,11 +7,16 @@ import com.immortalmc.adapter.dialogue.NpcDialogueRegistry;
 import com.immortalmc.adapter.gameplay.NpcDialogueInteractionAction;
 import com.immortalmc.adapter.logging.AdapterLogger;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Consumer;
 
 public final class NpcDialogueAdminRunner {
+    public static final String TARGET_PROVIDER_KEY = "target-provider";
+    public static final String CITIZENS_PROVIDER = "citizens";
+    public static final String CITIZENS_NPC_UUID_KEY = "citizens-npc-uuid";
+
     private final EntityInteractionRegistry interactionRegistry;
     private final NpcDialogueRegistry dialogueRegistry;
     private final NpcDialogueAdminMessages messages;
@@ -61,14 +66,26 @@ public final class NpcDialogueAdminRunner {
             return;
         }
 
-        interactionRegistry.removeInteraction(NpcDialogueInteractionAction.ACTION, entity.binding());
+        Map<String, String> metadata = new LinkedHashMap<>();
+        metadata.put(NpcDialogueInteractionAction.DIALOGUE_ID_KEY, dialogueId);
+        source.lookedAtCitizensNpcUuid().ifPresent(citizensNpcUuid -> {
+            interactionRegistry.removeInteractionsByMetadata(
+                    NpcDialogueInteractionAction.ACTION,
+                    CITIZENS_NPC_UUID_KEY,
+                    citizensNpcUuid.toString());
+            metadata.put(TARGET_PROVIDER_KEY, CITIZENS_PROVIDER);
+            metadata.put(CITIZENS_NPC_UUID_KEY, citizensNpcUuid.toString());
+        });
+        if (source.lookedAtCitizensNpcUuid().isEmpty()) {
+            interactionRegistry.removeInteraction(NpcDialogueInteractionAction.ACTION, entity.binding());
+        }
         String id = interactionRegistry.nextId(NpcDialogueInteractionAction.ACTION);
         EntityInteractionDefinition saved = interactionRegistry.saveInteraction(
                 id,
                 NpcDialogueInteractionAction.ACTION,
                 entity,
                 false,
-                Map.of(NpcDialogueInteractionAction.DIALOGUE_ID_KEY, dialogueId));
+                metadata);
         int totalDialogues = interactionRegistry.listByAction(NpcDialogueInteractionAction.ACTION).size();
         logger.info("npc_dialogue_bound minecraft_uuid="
                 + source.minecraftUuid().orElseThrow()
@@ -116,9 +133,17 @@ public final class NpcDialogueAdminRunner {
             return;
         }
 
-        EntityInteractionDefinition removed = interactionRegistry
-                .removeInteraction(NpcDialogueInteractionAction.ACTION, entity.binding())
-                .orElse(null);
+        EntityInteractionDefinition removed = source.lookedAtCitizensNpcUuid()
+                .map(citizensNpcUuid -> interactionRegistry.removeInteractionsByMetadata(
+                                NpcDialogueInteractionAction.ACTION,
+                                CITIZENS_NPC_UUID_KEY,
+                                citizensNpcUuid.toString())
+                        .stream()
+                        .findFirst()
+                        .orElse(null))
+                .orElseGet(() -> interactionRegistry
+                        .removeInteraction(NpcDialogueInteractionAction.ACTION, entity.binding())
+                        .orElse(null));
         if (removed == null) {
             logger.warn("npc_dialogue_admin_rejected minecraft_uuid="
                     + source.minecraftUuid().orElseThrow()

@@ -1,5 +1,7 @@
 package com.immortalmc.adapter.event;
 
+import com.immortalmc.adapter.citizens.CitizensNpcResolver;
+import com.immortalmc.adapter.command.NpcDialogueAdminRunner;
 import com.immortalmc.adapter.content.EntityBinding;
 import com.immortalmc.adapter.content.EntityInteractionRegistry;
 import io.papermc.paper.event.entity.EntityMoveEvent;
@@ -16,9 +18,17 @@ import org.bukkit.event.entity.EntityTransformEvent;
 
 public final class EntityInteractionProtectionListener implements Listener {
     private final EntityInteractionRegistry registry;
+    private final CitizensNpcResolver citizensNpcResolver;
 
     public EntityInteractionProtectionListener(EntityInteractionRegistry registry) {
+        this(registry, CitizensNpcResolver.unavailable());
+    }
+
+    public EntityInteractionProtectionListener(
+            EntityInteractionRegistry registry,
+            CitizensNpcResolver citizensNpcResolver) {
         this.registry = Objects.requireNonNull(registry, "registry");
+        this.citizensNpcResolver = Objects.requireNonNull(citizensNpcResolver, "citizensNpcResolver");
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -73,7 +83,20 @@ public final class EntityInteractionProtectionListener implements Listener {
         }
     }
 
-    private boolean isProtected(Entity entity) {
+    boolean isProtected(Entity entity) {
+        boolean citizensProtected = citizensNpcResolver.persistentNpcUuid(entity)
+                .map(citizensNpcUuid -> registry.findAllByMetadata(
+                                NpcDialogueAdminRunner.CITIZENS_NPC_UUID_KEY,
+                                citizensNpcUuid.toString())
+                        .stream()
+                        .filter(definition -> definition.metadataValue(NpcDialogueAdminRunner.TARGET_PROVIDER_KEY)
+                                .filter(NpcDialogueAdminRunner.CITIZENS_PROVIDER::equals)
+                                .isPresent())
+                        .anyMatch(definition -> definition.protectedEntity()))
+                .orElse(false);
+        if (citizensProtected) {
+            return true;
+        }
         return registry.isProtected(new EntityBinding(entity.getWorld().getName(), entity.getUniqueId()));
     }
 }

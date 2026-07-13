@@ -1,5 +1,6 @@
 package com.immortalmc.adapter.event;
 
+import com.immortalmc.adapter.citizens.CitizensNpcResolver;
 import com.immortalmc.adapter.content.EntityBinding;
 import com.immortalmc.adapter.content.EntityInteractionDefinition;
 import com.immortalmc.adapter.content.EntityInteractionRegistry;
@@ -19,14 +20,24 @@ public final class ImmortalEntityInteractionListener implements Listener {
     private final EntityInteractionRegistry registry;
     private final EntityInteractionActionRouter<BukkitEntityInteractionContext> router;
     private final AdapterLogger logger;
+    private final CitizensNpcResolver citizensNpcResolver;
 
     public ImmortalEntityInteractionListener(
             EntityInteractionRegistry registry,
             EntityInteractionActionRouter<BukkitEntityInteractionContext> router,
             AdapterLogger logger) {
+        this(registry, router, logger, CitizensNpcResolver.unavailable());
+    }
+
+    public ImmortalEntityInteractionListener(
+            EntityInteractionRegistry registry,
+            EntityInteractionActionRouter<BukkitEntityInteractionContext> router,
+            AdapterLogger logger,
+            CitizensNpcResolver citizensNpcResolver) {
         this.registry = Objects.requireNonNull(registry, "registry");
         this.router = Objects.requireNonNull(router, "router");
         this.logger = Objects.requireNonNull(logger, "logger");
+        this.citizensNpcResolver = Objects.requireNonNull(citizensNpcResolver, "citizensNpcResolver");
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -36,6 +47,9 @@ public final class ImmortalEntityInteractionListener implements Listener {
         }
 
         Entity entity = event.getRightClicked();
+        if (citizensNpcResolver.isCitizensNpc(entity)) {
+            return;
+        }
         EntityBinding binding = bindingFor(entity);
         List<EntityInteractionDefinition> interactions = registry.findAll(binding);
         if (interactions.isEmpty()) {

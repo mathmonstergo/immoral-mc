@@ -111,6 +111,56 @@ class EntityInteractionRegistryTest {
     }
 
     @Test
+    void findsCitizensBindingByPersistentMetadataWhenBukkitBindingChanges() {
+        InMemoryEntityInteractionRepository repository = new InMemoryEntityInteractionRepository();
+        EntityInteractionDefinition dialogue = new EntityInteractionDefinition(
+                "npc-dialogue-1",
+                "npc-dialogue",
+                binding("old-world", "30000000-0000-0000-0000-000000000001"),
+                "PLAYER",
+                true,
+                false,
+                Map.of(
+                        "target-provider", "citizens",
+                        "citizens-npc-uuid", "40000000-0000-0000-0000-000000000001",
+                        "dialogue-id", "old-man"));
+        repository.replaceWith(List.of(dialogue));
+        EntityInteractionRegistry registry = new EntityInteractionRegistry(repository);
+        registry.reload();
+
+        assertEquals(
+                List.of(dialogue),
+                registry.findAllByMetadata(
+                        "npc-dialogue",
+                        "citizens-npc-uuid",
+                        "40000000-0000-0000-0000-000000000001"));
+    }
+
+    @Test
+    void removesCitizensBindingByPersistentMetadata() {
+        InMemoryEntityInteractionRepository repository = new InMemoryEntityInteractionRepository();
+        EntityInteractionDefinition dialogue = new EntityInteractionDefinition(
+                "npc-dialogue-1",
+                "npc-dialogue",
+                binding("old-world", "30000000-0000-0000-0000-000000000001"),
+                "PLAYER",
+                true,
+                false,
+                Map.of("citizens-npc-uuid", "40000000-0000-0000-0000-000000000001"));
+        repository.replaceWith(List.of(dialogue));
+        EntityInteractionRegistry registry = new EntityInteractionRegistry(repository);
+        registry.reload();
+
+        assertEquals(
+                List.of(dialogue),
+                registry.removeInteractionsByMetadata(
+                        "npc-dialogue",
+                        "citizens-npc-uuid",
+                        "40000000-0000-0000-0000-000000000001"));
+        assertEquals(List.of(), repository.load());
+    }
+
+    @Test
     void nextIdSkipsExistingActionIds() {
         InMemoryEntityInteractionRepository repository = new InMemoryEntityInteractionRepository();
         repository.replaceWith(List.of(

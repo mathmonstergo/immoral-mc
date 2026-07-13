@@ -6,6 +6,8 @@ author: sensen
 api-version: '1.21.11'
 libraries:
   - com.fasterxml.jackson.core:jackson-databind:2.18.2
+softdepend:
+  - Citizens
 commands:
   immortal:
     description: ImmortalMC adapter operations.

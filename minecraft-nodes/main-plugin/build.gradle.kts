@@ -11,6 +11,9 @@ java {
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
+    compileOnly("net.citizensnpcs:citizens-main:2.0.43-SNAPSHOT") {
+        isTransitive = false
+    }
 
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.2")
 

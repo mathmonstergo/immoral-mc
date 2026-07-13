@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 
 class NpcDialogueAdminRunnerTest {
     private static final UUID MINECRAFT_UUID = UUID.fromString("00000000-0000-0000-0000-000000000010");
+    private static final UUID CITIZENS_UUID = UUID.fromString("40000000-0000-0000-0000-000000000001");
 
     @Test
     void setBindsLookedAtEntityToDialogueWithoutManagingEntity() {
@@ -73,6 +74,71 @@ class NpcDialogueAdminRunnerTest {
                         + MINECRAFT_UUID
                         + " dialogue_id=missing reason=dialogue_missing"),
                 logger.messagesAt("warn"));
+    }
+
+    @Test
+    void setCitizensNpcPersistsStableIdentityAndReplacesPreviousBinding() {
+        InMemoryEntityInteractionRepository interactionRepository = new InMemoryEntityInteractionRepository();
+        EntityInteractionDefinition previous = new EntityInteractionDefinition(
+                "npc-dialogue-1",
+                "npc-dialogue",
+                binding("old-world", "30000000-0000-0000-0000-000000000009"),
+                "PLAYER",
+                true,
+                false,
+                Map.of(
+                        "dialogue-id", "old-man",
+                        "target-provider", "citizens",
+                        "citizens-npc-uuid", CITIZENS_UUID.toString()));
+        interactionRepository.replaceWith(List.of(previous));
+        NpcDialogueAdminRunner runner = runnerWith(interactionRepository, dialogueRepository());
+        EntityInteractionEntity currentEntity = interactionEntity(
+                "world", "30000000-0000-0000-0000-000000000001", "PLAYER");
+        List<String> messages = new ArrayList<>();
+
+        runner.reload(ignored -> {});
+        runner.setLookedAtEntityAsDialogue(
+                ImmortalCommandSource.player(MINECRAFT_UUID, currentEntity, CITIZENS_UUID),
+                "old-man",
+                messages::add);
+
+        assertEquals(1, interactionRepository.load().size());
+        EntityInteractionDefinition saved = interactionRepository.load().getFirst();
+        assertEquals(currentEntity.binding(), saved.binding());
+        assertEquals("citizens", saved.metadataValue("target-provider").orElseThrow());
+        assertEquals(CITIZENS_UUID.toString(), saved.metadataValue("citizens-npc-uuid").orElseThrow());
+        assertEquals(
+                List.of("NPC dialogue npc-dialogue-1 bound to old-man for Citizens NPC "
+                        + CITIZENS_UUID
+                        + ". Total NPC dialogues: 1."),
+                messages);
+    }
+
+    @Test
+    void removeCitizensNpcUsesStableIdentityAfterBukkitBindingChanges() {
+        InMemoryEntityInteractionRepository interactionRepository = new InMemoryEntityInteractionRepository();
+        EntityInteractionDefinition dialogue = new EntityInteractionDefinition(
+                "npc-dialogue-1",
+                "npc-dialogue",
+                binding("old-world", "30000000-0000-0000-0000-000000000009"),
+                "PLAYER",
+                true,
+                false,
+                Map.of(
+                        "dialogue-id", "old-man",
+                        "target-provider", "citizens",
+                        "citizens-npc-uuid", CITIZENS_UUID.toString()));
+        interactionRepository.replaceWith(List.of(dialogue));
+        NpcDialogueAdminRunner runner = runnerWith(interactionRepository, dialogueRepository());
+        EntityInteractionEntity currentEntity = interactionEntity(
+                "world", "30000000-0000-0000-0000-000000000001", "PLAYER");
+
+        runner.reload(ignored -> {});
+        runner.removeLookedAtDialogue(
+                ImmortalCommandSource.player(MINECRAFT_UUID, currentEntity, CITIZENS_UUID),
+                ignored -> {});
+
+        assertEquals(List.of(), interactionRepository.load());
     }
 
     @Test

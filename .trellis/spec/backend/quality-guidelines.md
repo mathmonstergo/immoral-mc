@@ -81,6 +81,10 @@ Adapter.
 * Citizens integrations should persist the stable Citizens NPC ID when the API
   is available. A transient Bukkit entity UUID is not the long-term identity
   contract for a Citizens NPC.
+* Citizens click deduplication and dialogue session state are separate
+  contracts. A short event debounce may suppress duplicate click delivery, but
+  only the dialogue/quest layer may decide whether an active or completed
+  conversation can be started again.
 * MythicMobs owns how a mob spawns, moves, targets, and presents skills. It may
   emit an attack or death fact, but it does not decide authoritative combat
   damage, loot eligibility, progression rewards, or cultivation outcomes.
