@@ -406,3 +406,36 @@ Completed and manually verified the NPC dialogue interaction MVP, documented mat
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: Plugin integration research
+
+**Date**: 2026-07-13
+**Task**: Plugin integration research
+**Branch**: `main`
+
+### Summary
+
+Researched Citizens, MythicMobs, and MMOCore; selected Citizens and MythicMobs as optional mechanism integrations, rejected MMOCore from the default stack, and approved the Citizens NPC adapter migration.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3a6a842` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
