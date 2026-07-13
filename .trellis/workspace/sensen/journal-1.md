@@ -472,3 +472,40 @@ Integrated Citizens as an optional NPC identity and click layer with persistent 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: Resume and verify custom quest vertical slice
+
+**Date**: 2026-07-13
+**Task**: Resume and verify custom quest vertical slice
+**Branch**: `main`
+
+### Summary
+
+Restored the development environment on the new computer with Temurin JDK 21, Gradle 9.6.1, Python 3.12 dependencies, Paper 1.21.11, and Citizens 4211. Rebuilt persistent old-man and spirit-root detector NPC bindings, then manually verified the complete quest loop: offer and accept first-steps, detect a five-element spirit root, turn in exactly once, and finish with completed authoritative state and no tracked quest. Automated validation remained green: Ruff, 63 backend tests, and the Java test/build.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e0f42ac` | (see git log) |
+| `de5162d` | (see git log) |
+| `ebfa975` | (see git log) |
+| `29cb0df` | (see git log) |
+| `de1c8c4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
