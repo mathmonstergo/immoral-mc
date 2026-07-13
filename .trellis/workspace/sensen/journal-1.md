@@ -509,3 +509,37 @@ Restored the development environment on the new computer with Temurin JDK 21, Gr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: Citizens quest provider authoring
+
+**Date**: 2026-07-13
+**Task**: Citizens quest provider authoring
+**Branch**: `main`
+
+### Summary
+
+Added the authoritative quest-provider catalog API and Citizens selection-based quest bind/info/list/unbind/reload workflow with cached validation, tab completion, restart-safe persistent NPC identity, tests, deployment smoke verification, and local Temurin Java discovery.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0dc1b3c` | (see git log) |
+| `30ceda3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
