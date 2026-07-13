@@ -1,5 +1,6 @@
 package com.immortalmc.adapter.gameplay;
 
+import com.immortalmc.adapter.citizens.CitizensBindingMetadata;
 import com.immortalmc.adapter.client.PlayerLoginResult;
 import com.immortalmc.adapter.client.ProviderQuestSnapshot;
 import com.immortalmc.adapter.client.QuestInteractionState;
@@ -31,7 +32,7 @@ import org.bukkit.entity.Player;
 public final class QuestProviderInteractionAction implements EntityInteractionAction<BukkitEntityInteractionContext> {
     public static final String ACTION = "quest-provider";
     public static final String PROVIDER_ID_KEY = "quest-provider-id";
-    public static final String CITIZENS_NPC_UUID_KEY = "citizens-npc-uuid";
+    public static final String CITIZENS_NPC_UUID_KEY = CitizensBindingMetadata.NPC_UUID_KEY;
 
     private final PlayerSessionCache playerSessions;
     private final QuestInteractionService quests;

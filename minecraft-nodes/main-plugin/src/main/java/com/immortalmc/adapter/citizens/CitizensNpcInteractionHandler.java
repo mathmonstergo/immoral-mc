@@ -1,6 +1,5 @@
 package com.immortalmc.adapter.citizens;
 
-import com.immortalmc.adapter.command.NpcDialogueAdminRunner;
 import com.immortalmc.adapter.content.EntityBinding;
 import com.immortalmc.adapter.content.EntityInteractionDefinition;
 import com.immortalmc.adapter.content.EntityInteractionRegistry;
@@ -38,16 +37,16 @@ public final class CitizensNpcInteractionHandler {
         Objects.requireNonNull(entity, "entity");
 
         List<EntityInteractionDefinition> interactions = registry
-                .findAllByMetadata(NpcDialogueAdminRunner.CITIZENS_NPC_UUID_KEY, citizensNpcUuid.toString())
+                .findAllByMetadata(CitizensBindingMetadata.NPC_UUID_KEY, citizensNpcUuid.toString())
                 .stream()
-                .filter(definition -> definition.metadataValue(NpcDialogueAdminRunner.TARGET_PROVIDER_KEY)
-                        .filter(NpcDialogueAdminRunner.CITIZENS_PROVIDER::equals)
+                .filter(definition -> definition.metadataValue(CitizensBindingMetadata.TARGET_PROVIDER_KEY)
+                        .filter(CitizensBindingMetadata.TARGET_PROVIDER_VALUE::equals)
                         .isPresent())
                 .toList();
         if (interactions.isEmpty()) {
             EntityBinding currentBinding = new EntityBinding(entity.getWorld().getName(), entity.getUniqueId());
             interactions = registry.findAll(currentBinding).stream()
-                    .filter(definition -> definition.metadataValue(NpcDialogueAdminRunner.TARGET_PROVIDER_KEY).isEmpty())
+                    .filter(definition -> definition.metadataValue(CitizensBindingMetadata.TARGET_PROVIDER_KEY).isEmpty())
                     .toList();
         }
         if (interactions.isEmpty()) {

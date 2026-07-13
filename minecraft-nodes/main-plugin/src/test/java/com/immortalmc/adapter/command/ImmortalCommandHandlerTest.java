@@ -106,4 +106,23 @@ class ImmortalCommandHandlerTest {
                 ImmortalCommandAction.NPC_DIALOGUE_RELOAD,
                 handler.resolve(new String[] {"npc-dialogue", "reload"}));
     }
+
+    @Test
+    void questSubcommandsResolveExactAuthoringCommandFamily() {
+        ImmortalCommandHandler handler = new ImmortalCommandHandler();
+
+        assertEquals(
+                ImmortalCommandAction.QUEST_TEMPLATES,
+                handler.resolve(new String[] {"quest", "templates"}));
+        assertEquals(
+                ImmortalCommandAction.QUEST_BIND,
+                handler.resolve(new String[] {"quest", "bind", "old-man"}));
+        assertEquals(ImmortalCommandAction.QUEST_INFO, handler.resolve(new String[] {"quest", "info"}));
+        assertEquals(ImmortalCommandAction.QUEST_LIST, handler.resolve(new String[] {"quest", "list"}));
+        assertEquals(ImmortalCommandAction.QUEST_UNBIND, handler.resolve(new String[] {"quest", "unbind"}));
+        assertEquals(ImmortalCommandAction.QUEST_RELOAD, handler.resolve(new String[] {"quest", "reload"}));
+        assertEquals(
+                ImmortalCommandAction.USAGE,
+                handler.resolve(new String[] {"quest", "bind"}));
+    }
 }

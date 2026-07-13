@@ -1,7 +1,7 @@
 package com.immortalmc.adapter.event;
 
 import com.immortalmc.adapter.citizens.CitizensNpcResolver;
-import com.immortalmc.adapter.command.NpcDialogueAdminRunner;
+import com.immortalmc.adapter.citizens.CitizensBindingMetadata;
 import com.immortalmc.adapter.content.EntityBinding;
 import com.immortalmc.adapter.content.EntityInteractionRegistry;
 import io.papermc.paper.event.entity.EntityMoveEvent;
@@ -86,11 +86,11 @@ public final class EntityInteractionProtectionListener implements Listener {
     boolean isProtected(Entity entity) {
         boolean citizensProtected = citizensNpcResolver.persistentNpcUuid(entity)
                 .map(citizensNpcUuid -> registry.findAllByMetadata(
-                                NpcDialogueAdminRunner.CITIZENS_NPC_UUID_KEY,
+                                CitizensBindingMetadata.NPC_UUID_KEY,
                                 citizensNpcUuid.toString())
                         .stream()
-                        .filter(definition -> definition.metadataValue(NpcDialogueAdminRunner.TARGET_PROVIDER_KEY)
-                                .filter(NpcDialogueAdminRunner.CITIZENS_PROVIDER::equals)
+                        .filter(definition -> definition.metadataValue(CitizensBindingMetadata.TARGET_PROVIDER_KEY)
+                                .filter(CitizensBindingMetadata.TARGET_PROVIDER_VALUE::equals)
                                 .isPresent())
                         .anyMatch(definition -> definition.protectedEntity()))
                 .orElse(false);

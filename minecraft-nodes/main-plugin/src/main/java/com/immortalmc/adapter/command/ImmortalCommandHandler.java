@@ -19,6 +19,9 @@ public final class ImmortalCommandHandler {
         if ("npc-dialogue".equals(args[0].toLowerCase(Locale.ROOT))) {
             return resolveNpcDialogue(args);
         }
+        if ("quest".equals(args[0].toLowerCase(Locale.ROOT))) {
+            return resolveQuest(args);
+        }
         return ImmortalCommandAction.USAGE;
     }
 
@@ -61,6 +64,32 @@ public final class ImmortalCommandHandler {
         }
         if ("reload".equals(action)) {
             return ImmortalCommandAction.NPC_DIALOGUE_RELOAD;
+        }
+        return ImmortalCommandAction.USAGE;
+    }
+
+    private ImmortalCommandAction resolveQuest(String[] args) {
+        if (args.length < 2) {
+            return ImmortalCommandAction.USAGE;
+        }
+        String action = args[1].toLowerCase(Locale.ROOT);
+        if ("templates".equals(action) && args.length == 2) {
+            return ImmortalCommandAction.QUEST_TEMPLATES;
+        }
+        if ("bind".equals(action) && args.length == 3) {
+            return ImmortalCommandAction.QUEST_BIND;
+        }
+        if ("info".equals(action) && args.length == 2) {
+            return ImmortalCommandAction.QUEST_INFO;
+        }
+        if ("list".equals(action) && args.length == 2) {
+            return ImmortalCommandAction.QUEST_LIST;
+        }
+        if ("unbind".equals(action) && args.length == 2) {
+            return ImmortalCommandAction.QUEST_UNBIND;
+        }
+        if ("reload".equals(action) && args.length == 2) {
+            return ImmortalCommandAction.QUEST_RELOAD;
         }
         return ImmortalCommandAction.USAGE;
     }

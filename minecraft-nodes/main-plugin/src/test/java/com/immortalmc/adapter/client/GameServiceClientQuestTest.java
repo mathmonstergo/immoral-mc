@@ -27,6 +27,41 @@ class GameServiceClientQuestTest {
     private static final UUID OPERATION_ID = UUID.fromString("30000000-0000-0000-0000-000000000001");
 
     @Test
+    void fetchQuestProviderCatalogUsesGetAndDecodesAuthoritativeTemplateOrder() throws Exception {
+        AtomicReference<String> method = new AtomicReference<>();
+        withServer(server -> server.createContext("/api/v1/quest-providers", exchange -> {
+                    method.set(exchange.getRequestMethod());
+                    respond(exchange, 200, """
+                            {
+                              "contract_version":1,
+                              "revision":"sha256:definitions",
+                              "providers":[{
+                                "provider_id":"old-man",
+                                "display_name":"老村民",
+                                "main_quest_ids":["first-steps","second-step"],
+                                "side_quest_ids":["village-help"]
+                              }]
+                            }
+                            """);
+                }),
+                uri -> {
+                    QuestProviderCatalog catalog = new GameServiceClient(uri, HttpClient.newHttpClient())
+                            .fetchQuestProviderCatalog()
+                            .get(2, TimeUnit.SECONDS);
+
+                    assertEquals("GET", method.get());
+                    assertEquals(1, catalog.contractVersion());
+                    assertEquals("sha256:definitions", catalog.revision());
+                    assertEquals("old-man", catalog.providers().getFirst().providerId());
+                    assertEquals("老村民", catalog.providers().getFirst().displayName());
+                    assertEquals(
+                            List.of("first-steps", "second-step"),
+                            catalog.providers().getFirst().mainQuestIds());
+                    assertEquals(List.of("village-help"), catalog.providers().getFirst().sideQuestIds());
+                });
+    }
+
+    @Test
     void fetchQuestInteractionStatePostsProviderListAndDecodesCompleteSnakeCaseProjection() throws Exception {
         AtomicReference<String> method = new AtomicReference<>();
         AtomicReference<String> body = new AtomicReference<>();

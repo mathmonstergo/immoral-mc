@@ -147,6 +147,144 @@ MythicMobs combat/death fact -> ImmortalMC Adapter -> Game Service calculation
 Game Service result -> ImmortalMC presentation/reward delivery
 ```
 
+## Scenario: Citizens Quest Provider Authoring
+
+### 1. Scope / Trigger
+
+Trigger: an operator needs to attach an existing authoritative Game Service
+quest-provider template to a physical Citizens NPC without copying entity or
+Citizens UUIDs into YAML.
+
+### 2. Signatures
+
+Game Service catalog API:
+
+```http
+GET /api/v1/quest-providers
+```
+
+Minecraft authoring commands:
+
+```text
+/npc select <id|name>
+/immortal quest templates
+/immortal quest bind <provider-id>
+/immortal quest info
+/immortal quest list
+/immortal quest unbind
+/immortal quest reload
+```
+
+Citizens selection API:
+
+```java
+CitizensAPI.getDefaultNPCSelector().getSelected(commandSender)
+```
+
+### 3. Contracts
+
+The catalog response is typed and versioned:
+
+```json
+{
+  "contract_version": 1,
+  "revision": "sha256:...",
+  "providers": [
+    {
+      "provider_id": "old-man",
+      "display_name": "老村民",
+      "main_quest_ids": ["first-steps"],
+      "side_quest_ids": []
+    }
+  ]
+}
+```
+
+Game Service is the only provider-template source. The Adapter caches the last
+confirmed catalog only for command validation, listing, and tab completion; it
+must not mirror provider IDs in Paper configuration.
+
+Binding writes one normal `quest-provider` interaction with:
+
+```yaml
+target-provider: citizens
+citizens-npc-uuid: <Citizens persistent UUID>
+quest-provider-id: <validated provider ID>
+citizens-npc-id: <current numeric Citizens ID>
+citizens-npc-name: <current display name>
+```
+
+The persistent Citizens UUID is the routing identity. The Bukkit entity UUID
+and world in the interaction record are presentation fallbacks and may change
+after respawn. Each Citizens NPC has at most one quest-provider binding; one
+provider template may be reused by many Citizens NPCs. Rebind replaces only the
+selected NPC's old quest-provider binding. Unbind never deletes or despawns the
+Citizens NPC.
+
+HTTP catalog refresh runs asynchronously. Catalog confirmation, Bukkit/Citizens
+access, configuration writes, tab completion, and command messages stay on the
+Paper main thread.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| No player Citizens selection | Reject and instruct `/npc select <id|name>`; never fall back to look-at targeting |
+| Selected NPC is not spawned during bind | Reject without changing the previous binding |
+| No confirmed catalog | Bind fails closed; no interaction is written |
+| Unknown provider ID | Reject before removing or writing a binding |
+| Catalog refresh fails after an earlier success | Preserve the previous confirmed catalog and all bindings |
+| Rebind selected NPC | Remove that NPC's old quest-provider binding, then write the validated replacement |
+| Same provider bound to another NPC | Allow it; provider templates are reusable content |
+| Citizens NPC respawns or Paper restarts | Resolve click/proximity behavior by persistent Citizens UUID |
+| Unbind selected NPC | Remove ImmortalMC metadata only; keep the Citizens NPC intact |
+
+### 5. Good/Base/Bad Cases
+
+* Good: select NPC `1`, bind `old-man`, restart Paper, select NPC `1` again,
+  and `quest info` resolves the same binding by persistent Citizens UUID.
+* Base: `quest templates` lists provider IDs/display names and `quest bind`
+  confirms the selected NPC name, numeric ID, provider ID, and display name.
+* Bad: require an operator to paste a Bukkit entity UUID or Citizens UUID.
+* Bad: keep a duplicate provider list in `config.yml` and accept bindings while
+  Game Service has no confirmed definition for that ID.
+* Bad: use an implicit look-at fallback when no Citizens selection exists.
+
+### 6. Tests Required
+
+* Game Service integration test asserts the exact catalog response, provider
+  order, ordered main/side quest IDs, and definition revision.
+* Java HTTP-client test asserts `GET`, snake-case decoding, contract version,
+  and ordered quest lists.
+* Cache tests assert only the last confirmed catalog is exposed and a failed
+  refresh cannot erase it.
+* Command tests cover exact parser signatures and provider-ID tab completion.
+* Admin-runner tests cover player/selection/spawn validation, unknown provider
+  fail-closed behavior, rebind replacement, provider reuse across NPCs,
+  unbind-without-delete behavior, and persisted UUID metadata after reload.
+* Local Paper smoke test selects a real Citizens NPC, exercises
+  `info/bind/unbind/bind`, clicks into the quest flow, restarts Paper, and
+  verifies `info` still resolves the binding.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/immortal quest bind old-man <copied-entity-uuid>
+Paper config provider-ids: [old-man]
+Game Service outage -> accept unchecked binding
+```
+
+#### Correct
+
+```text
+/npc select 1
+/immortal quest bind old-man
+Citizens selection -> persistent NPC UUID -> validated cached catalog -> binding
+Catalog refresh failure -> preserve last confirmed catalog and existing binding
+```
+
 ## Testing Requirements
 
 Follow the architecture document's three-layer strategy:

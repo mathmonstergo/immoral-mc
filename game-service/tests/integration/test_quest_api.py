@@ -8,6 +8,7 @@ from immortal_mmo.player.service import PlayerService
 from immortal_mmo.quest.api import (
     accept_quest,
     get_quest_interaction_state,
+    get_quest_provider_catalog,
     turn_in_quest,
 )
 from immortal_mmo.quest.definitions import QUEST_CATALOG, QuestDefinitionCatalog
@@ -17,9 +18,28 @@ from immortal_mmo.quest.service import QuestService
 
 
 def test_quest_handlers_are_synchronous_for_fastapi_threadpool_dispatch() -> None:
+    assert inspect.iscoroutinefunction(get_quest_provider_catalog) is False
     assert inspect.iscoroutinefunction(get_quest_interaction_state) is False
     assert inspect.iscoroutinefunction(accept_quest) is False
     assert inspect.iscoroutinefunction(turn_in_quest) is False
+
+
+def test_provider_catalog_returns_authoritative_templates_and_revision() -> None:
+    response = TestClient(create_app()).get("/api/v1/quest-providers")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "contract_version": 1,
+        "revision": QUEST_CATALOG.revision,
+        "providers": [
+            {
+                "provider_id": "old-man",
+                "display_name": "老村民",
+                "main_quest_ids": ["first-steps"],
+                "side_quest_ids": [],
+            }
+        ],
+    }
 
 
 def login(client: TestClient, suffix: int = 1) -> dict:

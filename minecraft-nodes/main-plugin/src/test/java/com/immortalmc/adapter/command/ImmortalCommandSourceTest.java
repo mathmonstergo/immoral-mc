@@ -2,6 +2,7 @@ package com.immortalmc.adapter.command;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.immortalmc.adapter.citizens.CitizensNpcSelection;
 import com.immortalmc.adapter.content.EntityBinding;
 import com.immortalmc.adapter.content.EntityInteractionEntity;
 import java.util.Optional;
@@ -26,5 +27,19 @@ class ImmortalCommandSourceTest {
         ImmortalCommandSource source = ImmortalCommandSource.player(PLAYER_UUID, target, CITIZENS_UUID);
 
         assertEquals(Optional.of(CITIZENS_UUID), source.lookedAtCitizensNpcUuid());
+    }
+
+    @Test
+    void playerSourceCarriesNativeCitizensSelectionSeparatelyFromLookAtTarget() {
+        CitizensNpcSelection selection = new CitizensNpcSelection(
+                7,
+                "Guide",
+                CITIZENS_UUID,
+                Optional.empty());
+
+        ImmortalCommandSource source = ImmortalCommandSource.playerWithSelectedNpc(PLAYER_UUID, selection);
+
+        assertEquals(Optional.of(selection), source.selectedCitizensNpc());
+        assertEquals(Optional.empty(), source.lookedAtEntity());
     }
 }

@@ -36,6 +36,8 @@ class HealthCommandMessagesTest {
     void usageMessageShowsSupportedSubcommands() {
         HealthCommandMessages messages = new HealthCommandMessages();
 
-        assertEquals("Usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue>", messages.usage());
+        assertEquals(
+                "Usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue|quest>",
+                messages.usage());
     }
 }

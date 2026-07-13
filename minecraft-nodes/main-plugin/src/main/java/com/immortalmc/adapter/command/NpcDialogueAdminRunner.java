@@ -1,5 +1,6 @@
 package com.immortalmc.adapter.command;
 
+import com.immortalmc.adapter.citizens.CitizensBindingMetadata;
 import com.immortalmc.adapter.content.EntityInteractionDefinition;
 import com.immortalmc.adapter.content.EntityInteractionEntity;
 import com.immortalmc.adapter.content.EntityInteractionRegistry;
@@ -13,9 +14,9 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 public final class NpcDialogueAdminRunner {
-    public static final String TARGET_PROVIDER_KEY = "target-provider";
-    public static final String CITIZENS_PROVIDER = "citizens";
-    public static final String CITIZENS_NPC_UUID_KEY = "citizens-npc-uuid";
+    public static final String TARGET_PROVIDER_KEY = CitizensBindingMetadata.TARGET_PROVIDER_KEY;
+    public static final String CITIZENS_PROVIDER = CitizensBindingMetadata.TARGET_PROVIDER_VALUE;
+    public static final String CITIZENS_NPC_UUID_KEY = CitizensBindingMetadata.NPC_UUID_KEY;
 
     private final EntityInteractionRegistry interactionRegistry;
     private final NpcDialogueRegistry dialogueRegistry;

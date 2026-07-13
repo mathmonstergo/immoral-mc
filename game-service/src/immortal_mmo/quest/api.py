@@ -8,10 +8,12 @@ from immortal_mmo.quest.schemas import (
     QuestInteractionStateRequest,
     QuestMutationRequest,
     QuestMutationResult,
+    QuestProviderCatalog,
 )
 from immortal_mmo.quest.service import QuestService
 
 router = APIRouter(prefix="/api/v1/players", tags=["quests"])
+catalog_router = APIRouter(prefix="/api/v1", tags=["quests"])
 
 
 def get_quest_service(request: Request) -> QuestService:
@@ -20,6 +22,16 @@ def get_quest_service(request: Request) -> QuestService:
 
 quest_service_dependency = Depends(get_quest_service)
 idempotency_key_header = Header(alias="Idempotency-Key")
+
+
+@catalog_router.get(
+    "/quest-providers",
+    response_model=QuestProviderCatalog,
+)
+def get_quest_provider_catalog(
+    service: QuestService = quest_service_dependency,
+) -> QuestProviderCatalog:
+    return service.get_provider_catalog()
 
 
 @router.post(

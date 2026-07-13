@@ -12,5 +12,11 @@ public enum ImmortalCommandAction {
     NPC_DIALOGUE_LIST,
     NPC_DIALOGUE_REMOVE,
     NPC_DIALOGUE_RELOAD,
+    QUEST_TEMPLATES,
+    QUEST_BIND,
+    QUEST_INFO,
+    QUEST_LIST,
+    QUEST_UNBIND,
+    QUEST_RELOAD,
     USAGE
 }

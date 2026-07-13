@@ -1,5 +1,6 @@
 package com.immortalmc.adapter.command;
 
+import com.immortalmc.adapter.citizens.CitizensNpcSelection;
 import com.immortalmc.adapter.content.EntityBinding;
 import com.immortalmc.adapter.content.EntityInteractionEntity;
 import java.util.Objects;
@@ -12,32 +13,34 @@ public record ImmortalCommandSource(
         Optional<EntityInteractionEntity> lookedAtEntity,
         Optional<UUID> lookedAtCitizensNpcUuid,
         Optional<Function<String, EntityInteractionEntity>> entitySpawner,
-        Optional<Function<EntityBinding, Boolean>> entityRemover) {
+        Optional<Function<EntityBinding, Boolean>> entityRemover,
+        Optional<CitizensNpcSelection> selectedCitizensNpc) {
     public ImmortalCommandSource {
         Objects.requireNonNull(minecraftUuid, "minecraftUuid");
         Objects.requireNonNull(lookedAtEntity, "lookedAtEntity");
         Objects.requireNonNull(lookedAtCitizensNpcUuid, "lookedAtCitizensNpcUuid");
         Objects.requireNonNull(entitySpawner, "entitySpawner");
         Objects.requireNonNull(entityRemover, "entityRemover");
+        Objects.requireNonNull(selectedCitizensNpc, "selectedCitizensNpc");
     }
 
     public static ImmortalCommandSource console() {
         return new ImmortalCommandSource(
-                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
-    }
-
-    public static ImmortalCommandSource player(UUID minecraftUuid) {
-        return new ImmortalCommandSource(
-                Optional.of(Objects.requireNonNull(minecraftUuid, "minecraftUuid")),
+                Optional.empty(),
+                Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty());
     }
 
+    public static ImmortalCommandSource player(UUID minecraftUuid) {
+        return basePlayer(minecraftUuid, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+    }
+
     public static ImmortalCommandSource player(UUID minecraftUuid, EntityInteractionEntity lookedAtEntity) {
-        return new ImmortalCommandSource(
-                Optional.of(Objects.requireNonNull(minecraftUuid, "minecraftUuid")),
+        return basePlayer(
+                minecraftUuid,
                 Optional.of(Objects.requireNonNull(lookedAtEntity, "lookedAtEntity")),
                 Optional.empty(),
                 Optional.empty(),
@@ -48,8 +51,8 @@ public record ImmortalCommandSource(
             UUID minecraftUuid,
             EntityInteractionEntity lookedAtEntity,
             UUID citizensNpcUuid) {
-        return new ImmortalCommandSource(
-                Optional.of(Objects.requireNonNull(minecraftUuid, "minecraftUuid")),
+        return basePlayer(
+                minecraftUuid,
                 Optional.of(Objects.requireNonNull(lookedAtEntity, "lookedAtEntity")),
                 Optional.of(Objects.requireNonNull(citizensNpcUuid, "citizensNpcUuid")),
                 Optional.empty(),
@@ -65,7 +68,8 @@ public record ImmortalCommandSource(
                 Optional.of(Objects.requireNonNull(lookedAtEntity, "lookedAtEntity")),
                 Optional.empty(),
                 Optional.empty(),
-                Optional.of(Objects.requireNonNull(entityRemover, "entityRemover")));
+                Optional.of(Objects.requireNonNull(entityRemover, "entityRemover")),
+                Optional.empty());
     }
 
     public static ImmortalCommandSource playerWithSpawner(
@@ -76,7 +80,35 @@ public record ImmortalCommandSource(
                 Optional.empty(),
                 Optional.empty(),
                 Optional.of(Objects.requireNonNull(entitySpawner, "entitySpawner")),
+                Optional.empty(),
                 Optional.empty());
+    }
+
+    public static ImmortalCommandSource playerWithSelectedNpc(
+            UUID minecraftUuid,
+            CitizensNpcSelection selectedCitizensNpc) {
+        return basePlayer(
+                minecraftUuid,
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(Objects.requireNonNull(selectedCitizensNpc, "selectedCitizensNpc")));
+    }
+
+    public static ImmortalCommandSource player(
+            UUID minecraftUuid,
+            Optional<EntityInteractionEntity> lookedAtEntity,
+            Optional<UUID> lookedAtCitizensNpcUuid,
+            Function<String, EntityInteractionEntity> entitySpawner,
+            Function<EntityBinding, Boolean> entityRemover,
+            Optional<CitizensNpcSelection> selectedCitizensNpc) {
+        return new ImmortalCommandSource(
+                Optional.of(Objects.requireNonNull(minecraftUuid, "minecraftUuid")),
+                Objects.requireNonNull(lookedAtEntity, "lookedAtEntity"),
+                Objects.requireNonNull(lookedAtCitizensNpcUuid, "lookedAtCitizensNpcUuid"),
+                Optional.of(Objects.requireNonNull(entitySpawner, "entitySpawner")),
+                Optional.of(Objects.requireNonNull(entityRemover, "entityRemover")),
+                Objects.requireNonNull(selectedCitizensNpc, "selectedCitizensNpc"));
     }
 
     public static ImmortalCommandSource player(
@@ -85,12 +117,13 @@ public record ImmortalCommandSource(
             Optional<UUID> lookedAtCitizensNpcUuid,
             Function<String, EntityInteractionEntity> entitySpawner,
             Function<EntityBinding, Boolean> entityRemover) {
-        return new ImmortalCommandSource(
-                Optional.of(Objects.requireNonNull(minecraftUuid, "minecraftUuid")),
-                Objects.requireNonNull(lookedAtEntity, "lookedAtEntity"),
-                Objects.requireNonNull(lookedAtCitizensNpcUuid, "lookedAtCitizensNpcUuid"),
-                Optional.of(Objects.requireNonNull(entitySpawner, "entitySpawner")),
-                Optional.of(Objects.requireNonNull(entityRemover, "entityRemover")));
+        return player(
+                minecraftUuid,
+                lookedAtEntity,
+                lookedAtCitizensNpcUuid,
+                entitySpawner,
+                entityRemover,
+                Optional.empty());
     }
 
     public static ImmortalCommandSource player(
@@ -98,6 +131,27 @@ public record ImmortalCommandSource(
             Optional<EntityInteractionEntity> lookedAtEntity,
             Function<String, EntityInteractionEntity> entitySpawner,
             Function<EntityBinding, Boolean> entityRemover) {
-        return player(minecraftUuid, lookedAtEntity, Optional.empty(), entitySpawner, entityRemover);
+        return player(
+                minecraftUuid,
+                lookedAtEntity,
+                Optional.empty(),
+                entitySpawner,
+                entityRemover,
+                Optional.empty());
+    }
+
+    private static ImmortalCommandSource basePlayer(
+            UUID minecraftUuid,
+            Optional<EntityInteractionEntity> lookedAtEntity,
+            Optional<UUID> lookedAtCitizensNpcUuid,
+            Optional<Function<String, EntityInteractionEntity>> entitySpawner,
+            Optional<CitizensNpcSelection> selectedCitizensNpc) {
+        return new ImmortalCommandSource(
+                Optional.of(Objects.requireNonNull(minecraftUuid, "minecraftUuid")),
+                lookedAtEntity,
+                lookedAtCitizensNpcUuid,
+                entitySpawner,
+                Optional.empty(),
+                selectedCitizensNpc);
     }
 }

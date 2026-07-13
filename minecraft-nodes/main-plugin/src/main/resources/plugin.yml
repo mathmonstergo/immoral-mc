@@ -11,7 +11,7 @@ softdepend:
 commands:
   immortal:
     description: ImmortalMC adapter operations.
-    usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue>
+    usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue|quest>
     permission: immortalmc.command
 permissions:
   immortalmc.command:

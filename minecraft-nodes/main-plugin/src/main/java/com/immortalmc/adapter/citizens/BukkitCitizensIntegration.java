@@ -27,6 +27,9 @@ public final class BukkitCitizensIntegration {
         plugin.getServer().getPluginManager().registerEvents(
                 new CitizensNpcInteractionListener(handler),
                 plugin);
-        return new CitizensIntegrationHandle(resolver, new BukkitQuestNpcSource(registry));
+        return new CitizensIntegrationHandle(
+                resolver,
+                new BukkitCitizensNpcSelector(),
+                new BukkitQuestNpcSource(registry));
     }
 }

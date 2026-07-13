@@ -87,6 +87,19 @@ public final class GameServiceClient {
                 "quest interaction state");
     }
 
+    public CompletableFuture<QuestProviderCatalog> fetchQuestProviderCatalog() {
+        HttpRequest request = newRequestBuilder("/api/v1/quest-providers")
+                .GET()
+                .build();
+
+        return httpClient
+                .sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenApply(response -> parseJsonResponse(
+                        response,
+                        QuestProviderCatalog.class,
+                        "quest provider catalog"));
+    }
+
     public CompletableFuture<QuestMutationResult> acceptQuest(
             UUID accountId, String questId, String providerId, UUID operationId) {
         return mutateQuest(accountId, questId, providerId, operationId, "accept");

@@ -12,6 +12,8 @@ import com.immortalmc.adapter.command.ImmortalCommandHandler;
 import com.immortalmc.adapter.command.ImmortalCommandService;
 import com.immortalmc.adapter.command.NpcDialogueAdminMessages;
 import com.immortalmc.adapter.command.NpcDialogueAdminRunner;
+import com.immortalmc.adapter.command.QuestProviderAdminMessages;
+import com.immortalmc.adapter.command.QuestProviderAdminRunner;
 import com.immortalmc.adapter.command.SpiritRootCommandMessages;
 import com.immortalmc.adapter.command.SpiritRootCommandRunner;
 import com.immortalmc.adapter.command.SpiritRootDetectorAdminMessages;
@@ -48,6 +50,7 @@ import com.immortalmc.adapter.quest.QuestNpcCoordinator;
 import com.immortalmc.adapter.quest.QuestNpcSource;
 import com.immortalmc.adapter.quest.QuestOfferSessionStore;
 import com.immortalmc.adapter.quest.QuestPlayerPosition;
+import com.immortalmc.adapter.quest.QuestProviderCatalogCache;
 import com.immortalmc.adapter.quest.QuestRequestCoordinator;
 import com.immortalmc.adapter.session.PlayerSessionCache;
 import java.net.http.HttpClient;
@@ -91,6 +94,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         AdapterLogger adapterLogger = new PaperAdapterLogger(getLogger());
         GameServiceClient gameServiceClient =
                 new GameServiceClient(settings.gameServiceBaseUri(), HttpClient.newHttpClient());
+        QuestProviderCatalogCache questProviderCatalog = new QuestProviderCatalogCache();
         sessionCache = new PlayerSessionCache();
         QuestInteractionCache questCache = new QuestInteractionCache();
         questRequests = new QuestRequestCoordinator(
@@ -135,14 +139,6 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 npcDialogueRegistry,
                 new NpcDialogueAdminMessages(),
                 adapterLogger);
-        ImmortalCommandService commandService = new ImmortalCommandService(
-                new ImmortalCommandHandler(),
-                healthCommandRunner,
-                spiritRootCommandRunner,
-                detectorAdminRunner,
-                npcDialogueAdminRunner,
-                messages);
-
         PlayerJoinLoginService playerJoinLoginService = new PlayerJoinLoginService(
                 gameServiceClient::loginPlayer,
                 sessionCache,
@@ -192,6 +188,21 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 adapterLogger);
         CitizensNpcResolver citizensNpcResolver = citizensIntegration.resolver();
         QuestNpcSource questNpcSource = citizensIntegration.questNpcSource();
+        QuestProviderAdminRunner questProviderAdminRunner = new QuestProviderAdminRunner(
+                entityInteractionRegistry,
+                questProviderCatalog,
+                gameServiceClient::fetchQuestProviderCatalog,
+                new QuestProviderAdminMessages(),
+                adapterLogger,
+                task -> getServer().getScheduler().runTask(this, task));
+        ImmortalCommandService commandService = new ImmortalCommandService(
+                new ImmortalCommandHandler(),
+                healthCommandRunner,
+                spiritRootCommandRunner,
+                detectorAdminRunner,
+                npcDialogueAdminRunner,
+                questProviderAdminRunner,
+                messages);
         QuestNpcChunkIndex questNpcIndex = new QuestNpcChunkIndex();
         long questScanIntervalTicks = positiveLong(
                 getConfig().getLong("quest.scan-interval-ticks", 10L),
@@ -218,11 +229,16 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 maxPlayersPerScan);
 
         ImmortalBukkitCommandExecutor commandExecutor =
-                new ImmortalBukkitCommandExecutor(commandService, citizensNpcResolver);
+                new ImmortalBukkitCommandExecutor(
+                        commandService,
+                        citizensNpcResolver,
+                        citizensIntegration.selector(),
+                        questProviderCatalog);
         PluginCommand immortalCommand =
                 Objects.requireNonNull(getCommand("immortal"), "Command 'immortal' is missing from plugin.yml");
         immortalCommand.setExecutor(commandExecutor);
         immortalCommand.setTabCompleter(commandExecutor);
+        refreshQuestProviderCatalog(gameServiceClient, questProviderCatalog, adapterLogger);
 
         getServer().getPluginManager().registerEvents(new ImmortalPlayerJoinListener(playerJoinLoginService), this);
         getServer().getPluginManager().registerEvents(
@@ -293,6 +309,24 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                     }
                     questScoreboards.render(result.account().minecraftUuid(), state.trackedQuest());
                 });
+    }
+
+    private void refreshQuestProviderCatalog(
+            GameServiceClient gameServiceClient,
+            QuestProviderCatalogCache catalogCache,
+            AdapterLogger logger) {
+        gameServiceClient.fetchQuestProviderCatalog().whenComplete((catalog, error) ->
+                getServer().getScheduler().runTask(this, () -> {
+                    if (error != null) {
+                        logger.warn("quest_provider_catalog_startup_refresh_failed reason=" + error.getMessage());
+                        return;
+                    }
+                    catalogCache.confirm(catalog);
+                    logger.info("quest_provider_catalog_startup_refreshed revision="
+                            + catalog.revision()
+                            + " providers="
+                            + catalog.providers().size());
+                }));
     }
 
     private void cleanupPlayer(UUID playerId) {

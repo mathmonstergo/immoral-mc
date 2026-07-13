@@ -16,7 +16,8 @@ class PluginResourceTest {
         assertTrue(pluginYml.contains("main: com.immortalmc.adapter.ImmortalMainPlugin"));
         assertTrue(pluginYml.contains("api-version: '1.21.11'"));
         assertTrue(pluginYml.contains("immortal:"));
-        assertTrue(pluginYml.contains("usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue>"));
+        assertTrue(pluginYml.contains(
+                "usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue|quest>"));
         assertTrue(pluginYml.contains("com.fasterxml.jackson.core:jackson-databind:2.18.2"));
     }
 

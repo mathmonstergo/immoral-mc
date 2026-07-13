@@ -1,10 +1,12 @@
 package com.immortalmc.adapter.command;
 
 import com.immortalmc.adapter.citizens.CitizensNpcResolver;
+import com.immortalmc.adapter.citizens.CitizensNpcSelector;
 import com.immortalmc.adapter.content.EntityBinding;
 import com.immortalmc.adapter.content.EntityInteractionEntity;
 import com.immortalmc.adapter.targeting.EntityTargetCandidate;
 import com.immortalmc.adapter.targeting.EntityTargetSelector;
+import com.immortalmc.adapter.quest.QuestProviderCatalogCache;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -29,20 +31,40 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
     private static final double MAX_TARGET_DISTANCE = 8.0;
     private static final EntityTargetSelector TARGET_SELECTOR = new EntityTargetSelector(MAX_TARGET_DISTANCE);
     private static final List<String> ROOT_SUBCOMMANDS =
-            List.of("health", "spirit-root", "spirit-root-detector", "npc-dialogue");
+            List.of("health", "spirit-root", "spirit-root-detector", "npc-dialogue", "quest");
 
     private final ImmortalCommandService commandService;
     private final CitizensNpcResolver citizensNpcResolver;
+    private final CitizensNpcSelector citizensNpcSelector;
+    private final QuestProviderCatalogCache questProviderCatalog;
 
     public ImmortalBukkitCommandExecutor(ImmortalCommandService commandService) {
-        this(commandService, CitizensNpcResolver.unavailable());
+        this(
+                commandService,
+                CitizensNpcResolver.unavailable(),
+                CitizensNpcSelector.unavailable(),
+                new QuestProviderCatalogCache());
     }
 
     public ImmortalBukkitCommandExecutor(
             ImmortalCommandService commandService,
             CitizensNpcResolver citizensNpcResolver) {
+        this(
+                commandService,
+                citizensNpcResolver,
+                CitizensNpcSelector.unavailable(),
+                new QuestProviderCatalogCache());
+    }
+
+    public ImmortalBukkitCommandExecutor(
+            ImmortalCommandService commandService,
+            CitizensNpcResolver citizensNpcResolver,
+            CitizensNpcSelector citizensNpcSelector,
+            QuestProviderCatalogCache questProviderCatalog) {
         this.commandService = Objects.requireNonNull(commandService, "commandService");
         this.citizensNpcResolver = Objects.requireNonNull(citizensNpcResolver, "citizensNpcResolver");
+        this.citizensNpcSelector = Objects.requireNonNull(citizensNpcSelector, "citizensNpcSelector");
+        this.questProviderCatalog = Objects.requireNonNull(questProviderCatalog, "questProviderCatalog");
     }
 
     @Override
@@ -61,6 +83,10 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
             @NotNull Command command,
             @NotNull String label,
             @NotNull String[] args) {
+        return complete(args);
+    }
+
+    List<String> complete(String[] args) {
         if (args.length != 1) {
             if (args.length == 2 && "spirit-root-detector".equals(args[0].toLowerCase(Locale.ROOT))) {
                 String prefix = args[1].toLowerCase(Locale.ROOT);
@@ -72,6 +98,20 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
                 String prefix = args[1].toLowerCase(Locale.ROOT);
                 return List.of("set", "list", "remove", "reload").stream()
                         .filter(subcommand -> subcommand.startsWith(prefix))
+                        .toList();
+            }
+            if (args.length == 2 && "quest".equals(args[0].toLowerCase(Locale.ROOT))) {
+                String prefix = args[1].toLowerCase(Locale.ROOT);
+                return List.of("templates", "bind", "info", "list", "unbind", "reload").stream()
+                        .filter(subcommand -> subcommand.startsWith(prefix))
+                        .toList();
+            }
+            if (args.length == 3
+                    && "quest".equals(args[0].toLowerCase(Locale.ROOT))
+                    && "bind".equals(args[1].toLowerCase(Locale.ROOT))) {
+                String prefix = args[2].toLowerCase(Locale.ROOT);
+                return questProviderCatalog.providerIds().stream()
+                        .filter(providerId -> providerId.toLowerCase(Locale.ROOT).startsWith(prefix))
                         .toList();
             }
             return List.of();
@@ -90,7 +130,8 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
                     lookedAtEntity,
                     lookedAtEntity.flatMap(entity -> resolveCitizensNpcUuid(player, entity)),
                     detectorId -> spawnSpiritRootDetector(player, detectorId),
-                    binding -> removeEntity(player, binding));
+                    binding -> removeEntity(player, binding),
+                    citizensNpcSelector.selectedNpc(player));
         }
         return ImmortalCommandSource.console();
     }

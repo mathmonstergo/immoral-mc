@@ -94,3 +94,16 @@ class QuestMutationResult(BaseModel):
     changed: bool
     quest: ProviderQuestState
     interaction_state: QuestInteractionState
+
+
+class QuestProviderTemplate(BaseModel):
+    provider_id: str
+    display_name: str
+    main_quest_ids: list[str]
+    side_quest_ids: list[str]
+
+
+class QuestProviderCatalog(BaseModel):
+    contract_version: Literal[1] = 1
+    revision: str
+    providers: list[QuestProviderTemplate]

@@ -39,7 +39,9 @@ from immortal_mmo.quest.schemas import (
     QuestInteractionState,
     QuestMutationResult,
     QuestObjectiveProjection,
+    QuestProviderCatalog,
     QuestProviderProjection,
+    QuestProviderTemplate,
     QuestRevisionVector,
     TrackedQuest,
 )
@@ -100,6 +102,20 @@ class QuestService:
         self._repository = repository or InMemoryQuestRepository()
         self._catalog = catalog
         self._clock = clock or (lambda: datetime.now(UTC))
+
+    def get_provider_catalog(self) -> QuestProviderCatalog:
+        return QuestProviderCatalog(
+            revision=self._catalog.revision,
+            providers=[
+                QuestProviderTemplate(
+                    provider_id=provider.provider_id,
+                    display_name=provider.display_name,
+                    main_quest_ids=list(provider.main_quest_ids),
+                    side_quest_ids=list(provider.side_quest_ids),
+                )
+                for provider in self._catalog.providers
+            ],
+        )
 
     def get_interaction_state(
         self,

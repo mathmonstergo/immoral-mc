@@ -35,7 +35,9 @@ class ImmortalCommandServiceTest {
 
         service.execute(new String[] {}, sentMessages::add);
 
-        assertEquals(List.of("Usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue>"), sentMessages);
+        assertEquals(
+                List.of("Usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue|quest>"),
+                sentMessages);
     }
 
     @Test
