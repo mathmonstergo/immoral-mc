@@ -1,9 +1,12 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
 from tests.support.fakes import FakeStore, FakeUnitOfWorkFactory, processing_operation
 
-from immortal_mmo.quest.repository import QuestOperationCommand
+from immortal_mmo.quest.repository import QuestOperationCommand, QuestOperationState
+
+NOW = datetime(2026, 7, 14, tzinfo=UTC)
 
 
 @pytest.mark.asyncio
@@ -75,3 +78,42 @@ async def test_rollback_discards_and_closes_state_that_cannot_later_commit() -> 
 
     async with factory() as uow:
         assert await uow.players.lock_account(account.account_id) is None
+
+
+@pytest.mark.asyncio
+async def test_finalized_fake_operation_is_immutable() -> None:
+    factory = FakeUnitOfWorkFactory(FakeStore())
+    operation_id = UUID(int=20)
+    operation = processing_operation(
+        operation_id=operation_id,
+        account_id=UUID(int=21),
+        life_id=UUID(int=22),
+        command=QuestOperationCommand.ACCEPT,
+        quest_id="first-steps",
+        provider_id="old-man",
+        request_fingerprint="b" * 64,
+    )
+
+    async with factory() as uow:
+        await uow.quests.reserve_operation(operation)
+        await uow.quests.finalize_operation(
+            operation_id,
+            state=QuestOperationState.SUCCEEDED,
+            changed=True,
+            response_status=200,
+            response_content_type="application/json",
+            response_body=b"{}",
+            response_contract_version=1,
+            finalized_at=NOW,
+        )
+        with pytest.raises(RuntimeError, match="finalized"):
+            await uow.quests.finalize_operation(
+                operation_id,
+                state=QuestOperationState.SUCCEEDED,
+                changed=True,
+                response_status=200,
+                response_content_type="application/json",
+                response_body=b"{}",
+                response_contract_version=1,
+                finalized_at=NOW,
+            )

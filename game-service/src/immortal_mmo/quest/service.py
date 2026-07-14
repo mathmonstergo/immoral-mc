@@ -264,8 +264,8 @@ class QuestService:
         )
         quest_revision = await uow.quests.get_quest_revision(facts.life_id, for_update=True)
         progresses = await uow.quests.get_progresses(facts.life_id, self._catalog_quest_ids())
+        self._validate_progress_versions(progresses)
         progress = progresses.get(quest.quest_id)
-        self._check_definition_version(progress, quest)
         current = self._project_quest(quest, facts, progresses)
 
         changed = False
@@ -410,7 +410,10 @@ class QuestService:
 
     def _validate_progress_versions(self, progresses: dict[str, QuestProgress]) -> None:
         for quest_id, progress in progresses.items():
-            self._check_definition_version(progress, self._catalog.get_quest(quest_id))
+            definition = self._catalog.find_quest(quest_id)
+            if definition is None:
+                raise QuestDefinitionVersionMismatchError()
+            self._check_definition_version(progress, definition)
 
     def _build_interaction_state(
         self,

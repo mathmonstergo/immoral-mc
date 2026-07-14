@@ -175,3 +175,45 @@ async def test_quest_read_rejects_stale_prerequisite_progress() -> None:
 
     with pytest.raises(QuestDefinitionVersionMismatchError):
         await quests.get_interaction_state(account_id, ["old-man"])
+
+
+@pytest.mark.asyncio
+async def test_accept_freezes_stale_prerequisite_definition_mismatch() -> None:
+    prior = replace(QUEST_CATALOG.get_quest("first-steps"), quest_id="prior")
+    follow_up = replace(
+        QUEST_CATALOG.get_quest("first-steps"),
+        quest_id="follow-up",
+        prerequisites=("prior",),
+    )
+    provider = QuestProviderDefinition(
+        provider_id="old-man",
+        display_name="老村民",
+        main_quest_ids=("follow-up",),
+        side_quest_ids=(),
+    )
+    catalog = QuestDefinitionCatalog(quests=(prior, follow_up), providers=(provider,))
+    _, _, factory, account_id = await logged_in_services()
+    quests = QuestService(factory, catalog, clock=lambda: NOW)
+    async with factory() as uow:
+        facts = await uow.players.get_current_life_facts(account_id, for_update=True)
+        assert facts is not None
+        uow._working_state.progresses[(facts.life_id, "prior")] = QuestProgress(
+            life_id=facts.life_id,
+            quest_id="prior",
+            definition_version=999,
+            status=QuestProgressStatus.COMPLETED,
+            accepted_at=NOW,
+            completed_at=NOW,
+            revision=1,
+        )
+        await uow.commit()
+
+    response = await quests.accept(
+        account_id,
+        "follow-up",
+        "old-man",
+        UUID(int=23),
+    )
+
+    assert response.status_code == 409
+    assert body(response)["error"]["code"] == "quest.definition_version_mismatch"

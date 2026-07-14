@@ -164,6 +164,8 @@ class FakeQuestRepository:
     ) -> StoredQuestOperation:
         self._ensure_active()
         operation = self._state.operations[operation_id]
+        if operation.state is not QuestOperationState.PROCESSING:
+            raise RuntimeError("Quest operation is already finalized")
         finalized = replace(
             operation,
             state=state,
