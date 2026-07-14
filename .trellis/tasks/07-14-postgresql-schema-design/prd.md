@@ -42,6 +42,17 @@ clear path for cultivation, items, combat, reincarnation, and social systems.
 
 ## Requirements
 
+* Treat this pre-production 0-to-1 implementation as a clean break. Do not add
+  compatibility wrappers, dual sync/async paths, legacy repository adapters,
+  runtime fallbacks, or automatic development-data migrations.
+* Refactor the Game Service end to end to async FastAPI/application/repository
+  contracts backed by SQLAlchemy `AsyncSession` and asyncpg.
+* Production composition requires PostgreSQL. Tests use explicit injected fakes
+  or test databases; services never silently instantiate in-memory storage.
+* Replace presentation-shaped Player internals with domain models that contain
+  stable English codes. Keep localized Chinese spirit-root fields in a separate
+  API mapper because they are the intended current Paper presentation, not a
+  database or compatibility model.
 * Preserve permanent account identity separately from per-life state.
 * First migration scope is the core vertical slice only: accounts, lives,
   spirit-root state, quest progress, and quest operation idempotency.
@@ -83,6 +94,9 @@ clear path for cultivation, items, combat, reincarnation, and social systems.
   committed in one short transaction. A crash rolls back the whole transaction,
   so leases, worker ownership, mutation recovery snapshots, and a separate
   operation archive table are unnecessary.
+* Quest mutation success and domain-failure responses are serialized once and
+  frozen as status, content type, contract version, and raw body bytes. Replays
+  return those bytes directly without rebuilding Pydantic models or errors.
 * Quest objective progress is not stored as a second mutable truth source. A
   quest projection loads current-life facts, persisted `quest_progress` rows,
   and version-controlled quest definitions, then derives each quest state
@@ -221,8 +235,8 @@ values and database-side atomic increments.
   normal update/delete path.
 * `quest_progress` has primary key `(life_id, quest_id)` and only permits
   `active -> completed`.
-* `quest_operations` has primary key `(life_id, operation_id)`; reusing an
-  operation ID with a different request fingerprint is a conflict.
+* `quest_operations` has globally unique primary key `operation_id`; it stores
+  the original account/life and rejects reuse with a different fingerprint.
 
 ### Projection and transaction flow
 
@@ -237,10 +251,11 @@ frozen response to the operation ledger atomically. A crash before commit rolls
 back the operation and mutation together; a retry starts again. A retry after
 commit replays the frozen result instead of re-evaluating current state.
 
-The initial migration uses SQLAlchemy 2.x repositories and Alembic. It retains
-the in-memory repositories for fast unit tests behind the same interfaces. The
-deployment gate includes backup/PITR configuration and a real restore drill;
-schema correctness alone is not an operational backup strategy.
+The initial migration uses async SQLAlchemy 2.x repositories and Alembic.
+Production code contains no in-memory fallback. Unit tests may inject explicit
+fakes from test support. The deployment gate includes backup/PITR configuration
+and a real restore drill; schema correctness alone is not an operational backup
+strategy.
 
 ## Implementation Plan (after design approval)
 
@@ -250,8 +265,8 @@ schema correctness alone is not an operational backup strategy.
    repositories with concurrency tests.
 3. Implement quest aggregate revision, progress, and compact operation ledger
    repositories with transactional/idempotency tests.
-4. Make PlayerService and QuestService use the PostgreSQL repositories in the
-   application composition while preserving in-memory test injection.
+4. Make PlayerService and QuestService async and require an explicit UoW;
+   production composition uses PostgreSQL and tests inject explicit fakes.
 5. Add restart, duplicate-request, life-isolation, and migration upgrade tests;
    document backup/restore and player-history query paths.
 
@@ -265,13 +280,23 @@ schema correctness alone is not an operational backup strategy.
       timestamps, revision/concurrency strategy, and JSONB boundaries.
 * [x] The design includes restart, retry, duplicate-request, and future evolution
       considerations.
+* [ ] The implementation removes the obsolete synchronous repository/service
+      contracts and lease/waiter quest state machine instead of adapting them.
+* [ ] Production startup requires PostgreSQL; no service constructor or app
+      composition path silently creates an in-memory durable store.
+* [ ] Empty-database migration, concurrency, restart persistence, exact
+      idempotency replay, backend checks, and Paper regression checks pass.
 
 ## Definition of Done (team quality bar)
 
-* Design reviewed and approved by the user before implementation.
-* No implementation or migration code is written before design approval.
-* Approved design is saved under `docs/superpowers/specs/` and linked here.
-* Implementation plan is created only after the design review gate.
+* Design is reviewed, approved, and saved under `docs/superpowers/specs/`.
+* The implementation plan is executed as a clean break: obsolete code and tests
+  are deleted or rewritten, with no compatibility wrapper or dual path.
+* PostgreSQL/Alembic, async services, shared Unit of Work, Player persistence,
+  Quest persistence, readiness, and explicit test fakes are implemented.
+* Required quality checks and restart/idempotency smoke tests pass.
+* Concrete database conventions learned during implementation are recorded in
+  `.trellis/spec/`, and the completed Trellis task is archived.
 
 ## Out of Scope (initial discussion)
 

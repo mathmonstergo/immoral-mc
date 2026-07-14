@@ -63,13 +63,19 @@ are not automatically copied into a new inventory.
   snapshots or flexible future payloads.
 * Display text is not identity. Stable codes are persisted; localized labels
   are derived from version-controlled definitions.
+* Internal Player domain models contain only stable codes and authoritative
+  facts. HTTP/Paper presentation models are separate and derive the current
+  Chinese labels/elements at the API boundary; database mappers never reverse-
+  parse localized strings.
 * Production must fail startup/readiness when PostgreSQL is unavailable. It must
   never silently fall back to an in-memory repository.
-* In-memory repositories remain injectable test doubles.
-* The first persistence slice uses SQLAlchemy's synchronous engine with psycopg
-  3. This matches the existing synchronous FastAPI/service contracts and avoids
-  event-loop bridging. Async conversion is deferred until measured concurrency
-  requires it.
+* This is a pre-production 0-to-1 clean break. Existing synchronous services,
+  lease-based in-memory quest operations, API internals, tests, and disposable
+  development data do not receive compatibility adapters.
+* The implementation is async end to end: FastAPI routes, application services,
+  repositories, Unit of Work, SQLAlchemy `AsyncSession`, and asyncpg.
+* Tests may inject explicit fakes, but services have no default in-memory
+  repository and runtime composition has no fallback path.
 
 ## 4. Core Schema
 
@@ -81,7 +87,8 @@ Permanent login-linked identity.
 CREATE TABLE accounts (
     account_id       UUID PRIMARY KEY,
     minecraft_uuid   UUID NOT NULL UNIQUE,
-    last_known_name  VARCHAR(16) NOT NULL,
+    last_known_name  VARCHAR(16) NOT NULL
+                     CHECK (last_known_name ~ '^[A-Za-z0-9_]{3,16}$'),
     revision         BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0),
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -402,6 +409,32 @@ CREATE INDEX ix_quest_progress_active_life
 
 CREATE INDEX ix_quest_progress_revision
     ON quest_progress (life_id, revision);
+
+CREATE FUNCTION prevent_quest_progress_reversal_or_delete()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'quest progress rows are not deleted';
+    END IF;
+    IF OLD.life_id IS DISTINCT FROM NEW.life_id
+       OR OLD.quest_id IS DISTINCT FROM NEW.quest_id
+       OR OLD.definition_version IS DISTINCT FROM NEW.definition_version
+       OR OLD.accepted_at IS DISTINCT FROM NEW.accepted_at THEN
+        RAISE EXCEPTION 'quest progress identity and acceptance facts are immutable';
+    END IF;
+    IF NOT (OLD.status = 'active' AND NEW.status = 'completed') THEN
+        RAISE EXCEPTION 'quest progress only transitions active to completed';
+    END IF;
+    IF NEW.revision <= OLD.revision THEN
+        RAISE EXCEPTION 'quest progress revision must advance';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_quest_progress_prevent_reversal_delete
+BEFORE UPDATE OR DELETE ON quest_progress
+FOR EACH ROW EXECUTE FUNCTION prevent_quest_progress_reversal_or_delete();
 ```
 
 | Column | Meaning |
@@ -419,19 +452,12 @@ Quest definitions remain in version-controlled code/content files. There is no
 foreign key to a quest-definition table. A future online content system may add
 versioned definition storage without changing historical progress identity.
 
-The code-owned catalog is version-retaining from this slice onward:
-
-* new acceptance uses the latest version of a quest ID;
-* active/completed progress projects with its pinned `definition_version`;
-* a breaking definition release adds a new version and keeps any version still
-  referenced by durable progress;
-* deleting or rewriting a referenced version is prohibited;
-* an intentional progress upgrade uses an explicit, tested data migration and
-  advances the stored version in one transaction.
-
-The catalog therefore supports lookup by `(quest_id, version)` plus a latest
-version lookup. Provider templates expose the latest acceptable version for new
-offers while existing progress remains pinned.
+The current code-owned catalog exposes one active definition version per quest.
+Because there is no production player data yet, incompatible definition changes
+may reset or explicitly migrate the development database instead of retaining
+old code paths. `definition_version` is persisted so mismatches fail fast and a
+future content-publishing system can introduce version retention before public
+operations. This slice does not implement a multi-version catalog.
 
 The following values are derived, never persisted:
 
@@ -460,7 +486,8 @@ CREATE TABLE quest_operations (
     state                VARCHAR(20) NOT NULL,
     changed              BOOLEAN NULL,
     response_status      SMALLINT NULL,
-    response_body        TEXT NULL,
+    response_content_type VARCHAR(64) NULL,
+    response_body        BYTEA NULL,
     response_contract_version SMALLINT NULL,
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     finalized_at         TIMESTAMPTZ NULL,
@@ -474,10 +501,15 @@ CREATE TABLE quest_operations (
     CONSTRAINT ck_quest_operation_state CHECK (
         state IN ('processing', 'succeeded', 'domain_failed')
     ),
+    CONSTRAINT ck_quest_operation_content_type CHECK (
+        response_content_type IS NULL
+        OR response_content_type = 'application/json'
+    ),
     CONSTRAINT ck_quest_operation_finalization CHECK ((
         (state = 'processing'
             AND changed IS NULL
             AND response_status IS NULL
+            AND response_content_type IS NULL
             AND response_body IS NULL
             AND response_contract_version IS NULL
             AND finalized_at IS NULL)
@@ -486,6 +518,7 @@ CREATE TABLE quest_operations (
             AND changed IS NOT NULL
             AND response_status IS NOT NULL
             AND response_status BETWEEN 200 AND 299
+            AND response_content_type IS NOT NULL
             AND response_body IS NOT NULL
             AND response_contract_version IS NOT NULL
             AND finalized_at IS NOT NULL)
@@ -494,6 +527,7 @@ CREATE TABLE quest_operations (
             AND changed IS FALSE
             AND response_status IS NOT NULL
             AND response_status BETWEEN 400 AND 499
+            AND response_content_type IS NOT NULL
             AND response_body IS NOT NULL
             AND response_contract_version IS NOT NULL
             AND finalized_at IS NOT NULL)
@@ -502,6 +536,36 @@ CREATE TABLE quest_operations (
 
 CREATE INDEX ix_quest_operations_account_created
     ON quest_operations (account_id, created_at DESC);
+
+CREATE FUNCTION prevent_quest_operation_rewrite_or_delete()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'quest operation rows are not deleted';
+    END IF;
+    IF OLD.state <> 'processing' THEN
+        RAISE EXCEPTION 'finalized quest operations are immutable';
+    END IF;
+    IF OLD.operation_id IS DISTINCT FROM NEW.operation_id
+       OR OLD.account_id IS DISTINCT FROM NEW.account_id
+       OR OLD.life_id IS DISTINCT FROM NEW.life_id
+       OR OLD.command IS DISTINCT FROM NEW.command
+       OR OLD.quest_id IS DISTINCT FROM NEW.quest_id
+       OR OLD.provider_id IS DISTINCT FROM NEW.provider_id
+       OR OLD.request_fingerprint IS DISTINCT FROM NEW.request_fingerprint
+       OR OLD.created_at IS DISTINCT FROM NEW.created_at THEN
+        RAISE EXCEPTION 'quest operation request identity is immutable';
+    END IF;
+    IF NEW.state NOT IN ('succeeded', 'domain_failed') THEN
+        RAISE EXCEPTION 'quest operation must finalize in one update';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_quest_operations_prevent_rewrite_delete
+BEFORE UPDATE OR DELETE ON quest_operations
+FOR EACH ROW EXECUTE FUNCTION prevent_quest_operation_rewrite_or_delete();
 ```
 
 | Column | Meaning |
@@ -516,7 +580,8 @@ CREATE INDEX ix_quest_operations_account_created
 | `state` | Transaction-local `processing`, or finalized success/domain failure. |
 | `changed` | Whether the operation created/completed progress. |
 | `response_status` | Frozen HTTP status. |
-| `response_body` | Frozen success/error JSON text; preserves exact serialized bytes. |
+| `response_content_type` | Frozen response media type, initially `application/json`. |
+| `response_body` | Frozen success/error wire bytes; replay never parses or reserializes them. |
 | `response_contract_version` | Version of the frozen response contract. |
 | `created_at` | First operation creation time. |
 | `finalized_at` | Time the replayable result was frozen. |
@@ -526,6 +591,14 @@ mutation recovery snapshot in this slice.
 
 The request fingerprint is lowercase SHA-256 over canonical JSON containing
 `contract_version`, `account_id`, `command`, `quest_id`, and `provider_id`.
+
+Quest mutation use cases return a small application-layer `FrozenHttpResponse`
+value containing status, content type, and body bytes. A newly produced success
+or domain failure is serialized once, frozen in this row, committed, and then
+returned. A replay returns the stored bytes directly through a Starlette
+`Response`; it does not rebuild a Pydantic model or raise a domain exception for
+FastAPI to serialize again. Validation errors before operation reservation and
+unexpected 5xx failures are not frozen.
 
 The entire operation runs in one short database transaction. Reservation uses:
 
@@ -588,8 +661,8 @@ DIALOGUE_CHOICE                 -> Narrative facts/projection
 Quest does not bypass module services to query another module's tables, and it
 does not persist a second mutable counter when a fact is derivable elsewhere.
 
-Projection runs inside one shared synchronous Unit of Work using a SQLAlchemy
-`Session` opened at PostgreSQL `REPEATABLE READ`. Player fact readers and Quest
+Projection runs inside one shared async Unit of Work using a SQLAlchemy
+`AsyncSession` opened at PostgreSQL `REPEATABLE READ`. Player fact readers and Quest
 repositories are bound to that same session. A module service exposes facts
 through its contract but does not open an independent transaction.
 
@@ -626,27 +699,32 @@ requests cannot produce two roots.
 ### 6.3 Quest accept/turn-in
 
 1. Begin a short transaction.
-2. Reserve the global operation ID with `INSERT ... ON CONFLICT DO NOTHING
-   RETURNING`. A duplicate waits on the same primary key and then replays or
-   conflicts after the first transaction ends.
-3. For a new operation, resolve and lock the account's current alive life.
-4. Lock/lazily create `life_quest_states`.
-5. Read current-life facts and relevant progress through readers bound to the
+2. Look up the global operation ID first. A finalized match replays even if the
+   account has since entered another life.
+3. For a new operation, lock the account and resolve/lock its current alive life.
+4. Recheck the operation ID after acquiring the account lock, then reserve it
+   with `INSERT ... ON CONFLICT DO NOTHING RETURNING` as the final race guard.
+5. Lock/lazily create `life_quest_states`.
+6. Read current-life facts and relevant progress through readers bound to the
    same Unit of Work.
-6. Validate provider, pinned definition version, prerequisites, objective facts,
+7. Validate provider, current definition version, prerequisites, objective facts,
    and current progress.
-7. Apply the conditional insert or `active -> completed` update.
-8. Increment quest revision only when the durable state changed.
-9. Build the response from the post-mutation snapshot.
-10. Finalize the operation with frozen success or domain-failure JSON.
-11. Commit normally, then return success or re-raise the frozen domain error.
+8. Apply the conditional insert or `active -> completed` update. If the
+   conditional write returns no row, reload the locked progress: an already
+   active/completed accept or completed turn-in is a successful no-op with
+   `changed=false`; invalid states become frozen domain failures.
+9. Increment quest revision only when the durable state changed.
+10. Build the response from the post-mutation snapshot.
+11. Finalize the operation with frozen success or domain-failure wire bytes.
+12. Commit normally, then return the exact frozen status, content type, and body
+    bytes for both success and domain failure.
 
 No network call, Paper API, Citizens API, or long-running calculation may occur
 inside this transaction.
 
-The global lock order for database mutations is operation reservation, then
-`accounts`, `lives`, `life_quest_states`, and finally `quest_progress`. Code that
-does not require an earlier lock must not acquire it later out of order.
+The global lock order for player/quest mutations is `accounts`, `lives`,
+operation reservation, `life_quest_states`, and finally `quest_progress`. Code
+that does not require an earlier lock must not acquire it later out of order.
 
 ## 7. Future Life Aggregate
 
@@ -778,16 +856,17 @@ analytics store rather than the login/transaction path.
 
 ## 12. SQLAlchemy, Alembic, and Application Composition
 
-* Use SQLAlchemy 2.x typed models and repository implementations.
-* Use psycopg 3 through SQLAlchemy's synchronous engine for the first FastAPI
-  persistence slice.
+* Use SQLAlchemy 2.x typed models and async repository implementations.
+* Use asyncpg through SQLAlchemy's async engine.
 * Use Alembic for deterministic named migrations.
 * Never edit an applied migration; add expand/contract migrations.
 * Structural migrations and demo/content seeding remain separate.
-* Application composition builds one shared database/session factory and injects
-  PostgreSQL repositories into PlayerService and QuestService.
-* Each API use case opens a shared Unit of Work/Session and passes transaction-
+* Application composition builds one shared async database/session factory and
+  injects PostgreSQL repositories into PlayerService and QuestService.
+* Each API use case opens a shared async Unit of Work/Session and passes transaction-
   bound repositories/readers through the service boundary.
+* Existing synchronous service/repository contracts are replaced directly; no
+  sync bridge, deprecation wrapper, or dual-mode code remains.
 * Route handlers do not execute SQL.
 * Cross-module orchestration uses explicit services/unit-of-work boundaries;
   repositories do not reach into tables owned by another module.
@@ -885,11 +964,13 @@ rollback path for destructive corruption.
 * PostgreSQL restart preserves account, current life, spirit root, quest progress,
   quest revision, and idempotency outcomes.
 * Database constraints enforce one current life, one root per life, one progress
-  row per life/quest, and one request identity per life/operation.
+  row per life/quest, and one globally unique request identity per operation.
 * Duplicate/retried quest mutations cannot grant state twice.
 * Current-life reads remain index-isolated from historical generations.
 * The schema has no permanent QQ compatibility fields and no silent in-memory
   production fallback.
+* Obsolete synchronous contracts, lease/waiter operation code, and their tests
+  are removed rather than retained behind compatibility adapters.
 * Future life-owned systems and allowlisted cross-life inheritance have explicit
   module boundaries without speculative first-migration tables.
 * Migration, concurrency, restart, and repository integration checks pass.
