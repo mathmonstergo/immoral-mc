@@ -35,7 +35,8 @@ class PlayerService:
         async with self._uow_factory(isolation="read_committed") as uow:
             account = await uow.players.upsert_account(minecraft_uuid, player_name)
             account = await uow.players.lock_account(account.account_id)
-            assert account is not None
+            if account is None:
+                raise RuntimeError("Account disappeared after upsert")
             life = await uow.players.get_current_life(account.account_id, for_update=True)
             if life is None:
                 if await uow.players.get_lives(account.account_id):
@@ -68,7 +69,8 @@ class PlayerService:
             inserted = await uow.players.insert_spirit_root(generated)
             if not inserted:
                 generated = await uow.players.get_spirit_root(life.life_id)
-                assert generated is not None
+                if generated is None:
+                    raise RuntimeError("Spirit root insert lost without an existing root")
                 already_detected = True
             else:
                 await uow.players.increment_life_revision(life.life_id)

@@ -117,3 +117,19 @@ async def test_finalized_fake_operation_is_immutable() -> None:
                 response_contract_version=1,
                 finalized_at=NOW,
             )
+
+
+@pytest.mark.asyncio
+async def test_fake_unit_of_work_is_one_shot_and_old_repository_handles_stay_closed() -> None:
+    factory = FakeUnitOfWorkFactory(FakeStore())
+    uow = factory()
+
+    async with uow:
+        old_players = uow.players
+        await uow.commit()
+
+    with pytest.raises(RuntimeError, match="already entered"):
+        async with uow:
+            pass
+    with pytest.raises(RuntimeError, match="closed"):
+        await old_players.upsert_account(UUID(int=30), "Stale")

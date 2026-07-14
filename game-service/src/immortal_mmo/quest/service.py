@@ -4,7 +4,7 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from uuid import UUID
 
-from immortal_mmo.api.errors import serialize_domain_error
+from immortal_mmo.core.error_wire import serialize_domain_error
 from immortal_mmo.core.errors import ConflictError, DomainError, NotFoundError, RuleViolationError
 from immortal_mmo.core.uow import UnitOfWork, UnitOfWorkFactory
 from immortal_mmo.player.models import CurrentLifeQuestFacts

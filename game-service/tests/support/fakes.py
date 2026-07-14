@@ -1,8 +1,9 @@
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from types import TracebackType
 from uuid import UUID, uuid4
 
 from immortal_mmo.player.models import Account, CurrentLifeQuestFacts, Life, SpiritRoot
@@ -193,7 +194,7 @@ class FakeQuestRepository:
     async def get_progresses(
         self,
         life_id: UUID,
-        quest_ids: set[str],
+        quest_ids: Collection[str],
     ) -> dict[str, QuestProgress]:
         self._ensure_active()
         return {
@@ -201,10 +202,6 @@ class FakeQuestRepository:
             for quest_id in quest_ids
             if (progress := self._state.progresses.get((life_id, quest_id))) is not None
         }
-
-    async def get_progress(self, life_id: UUID, quest_id: str) -> QuestProgress | None:
-        self._ensure_active()
-        return self._state.progresses.get((life_id, quest_id))
 
     async def insert_progress_if_absent(self, progress: QuestProgress) -> bool:
         self._ensure_active()
@@ -243,12 +240,14 @@ class FakeUnitOfWork:
         self.players: FakePlayerRepository
         self.quests: FakeQuestRepository
         self._working_state: _FakeState | None = None
+        self._entered = False
         self._active = False
         self._lock_held = False
 
     async def __aenter__(self) -> "FakeUnitOfWork":
-        if self._active or self._lock_held:
-            raise RuntimeError("Unit of work is already active")
+        if self._entered:
+            raise RuntimeError("Unit of work was already entered")
+        self._entered = True
         await self._store._transaction_lock.acquire()
         self._lock_held = True
         self._working_state = deepcopy(self._store._state)
@@ -257,7 +256,12 @@ class FakeUnitOfWork:
         self.quests = FakeQuestRepository(self._working_state, self._ensure_active)
         return self
 
-    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
         del exc_type, exc, traceback
         if self._active:
             await self.rollback()
