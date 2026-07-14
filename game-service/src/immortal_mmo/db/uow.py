@@ -31,12 +31,16 @@ class SqlAlchemyUnitOfWork:
 
     async def __aenter__(self) -> "SqlAlchemyUnitOfWork":
         self.session = self._sessions()
-        await self.session.connection(
-            execution_options={"isolation_level": ISOLATION_LEVELS[self._isolation]}
-        )
-        self.players = self._player_repository_factory(self.session)
-        self.quests = self._quest_repository_factory(self.session)
-        return self
+        try:
+            await self.session.connection(
+                execution_options={"isolation_level": ISOLATION_LEVELS[self._isolation]}
+            )
+            self.players = self._player_repository_factory(self.session)
+            self.quests = self._quest_repository_factory(self.session)
+            return self
+        except BaseException:
+            await self._rollback_and_close()
+            raise
 
     async def __aexit__(
         self,
@@ -44,6 +48,9 @@ class SqlAlchemyUnitOfWork:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
+        await self._rollback_and_close()
+
+    async def _rollback_and_close(self) -> None:
         try:
             if self.session.in_transaction():
                 await self.session.rollback()

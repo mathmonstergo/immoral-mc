@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from immortal_mmo.core.config import Settings
@@ -121,6 +123,22 @@ class RecordingSessionFactory:
         return session
 
 
+class FixedSessionFactory:
+    def __init__(self, session: RecordingSession) -> None:
+        self.session = session
+
+    def __call__(self) -> RecordingSession:
+        self.session.events.append("session")
+        return self.session
+
+
+class FailingConnectionSession(RecordingSession):
+    async def connection(self, *, execution_options: dict[str, str]) -> object:
+        self.events.append(f"connection:{execution_options['isolation_level']}")
+        self.transaction_active = True
+        raise RuntimeError("connection failed")
+
+
 class RecordingRepositoryFactory:
     def __init__(self, name: str, events: list[str]) -> None:
         self.name = name
@@ -133,6 +151,17 @@ class RecordingRepositoryFactory:
         self.repository = object()
         self.session = session
         return self.repository
+
+
+class FailingRepositoryFactory:
+    def __init__(self, name: str, events: list[str], error: BaseException) -> None:
+        self.name = name
+        self.events = events
+        self.error = error
+
+    def __call__(self, session: RecordingSession) -> object:
+        self.events.append(self.name)
+        raise self.error
 
 
 def make_uow_factory(
@@ -219,3 +248,91 @@ async def test_uow_rolls_back_uncommitted_successful_context() -> None:
         pass
 
     assert events[-2:] == ["rollback", "close"]
+
+
+@pytest.mark.asyncio
+async def test_uow_cleans_up_when_isolation_configuration_fails() -> None:
+    events: list[str] = []
+    session = FailingConnectionSession(events)
+    players = RecordingRepositoryFactory("players", events)
+    quests = RecordingRepositoryFactory("quests", events)
+    factory = SqlAlchemyUnitOfWorkFactory(FixedSessionFactory(session), players, quests)
+
+    with pytest.raises(RuntimeError, match="connection failed"):
+        async with factory():
+            pass
+
+    assert events == [
+        "session",
+        "connection:READ COMMITTED",
+        "rollback",
+        "close",
+    ]
+    assert players.repository is None
+    assert quests.repository is None
+
+
+@pytest.mark.asyncio
+async def test_uow_cleans_up_when_player_repository_factory_fails() -> None:
+    events: list[str] = []
+    session = RecordingSession(events)
+    players = FailingRepositoryFactory("players", events, RuntimeError("players failed"))
+    quests = RecordingRepositoryFactory("quests", events)
+    factory = SqlAlchemyUnitOfWorkFactory(FixedSessionFactory(session), players, quests)
+
+    with pytest.raises(RuntimeError, match="players failed"):
+        async with factory():
+            pass
+
+    assert events == [
+        "session",
+        "connection:READ COMMITTED",
+        "players",
+        "rollback",
+        "close",
+    ]
+    assert quests.repository is None
+
+
+@pytest.mark.asyncio
+async def test_uow_cleans_up_when_quest_repository_factory_fails() -> None:
+    events: list[str] = []
+    session = RecordingSession(events)
+    players = RecordingRepositoryFactory("players", events)
+    quests = FailingRepositoryFactory("quests", events, RuntimeError("quests failed"))
+    factory = SqlAlchemyUnitOfWorkFactory(FixedSessionFactory(session), players, quests)
+
+    with pytest.raises(RuntimeError, match="quests failed"):
+        async with factory():
+            pass
+
+    assert events == [
+        "session",
+        "connection:READ COMMITTED",
+        "players",
+        "quests",
+        "rollback",
+        "close",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_uow_cleans_up_and_stops_factory_chain_when_startup_is_cancelled() -> None:
+    events: list[str] = []
+    session = RecordingSession(events)
+    players = FailingRepositoryFactory("players", events, asyncio.CancelledError("cancelled"))
+    quests = RecordingRepositoryFactory("quests", events)
+    factory = SqlAlchemyUnitOfWorkFactory(FixedSessionFactory(session), players, quests)
+
+    with pytest.raises(asyncio.CancelledError, match="cancelled"):
+        async with factory():
+            pass
+
+    assert events == [
+        "session",
+        "connection:READ COMMITTED",
+        "players",
+        "rollback",
+        "close",
+    ]
+    assert quests.repository is None

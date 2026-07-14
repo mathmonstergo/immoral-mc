@@ -11,6 +11,28 @@ def test_settings_require_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
         Settings(_env_file=None)
 
 
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "",
+        "   ",
+        "postgresql://game:test@database/game",
+    ],
+)
+def test_settings_reject_invalid_database_urls(database_url: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, database_url=database_url)
+
+
+def test_settings_accept_asyncpg_database_url_and_strip_whitespace() -> None:
+    settings = Settings(
+        _env_file=None,
+        database_url="  postgresql+asyncpg://game:test@database/game  ",
+    )
+
+    assert settings.database_url == "postgresql+asyncpg://game:test@database/game"
+
+
 def test_settings_load_database_pool_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://game:test@database/game")
     monkeypatch.setenv("DATABASE_POOL_SIZE", "12")
