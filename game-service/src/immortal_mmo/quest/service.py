@@ -114,6 +114,7 @@ class QuestService:
         async with self._uow_factory(isolation="repeatable_read") as uow:
             facts = await self._load_player_facts(uow, account_id, for_update=False)
             progresses = await uow.quests.get_progresses(facts.life_id, self._catalog_quest_ids())
+            self._validate_progress_versions(progresses)
             quest_revision = await uow.quests.get_quest_revision(
                 facts.life_id,
                 for_update=False,
@@ -406,6 +407,10 @@ class QuestService:
 
     def _catalog_quest_ids(self) -> set[str]:
         return {quest.quest_id for quest in self._catalog.quests}
+
+    def _validate_progress_versions(self, progresses: dict[str, QuestProgress]) -> None:
+        for quest_id, progress in progresses.items():
+            self._check_definition_version(progress, self._catalog.get_quest(quest_id))
 
     def _build_interaction_state(
         self,

@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -32,10 +33,12 @@ class FakeStore:
 
 
 class FakePlayerRepository:
-    def __init__(self, state: _FakeState) -> None:
+    def __init__(self, state: _FakeState, ensure_active: Callable[[], None]) -> None:
         self._state = state
+        self._ensure_active = ensure_active
 
     async def upsert_account(self, minecraft_uuid: UUID, last_known_name: str) -> Account:
+        self._ensure_active()
         account_id = self._state.account_ids_by_minecraft_uuid.get(minecraft_uuid)
         if account_id is None:
             account = Account(
@@ -58,9 +61,11 @@ class FakePlayerRepository:
         return account
 
     async def lock_account(self, account_id: UUID) -> Account | None:
+        self._ensure_active()
         return self._state.accounts.get(account_id)
 
     async def get_current_life(self, account_id: UUID, *, for_update: bool) -> Life | None:
+        self._ensure_active()
         del for_update
         return next(
             (
@@ -72,6 +77,7 @@ class FakePlayerRepository:
         )
 
     async def get_lives(self, account_id: UUID) -> tuple[Life, ...]:
+        self._ensure_active()
         return tuple(
             sorted(
                 (life for life in self._state.lives.values() if life.account_id == account_id),
@@ -80,6 +86,7 @@ class FakePlayerRepository:
         )
 
     async def insert_first_life(self, account_id: UUID) -> Life:
+        self._ensure_active()
         life = Life(
             life_id=uuid4(),
             account_id=account_id,
@@ -91,15 +98,18 @@ class FakePlayerRepository:
         return life
 
     async def get_spirit_root(self, life_id: UUID) -> SpiritRoot | None:
+        self._ensure_active()
         return self._state.spirit_roots.get(life_id)
 
     async def insert_spirit_root(self, spirit_root: SpiritRoot) -> bool:
+        self._ensure_active()
         if spirit_root.life_id in self._state.spirit_roots:
             return False
         self._state.spirit_roots[spirit_root.life_id] = spirit_root
         return True
 
     async def increment_life_revision(self, life_id: UUID) -> int:
+        self._ensure_active()
         life = self._state.lives[life_id]
         life = replace(life, revision=life.revision + 1)
         self._state.lives[life_id] = life
@@ -111,6 +121,7 @@ class FakePlayerRepository:
         *,
         for_update: bool,
     ) -> CurrentLifeQuestFacts | None:
+        self._ensure_active()
         life = await self.get_current_life(account_id, for_update=for_update)
         if life is None:
             return None
@@ -124,13 +135,16 @@ class FakePlayerRepository:
 
 
 class FakeQuestRepository:
-    def __init__(self, state: _FakeState) -> None:
+    def __init__(self, state: _FakeState, ensure_active: Callable[[], None]) -> None:
         self._state = state
+        self._ensure_active = ensure_active
 
     async def get_operation(self, operation_id: UUID) -> StoredQuestOperation | None:
+        self._ensure_active()
         return self._state.operations.get(operation_id)
 
     async def reserve_operation(self, operation: StoredQuestOperation) -> bool:
+        self._ensure_active()
         if operation.operation_id in self._state.operations:
             return False
         self._state.operations[operation.operation_id] = operation
@@ -148,6 +162,7 @@ class FakeQuestRepository:
         response_contract_version: int,
         finalized_at: datetime,
     ) -> StoredQuestOperation:
+        self._ensure_active()
         operation = self._state.operations[operation_id]
         finalized = replace(
             operation,
@@ -163,10 +178,12 @@ class FakeQuestRepository:
         return finalized
 
     async def get_quest_revision(self, life_id: UUID, *, for_update: bool) -> int:
+        self._ensure_active()
         del for_update
         return self._state.quest_revisions.setdefault(life_id, 0)
 
     async def increment_quest_revision(self, life_id: UUID) -> int:
+        self._ensure_active()
         revision = self._state.quest_revisions.setdefault(life_id, 0) + 1
         self._state.quest_revisions[life_id] = revision
         return revision
@@ -176,6 +193,7 @@ class FakeQuestRepository:
         life_id: UUID,
         quest_ids: set[str],
     ) -> dict[str, QuestProgress]:
+        self._ensure_active()
         return {
             quest_id: progress
             for quest_id in quest_ids
@@ -183,9 +201,11 @@ class FakeQuestRepository:
         }
 
     async def get_progress(self, life_id: UUID, quest_id: str) -> QuestProgress | None:
+        self._ensure_active()
         return self._state.progresses.get((life_id, quest_id))
 
     async def insert_progress_if_absent(self, progress: QuestProgress) -> bool:
+        self._ensure_active()
         key = (progress.life_id, progress.quest_id)
         if key in self._state.progresses:
             return False
@@ -200,6 +220,7 @@ class FakeQuestRepository:
         completed_at: datetime,
         revision: int,
     ) -> bool:
+        self._ensure_active()
         key = (life_id, quest_id)
         progress = self._state.progresses.get(key)
         if progress is None or progress.status is not QuestProgressStatus.ACTIVE:
@@ -220,28 +241,45 @@ class FakeUnitOfWork:
         self.players: FakePlayerRepository
         self.quests: FakeQuestRepository
         self._working_state: _FakeState | None = None
-        self._committed = False
+        self._active = False
+        self._lock_held = False
 
     async def __aenter__(self) -> "FakeUnitOfWork":
+        if self._active or self._lock_held:
+            raise RuntimeError("Unit of work is already active")
         await self._store._transaction_lock.acquire()
+        self._lock_held = True
         self._working_state = deepcopy(self._store._state)
-        self.players = FakePlayerRepository(self._working_state)
-        self.quests = FakeQuestRepository(self._working_state)
+        self._active = True
+        self.players = FakePlayerRepository(self._working_state, self._ensure_active)
+        self.quests = FakeQuestRepository(self._working_state, self._ensure_active)
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
         del exc_type, exc, traceback
-        self._working_state = None
-        self._store._transaction_lock.release()
+        if self._active:
+            await self.rollback()
 
     async def commit(self) -> None:
-        if self._working_state is None:
-            raise RuntimeError("Unit of work is not active")
-        self._store._state = self._working_state
-        self._committed = True
+        self._ensure_active()
+        assert self._working_state is not None
+        self._store._state = deepcopy(self._working_state)
+        self._close()
 
     async def rollback(self) -> None:
-        self._committed = False
+        self._ensure_active()
+        self._close()
+
+    def _ensure_active(self) -> None:
+        if not self._active or self._working_state is None:
+            raise RuntimeError("Unit of work is closed")
+
+    def _close(self) -> None:
+        self._active = False
+        self._working_state = None
+        if self._lock_held:
+            self._lock_held = False
+            self._store._transaction_lock.release()
 
 
 class FakeUnitOfWorkFactory:

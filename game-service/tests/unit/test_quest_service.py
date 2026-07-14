@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -6,8 +7,10 @@ import pytest
 from tests.support.fakes import FakeStore, FakeUnitOfWorkFactory
 
 from immortal_mmo.player.service import PlayerService
+from immortal_mmo.quest.definitions import QUEST_CATALOG, QuestDefinitionCatalog
+from immortal_mmo.quest.models import QuestProviderDefinition
 from immortal_mmo.quest.repository import QuestProgress, QuestProgressStatus
-from immortal_mmo.quest.service import QuestService
+from immortal_mmo.quest.service import QuestDefinitionVersionMismatchError, QuestService
 
 NOW = datetime(2026, 7, 14, tzinfo=UTC)
 
@@ -115,3 +118,60 @@ async def test_quest_read_uses_repeatable_read_snapshot() -> None:
 
     assert state.providers[0].quests[0].state == "available"
     assert factory.isolations[-1] == "repeatable_read"
+
+
+@pytest.mark.asyncio
+async def test_quest_read_rejects_loaded_progress_with_stale_definition_version() -> None:
+    _, quests, factory, account_id = await logged_in_services()
+    async with factory() as uow:
+        facts = await uow.players.get_current_life_facts(account_id, for_update=True)
+        assert facts is not None
+        uow._working_state.progresses[(facts.life_id, "first-steps")] = QuestProgress(
+            life_id=facts.life_id,
+            quest_id="first-steps",
+            definition_version=999,
+            status=QuestProgressStatus.ACTIVE,
+            accepted_at=NOW,
+            completed_at=None,
+            revision=1,
+        )
+        await uow.commit()
+
+    with pytest.raises(QuestDefinitionVersionMismatchError):
+        await quests.get_interaction_state(account_id, ["old-man"])
+
+
+@pytest.mark.asyncio
+async def test_quest_read_rejects_stale_prerequisite_progress() -> None:
+    prior = replace(QUEST_CATALOG.get_quest("first-steps"), quest_id="prior")
+    follow_up = replace(
+        QUEST_CATALOG.get_quest("first-steps"),
+        quest_id="follow-up",
+        prerequisites=("prior",),
+    )
+    provider = QuestProviderDefinition(
+        provider_id="old-man",
+        display_name="老村民",
+        main_quest_ids=("follow-up",),
+        side_quest_ids=(),
+    )
+    catalog = QuestDefinitionCatalog(quests=(prior, follow_up), providers=(provider,))
+    players, _, factory, account_id = await logged_in_services()
+    quests = QuestService(factory, catalog, clock=lambda: NOW)
+    await players.detect_current_life_spirit_root(account_id)
+    async with factory() as uow:
+        facts = await uow.players.get_current_life_facts(account_id, for_update=True)
+        assert facts is not None
+        uow._working_state.progresses[(facts.life_id, "prior")] = QuestProgress(
+            life_id=facts.life_id,
+            quest_id="prior",
+            definition_version=999,
+            status=QuestProgressStatus.COMPLETED,
+            accepted_at=NOW,
+            completed_at=NOW,
+            revision=1,
+        )
+        await uow.commit()
+
+    with pytest.raises(QuestDefinitionVersionMismatchError):
+        await quests.get_interaction_state(account_id, ["old-man"])

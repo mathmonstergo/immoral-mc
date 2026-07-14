@@ -1,4 +1,4 @@
-from collections.abc import Collection, Mapping
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -31,12 +31,6 @@ class QuestProgress:
     accepted_at: datetime
     completed_at: datetime | None
     revision: int
-
-
-@dataclass(frozen=True, slots=True)
-class QuestProgressSnapshot:
-    progresses: Mapping[str, QuestProgress]
-    quest_revision: int
 
 
 @dataclass(frozen=True, slots=True)
