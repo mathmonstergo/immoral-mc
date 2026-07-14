@@ -2,6 +2,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Request
+from starlette.responses import Response
 
 from immortal_mmo.quest.schemas import (
     QuestInteractionState,
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/api/v1/players", tags=["quests"])
 catalog_router = APIRouter(prefix="/api/v1", tags=["quests"])
 
 
-def get_quest_service(request: Request) -> QuestService:
+async def get_quest_service(request: Request) -> QuestService:
     return request.app.state.quest_service
 
 
@@ -28,47 +29,57 @@ idempotency_key_header = Header(alias="Idempotency-Key")
     "/quest-providers",
     response_model=QuestProviderCatalog,
 )
-def get_quest_provider_catalog(
+async def get_quest_provider_catalog(
     service: QuestService = quest_service_dependency,
 ) -> QuestProviderCatalog:
-    return service.get_provider_catalog()
+    return await service.get_provider_catalog()
 
 
 @router.post(
     "/{account_id}/current-life/quest-interaction-state",
     response_model=QuestInteractionState,
 )
-def get_quest_interaction_state(
+async def get_quest_interaction_state(
     account_id: UUID,
     body: QuestInteractionStateRequest,
     service: QuestService = quest_service_dependency,
 ) -> QuestInteractionState:
-    return service.get_interaction_state(account_id, body.provider_ids)
+    return await service.get_interaction_state(account_id, body.provider_ids)
 
 
 @router.put(
     "/{account_id}/current-life/quests/{quest_id}/accept",
     response_model=QuestMutationResult,
 )
-def accept_quest(
+async def accept_quest(
     account_id: UUID,
     quest_id: str,
     body: QuestMutationRequest,
     idempotency_key: Annotated[UUID, idempotency_key_header],
     service: QuestService = quest_service_dependency,
-) -> QuestMutationResult:
-    return service.accept(account_id, quest_id, body.provider_id, idempotency_key)
+) -> Response:
+    frozen = await service.accept(account_id, quest_id, body.provider_id, idempotency_key)
+    return Response(
+        content=frozen.body,
+        status_code=frozen.status_code,
+        media_type=frozen.content_type,
+    )
 
 
 @router.put(
     "/{account_id}/current-life/quests/{quest_id}/turn-in",
     response_model=QuestMutationResult,
 )
-def turn_in_quest(
+async def turn_in_quest(
     account_id: UUID,
     quest_id: str,
     body: QuestMutationRequest,
     idempotency_key: Annotated[UUID, idempotency_key_header],
     service: QuestService = quest_service_dependency,
-) -> QuestMutationResult:
-    return service.turn_in(account_id, quest_id, body.provider_id, idempotency_key)
+) -> Response:
+    frozen = await service.turn_in(account_id, quest_id, body.provider_id, idempotency_key)
+    return Response(
+        content=frozen.body,
+        status_code=frozen.status_code,
+        media_type=frozen.content_type,
+    )

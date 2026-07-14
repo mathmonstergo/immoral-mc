@@ -12,7 +12,7 @@ from immortal_mmo.player.service import PlayerService
 router = APIRouter(prefix="/api/v1/players", tags=["players"])
 
 
-def get_player_service(request: Request) -> PlayerService:
+async def get_player_service(request: Request) -> PlayerService:
     return request.app.state.player_service
 
 
@@ -24,7 +24,7 @@ async def login_player(
     request: PlayerLoginRequest,
     service: PlayerService = player_service_dependency,
 ) -> PlayerLoginResponse:
-    return service.login(
+    return await service.login(
         minecraft_uuid=request.minecraft_uuid,
         player_name=request.player_name,
     )
@@ -35,4 +35,4 @@ async def detect_current_life_spirit_root(
     account_id: UUID,
     service: PlayerService = player_service_dependency,
 ) -> SpiritRootDetectionResponse:
-    return service.detect_current_life_spirit_root(account_id)
+    return await service.detect_current_life_spirit_root(account_id)

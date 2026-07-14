@@ -1,18 +1,29 @@
+import json
+
 from fastapi import Request
-from fastapi.responses import JSONResponse
+from starlette.responses import Response
 
 from immortal_mmo.core.errors import DomainError
 
 
-async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
+def serialize_domain_error(error: DomainError) -> bytes:
+    return json.dumps(
+        {
             "error": {
-                "code": exc.code,
-                "message": exc.message,
-                "retryable": exc.retryable,
+                "code": error.code,
+                "message": error.message,
+                "retryable": error.retryable,
             }
         },
-    )
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode()
 
+
+async def domain_error_handler(request: Request, exc: DomainError) -> Response:
+    del request
+    return Response(
+        content=serialize_domain_error(exc),
+        status_code=exc.status_code,
+        media_type="application/json",
+    )

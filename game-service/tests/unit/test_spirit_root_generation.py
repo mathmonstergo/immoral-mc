@@ -1,66 +1,60 @@
-from immortal_mmo.player.service import BASE_ELEMENTS, SpiritRootGenerator
+from uuid import UUID
+
+from immortal_mmo.player.models import BASE_ELEMENT_ORDER, SpiritRootGenerator
+from immortal_mmo.player.schemas import to_spirit_root_schema
 
 
-def test_spirit_root_quality_buckets_are_rolled_before_elements() -> None:
-    element_calls: list[int] = []
-
-    def choose_base_elements(count: int) -> list[str]:
-        element_calls.append(count)
-        return BASE_ELEMENTS[:count]
-
+def test_spirit_root_generator_emits_canonical_codes_in_stable_order() -> None:
     generator = SpiritRootGenerator(
         roll=lambda: 0.10,
-        choose_base_elements=choose_base_elements,
-        choose_mutated_element=lambda: "金雷",
+        choose_base_elements=lambda count: ("fire", "metal", "water", "wood")[:count],
+        choose_variant_pair=lambda: ("metal", "thunder"),
     )
 
-    root = generator.generate()
+    root = generator.generate(UUID(int=1))
 
-    assert root.quality == "quad"
-    assert root.label == "伪灵根"
-    assert root.elements == ["金", "木", "水", "火"]
-    assert root.mutated_element is None
-    assert root.variant_element is None
-    assert element_calls == [4]
-
-
-def test_spirit_root_generator_covers_all_quality_buckets() -> None:
-    cases = [
-        (0.10, "quad", "伪灵根", ["金", "木", "水", "火"]),
-        (0.40, "penta", "伪灵根", ["金", "木", "水", "火", "土"]),
-        (0.70, "triple", "三灵根", ["金", "木", "水"]),
-        (0.85, "dual", "双灵根", ["金", "木"]),
-        (0.99, "celestial", "天灵根", ["金"]),
-    ]
-
-    for roll, quality, label, elements in cases:
-        generator = SpiritRootGenerator(
-            roll=lambda value=roll: value,
-            choose_base_elements=lambda count: BASE_ELEMENTS[:count],
-            choose_mutated_element=lambda: "金雷",
-        )
-
-        root = generator.generate()
-
-        assert root.quality == quality
-        assert root.label == label
-        assert root.elements == elements
-        assert root.mutated_element is None
-        assert root.variant_element is None
+    assert root.quality_code == "quad"
+    assert root.base_element_codes == ("metal", "wood", "water", "fire")
+    assert root.variant_element_code is None
+    assert root.generator_version == 1
+    assert BASE_ELEMENT_ORDER == ("metal", "wood", "water", "fire", "earth")
 
 
-def test_variant_spirit_root_splits_base_and_variant_attributes() -> None:
-    generator = SpiritRootGenerator(
+def test_variant_generation_persists_codes_and_maps_chinese_only_for_presentation() -> None:
+    root = SpiritRootGenerator(
         roll=lambda: 0.95,
-        choose_base_elements=lambda count: BASE_ELEMENTS[:count],
-        choose_mutated_element=lambda: "金雷",
-    )
+        choose_base_elements=lambda count: BASE_ELEMENT_ORDER[:count],
+        choose_variant_pair=lambda: ("metal", "thunder"),
+    ).generate(UUID(int=2))
 
-    root = generator.generate()
+    assert root.base_element_codes == ("metal",)
+    assert root.variant_element_code == "thunder"
+    assert not hasattr(root, "mutated_element")
 
-    assert root.quality == "variant"
-    assert root.label == "异灵根"
-    assert root.elements == ["金"]
-    assert root.mutated_element == "金雷"
-    assert root.variant_element == "雷"
+    presented = to_spirit_root_schema(root)
+    assert presented.model_dump() == {
+        "quality": "variant",
+        "label": "异灵根",
+        "elements": ["金"],
+        "mutated_element": "金雷",
+        "variant_element": "雷",
+    }
+
+
+def test_generator_covers_all_non_variant_quality_shapes() -> None:
+    cases = [
+        (0.10, "quad", 4),
+        (0.40, "penta", 5),
+        (0.70, "triple", 3),
+        (0.85, "dual", 2),
+        (0.99, "celestial", 1),
+    ]
+    for roll, quality, count in cases:
+        root = SpiritRootGenerator(
+            roll=lambda value=roll: value,
+            choose_base_elements=lambda size: BASE_ELEMENT_ORDER[:size],
+            choose_variant_pair=lambda: ("metal", "thunder"),
+        ).generate(UUID(int=count))
+        assert root.quality_code == quality
+        assert len(root.base_element_codes) == count
 

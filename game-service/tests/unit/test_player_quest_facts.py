@@ -1,66 +1,55 @@
+from dataclasses import replace
 from uuid import UUID
 
 import pytest
+from tests.support.fakes import FakeStore, FakeUnitOfWorkFactory
 
-from immortal_mmo.player.schemas import SpiritRoot
-from immortal_mmo.player.service import (
-    PlayerAccountNotFoundError,
-    PlayerService,
-    SpiritRootGenerator,
-)
+from immortal_mmo.player.models import SpiritRootGenerator
+from immortal_mmo.player.service import PlayerLifecycleError, PlayerService
 
 
-def fixed_spirit_root() -> SpiritRoot:
-    return SpiritRoot(
-        quality="variant",
-        label="异灵根",
-        elements=["金"],
-        mutated_element="金雷",
-        variant_element="雷",
-    )
-
-
-def test_current_life_quest_facts_expose_authoritative_player_state() -> None:
-    service = PlayerService()
-    login = service.login(UUID(int=1), "Facts")
-
-    facts = service.get_current_life_facts(login.account.account_id)
-
-    assert facts.account_id == login.account.account_id
-    assert facts.life_id == login.current_life.life_id
-    assert facts.generation_no == 1
-    assert facts.spirit_root is None
-    assert facts.revision == 1
-
-
-def test_spirit_root_assignment_advances_player_revision_only_once() -> None:
+@pytest.mark.asyncio
+async def test_login_and_detection_use_transactional_player_facts() -> None:
+    factory = FakeUnitOfWorkFactory(FakeStore())
     service = PlayerService(
+        factory,
         spirit_root_generator=SpiritRootGenerator(
             roll=lambda: 0.95,
-            choose_mutated_element=lambda: "金雷",
-        )
+            choose_base_elements=lambda count: ("metal", "wood", "water", "fire", "earth")[
+                :count
+            ],
+            choose_variant_pair=lambda: ("metal", "thunder"),
+        ),
     )
-    login = service.login(UUID(int=2), "Revision")
 
-    before = service.get_current_life_facts(login.account.account_id)
-    first_detection = service.detect_current_life_spirit_root(login.account.account_id)
-    after_first = service.get_current_life_facts(login.account.account_id)
-    second_detection = service.detect_current_life_spirit_root(login.account.account_id)
-    after_second = service.get_current_life_facts(login.account.account_id)
+    login = await service.login(UUID(int=1), "Facts")
+    before = await service.get_current_life_facts(login.account.account_id)
+    detected = await service.detect_current_life_spirit_root(login.account.account_id)
+    repeated = await service.detect_current_life_spirit_root(login.account.account_id)
+    after = await service.get_current_life_facts(login.account.account_id)
 
-    assert first_detection.already_detected is False
-    assert second_detection.already_detected is True
+    assert before.spirit_root is None
     assert before.revision == 1
-    assert after_first.revision == 2
-    assert after_second.revision == 2
-    assert after_first.spirit_root == fixed_spirit_root()
-    assert after_second.spirit_root == after_first.spirit_root
+    assert detected.already_detected is False
+    assert repeated.already_detected is True
+    assert repeated.spirit_root == detected.spirit_root
+    assert after.revision == 2
+    assert factory.isolations == ["read_committed"] * 5
 
 
-def test_current_life_quest_facts_preserve_account_not_found_error() -> None:
-    service = PlayerService()
+@pytest.mark.asyncio
+async def test_historical_life_without_an_alive_life_is_a_lifecycle_error() -> None:
+    store = FakeStore()
+    factory = FakeUnitOfWorkFactory(store)
+    service = PlayerService(factory)
+    login = await service.login(UUID(int=2), "History")
+    async with factory() as uow:
+        life = await uow.players.get_current_life(login.account.account_id, for_update=True)
+        assert life is not None
+        uow._working_state.lives[life.life_id] = replace(life, status="reincarnated")
+        await uow.commit()
 
-    with pytest.raises(PlayerAccountNotFoundError) as error:
-        service.get_current_life_facts(UUID(int=999))
+    with pytest.raises(PlayerLifecycleError) as exc_info:
+        await service.login(UUID(int=2), "History")
 
-    assert error.value.code == "player.account_not_found"
+    assert exc_info.value.code == "player.lifecycle_unavailable"
