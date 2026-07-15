@@ -29,6 +29,7 @@ public final class OutboxDeliveryWorker implements AutoCloseable {
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean inFlight = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private volatile CompletableFuture<DeliveryRun> activeRun;
     private ScheduledFuture<?> scheduledRun;
 
     public OutboxDeliveryWorker(
@@ -67,7 +68,11 @@ public final class OutboxDeliveryWorker implements AutoCloseable {
                             .thenCompose(response -> acknowledge(rows))
                             .exceptionallyCompose(error -> handleFailure(rows, unwrap(error)));
                 });
-        return result.whenComplete((ignored, error) -> inFlight.set(false));
+        activeRun = result;
+        return result.whenComplete((ignored, error) -> {
+            activeRun = null;
+            inFlight.set(false);
+        });
     }
 
     public synchronized void start(DoubleSupplier tpsSupplier) {
@@ -85,6 +90,14 @@ public final class OutboxDeliveryWorker implements AutoCloseable {
         }
         if (scheduledRun != null) {
             scheduledRun.cancel(false);
+        }
+        CompletableFuture<DeliveryRun> running = activeRun;
+        if (running != null) {
+            try {
+                running.get(5, TimeUnit.SECONDS);
+            } catch (Exception error) {
+                logger.error("combat_outbox_delivery_shutdown_failed", error);
+            }
         }
         scheduler.shutdownNow();
         try {

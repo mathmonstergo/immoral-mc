@@ -38,6 +38,21 @@ starting a new database or applying a migration.
 
 Open the API documentation at <http://127.0.0.1:8000/docs>.
 
+## MythicMobs reward catalog
+
+Combat rewards are authoritative in Game Service. Paper submits amount-free
+kill facts to:
+
+```http
+POST /api/v1/combat/mythicmob-kills/batch
+```
+
+The exact MythicMobs top-level/internal name is resolved through
+`src/immortal_mmo/combat/mythicmob_rewards.json`. Unknown IDs return the stable
+`not_rewardable` result; they never receive a fallback amount. Catalog changes
+are startup content changes, so restart Game Service after editing and keep the
+Mythic YAML key and catalog `internal_name` identical.
+
 ## Disposable development reset
 
 This permanently deletes the local PostgreSQL volume and all development data:

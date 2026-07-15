@@ -14,6 +14,7 @@ import com.immortalmc.adapter.testsupport.RecordingAdapterLogger;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
 import org.bukkit.Server;
 import org.bukkit.event.Listener;
 import org.bukkit.plugin.PluginManager;
@@ -30,7 +31,7 @@ class MythicMobsIntegrationLoaderTest {
                 fixture.plugin(),
                 "main-1",
                 tracker(),
-                snapshot -> {},
+                snapshot -> CompletableFuture.completedFuture(true),
                 logger,
                 Clock.systemUTC());
 
@@ -48,7 +49,7 @@ class MythicMobsIntegrationLoaderTest {
                 fixture.plugin(),
                 "main-1",
                 tracker(),
-                new ArrayList<MythicMobDeathSnapshot>()::add,
+                snapshot -> CompletableFuture.completedFuture(true),
                 new RecordingAdapterLogger(),
                 Clock.systemUTC());
 
@@ -68,7 +69,7 @@ class MythicMobsIntegrationLoaderTest {
                         fixture.plugin(),
                         "main-1",
                         tracker(),
-                        snapshot -> {},
+                        snapshot -> CompletableFuture.completedFuture(true),
                         new RecordingAdapterLogger(),
                         Clock.systemUTC(),
                         "com.immortalmc.adapter.mythicmobs.MissingIntegration"));

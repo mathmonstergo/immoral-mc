@@ -6,7 +6,8 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.time.Clock;
 import java.util.Objects;
-import java.util.function.Consumer;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class MythicMobsIntegrationLoader {
@@ -19,7 +20,7 @@ public final class MythicMobsIntegrationLoader {
             JavaPlugin plugin,
             String serverId,
             CombatAttributionTracker tracker,
-            Consumer<MythicMobDeathSnapshot> snapshotSink,
+            Function<MythicMobDeathSnapshot, CompletableFuture<Boolean>> snapshotSink,
             AdapterLogger logger,
             Clock clock) {
         return enableIfAvailable(
@@ -36,7 +37,7 @@ public final class MythicMobsIntegrationLoader {
             JavaPlugin plugin,
             String serverId,
             CombatAttributionTracker tracker,
-            Consumer<MythicMobDeathSnapshot> snapshotSink,
+            Function<MythicMobDeathSnapshot, CompletableFuture<Boolean>> snapshotSink,
             AdapterLogger logger,
             Clock clock,
             String implementationClass) {
@@ -57,7 +58,7 @@ public final class MythicMobsIntegrationLoader {
                     JavaPlugin.class,
                     String.class,
                     CombatAttributionTracker.class,
-                    Consumer.class,
+                    Function.class,
                     AdapterLogger.class,
                     Clock.class);
             MythicMobsIntegrationHandle handle = (MythicMobsIntegrationHandle) enable.invoke(

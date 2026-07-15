@@ -247,11 +247,11 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
 - Modify: `minecraft-nodes/main-plugin/README.md`
 - Modify: `minecraft-nodes/main-server/README.md`
 
-- [ ] **Step 1: Wire startup order**: settings → GameServiceClient → attribution tracker → SQLite outbox → delivery worker → optional MythicMobs loader/listener. Log server ID, integration availability, and outbox path without player payloads.
-- [ ] **Step 2: Wire shutdown order**: stop listener, stop scheduler, drain/close writer, checkpoint/close SQLite, then clear existing session/quest state. No new event may be accepted after outbox shutdown begins.
-- [ ] **Step 3: Add resource/config tests** for soft dependency, official free API version, default outbox settings, no Premium artifact references, and catalog content loading.
-- [ ] **Step 4: Document operator flow**: define a native MythicMobs mob key, add matching Game Service catalog entry, reload/restart both services, verify unknown-ID behavior, and inspect pending/dead-letter metrics.
-- [ ] **Step 5: Run full project checks**:
+- [x] **Step 1: Wire startup order**: settings → GameServiceClient → attribution tracker → SQLite outbox → delivery worker → optional MythicMobs loader/listener. Log server ID, integration availability, and outbox path without player payloads.
+- [x] **Step 2: Wire shutdown order**: stop listener, stop scheduler, drain/close writer, checkpoint/close SQLite, then clear existing session/quest state. No new event may be accepted after outbox shutdown begins.
+- [x] **Step 3: Add resource/config tests** for soft dependency, official free API version, default outbox settings, no Premium artifact references, and catalog content loading.
+- [x] **Step 4: Document operator flow**: define a native MythicMobs mob key, add matching Game Service catalog entry, reload/restart both services, verify unknown-ID behavior, and inspect pending/dead-letter metrics.
+- [x] **Step 5: Run full project checks**:
 
   ```bash
   cd game-service && uv run ruff check . && uv run pytest -q
@@ -259,7 +259,7 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
   ```
 
   Expected: Python tests, Java tests, and plugin build are green.
-- [ ] **Step 6: Commit** `feat: wire MythicMobs cultivation reward vertical slice`.
+- [x] **Step 6: Commit** `feat: wire MythicMobs cultivation reward vertical slice`.
 
 ## Task 8: Real-server smoke, quality gate, and handoff
 

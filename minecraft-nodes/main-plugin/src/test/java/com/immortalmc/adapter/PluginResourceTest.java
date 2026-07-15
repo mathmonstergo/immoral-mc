@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
 class PluginResourceTest {
@@ -54,6 +56,15 @@ class PluginResourceTest {
         assertTrue(dialogueYml.contains("sound: \"entity.villager.ambient\""));
         assertTrue(dialogueYml.contains("opening-lines:"));
         assertTrue(dialogueYml.contains("lines:"));
+    }
+
+    @Test
+    void buildUsesOfficialFreeMythicApiWithoutLocalOrPremiumArtifacts() throws Exception {
+        String build = Files.readString(Path.of("build.gradle.kts"), StandardCharsets.UTF_8);
+
+        assertTrue(build.contains("io.lumine:Mythic-Dist:5.12.1"));
+        assertTrue(!build.contains("Premium"));
+        assertTrue(!build.contains("plugins-new-add"));
     }
 
     private static String readResource(String path) throws IOException {

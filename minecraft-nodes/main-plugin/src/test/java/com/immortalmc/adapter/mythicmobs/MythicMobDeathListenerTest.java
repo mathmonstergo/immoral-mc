@@ -22,6 +22,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
@@ -83,7 +84,10 @@ class MythicMobDeathListenerTest {
         MythicMobDeathListener listener = new MythicMobDeathListener(
                 "main-1",
                 tracker,
-                snapshots::add,
+                snapshot -> {
+                    snapshots.add(snapshot);
+                    return CompletableFuture.completedFuture(true);
+                },
                 logger,
                 Clock.fixed(NOW, ZoneOffset.UTC));
 
@@ -100,6 +104,37 @@ class MythicMobDeathListenerTest {
 
         assertThrows(IllegalArgumentException.class, () -> fixture.listener().onDeath(event(Double.NaN)));
         assertTrue(fixture.snapshots().isEmpty());
+    }
+
+    @Test
+    void localCaptureFailureIsLoggedWithoutGrantingAnyFallback() {
+        CombatAttributionTracker tracker =
+                new CombatAttributionTracker(Duration.ofMinutes(15), 100);
+        tracker.recordDamage(
+                ENTITY_ID,
+                new CombatSource(
+                        PLAYER_ID,
+                        LIFE_ID,
+                        null,
+                        null,
+                        CombatAttributionKind.DIRECT,
+                        NOW.minusSeconds(1),
+                        NOW.plusSeconds(60)),
+                10.0,
+                true,
+                NOW);
+        RecordingAdapterLogger logger = new RecordingAdapterLogger();
+        MythicMobDeathListener listener = new MythicMobDeathListener(
+                "main-1",
+                tracker,
+                snapshot -> CompletableFuture.failedFuture(new IllegalStateException("disk full")),
+                logger,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+
+        listener.onDeath(event(12.5));
+
+        assertTrue(logger.messagesAt("error").stream()
+                .anyMatch(message -> message.contains("combat_kill_capture_failed")));
     }
 
     private static Fixture fixtureWithAttribution(String serverId) {
@@ -122,7 +157,10 @@ class MythicMobDeathListenerTest {
         MythicMobDeathListener listener = new MythicMobDeathListener(
                 serverId,
                 tracker,
-                snapshots::add,
+                snapshot -> {
+                    snapshots.add(snapshot);
+                    return CompletableFuture.completedFuture(true);
+                },
                 new RecordingAdapterLogger(),
                 Clock.fixed(NOW, ZoneOffset.UTC));
         return new Fixture(listener, snapshots);

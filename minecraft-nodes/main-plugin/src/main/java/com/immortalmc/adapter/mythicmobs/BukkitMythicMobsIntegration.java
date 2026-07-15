@@ -4,7 +4,8 @@ import com.immortalmc.adapter.combat.CombatAttributionTracker;
 import com.immortalmc.adapter.logging.AdapterLogger;
 import java.time.Clock;
 import java.util.Objects;
-import java.util.function.Consumer;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class BukkitMythicMobsIntegration {
@@ -14,7 +15,7 @@ public final class BukkitMythicMobsIntegration {
             JavaPlugin plugin,
             String serverId,
             CombatAttributionTracker tracker,
-            Consumer<MythicMobDeathSnapshot> snapshotSink,
+            Function<MythicMobDeathSnapshot, CompletableFuture<Boolean>> snapshotSink,
             AdapterLogger logger,
             Clock clock) {
         Objects.requireNonNull(plugin, "plugin");

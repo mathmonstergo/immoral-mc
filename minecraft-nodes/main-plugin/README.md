@@ -51,6 +51,36 @@ This command uses the cached Game Service `account_id`, calls
 returned spirit-root payload. The Java plugin does not roll spirit roots or
 persist player progression state.
 
+## MythicMobs cultivation rewards
+
+The plugin compiles against the official free-distribution MythicMobs `5.12.1`
+API and listens to typed `MythicMobDeathEvent` events. A reward event is
+captured only when ImmortalMC already recorded a lethal player-owned combat
+source; MythicMobs `getKiller()` is not used as a fallback.
+
+Operator flow:
+
+1. Define the mob with a stable top-level key in native MythicMobs YAML, for
+   example `AzureWolf`.
+2. Add the exact same `internal_name` to
+   `game-service/src/immortal_mmo/combat/mythicmob_rewards.json` with a Game
+   Service-owned reward profile and telemetry mode.
+3. Restart Game Service after catalog changes and restart/reload Paper content.
+4. Kill the mob with a tracked player source. Unknown IDs are acknowledged as
+   `not_rewardable`; no default reward exists.
+
+Every death fact is committed first to
+`plugins/ImmortalMC/combat-outbox.sqlite3` using SQLite WAL and
+`synchronous=FULL`. A separate load-aware worker sends bounded HTTP batches;
+SQLite is not a cultivation database and acknowledged rows are deleted.
+
+Useful outbox inspection:
+
+```bash
+sqlite3 plugins/ImmortalMC/combat-outbox.sqlite3 \
+  "select delivery_status, count(*) from kill_outbox group by delivery_status;"
+```
+
 ## Development Flow
 
 1. Write or update automated tests for the adapter behavior.

@@ -10,7 +10,8 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.function.Consumer;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.event.EventHandler;
@@ -20,14 +21,14 @@ import org.bukkit.event.Listener;
 public final class MythicMobDeathListener implements Listener {
     private final String serverId;
     private final CombatAttributionTracker tracker;
-    private final Consumer<MythicMobDeathSnapshot> snapshotSink;
+    private final Function<MythicMobDeathSnapshot, CompletableFuture<Boolean>> snapshotSink;
     private final AdapterLogger logger;
     private final Clock clock;
 
     public MythicMobDeathListener(
             String serverId,
             CombatAttributionTracker tracker,
-            Consumer<MythicMobDeathSnapshot> snapshotSink,
+            Function<MythicMobDeathSnapshot, CompletableFuture<Boolean>> snapshotSink,
             AdapterLogger logger,
             Clock clock) {
         MythicMobDeathSnapshot.eventId(serverId, new UUID(0L, 0L));
@@ -63,7 +64,11 @@ public final class MythicMobDeathListener implements Listener {
                 location.getY(),
                 location.getZ(),
                 occurredAt);
-        snapshotSink.accept(snapshot);
+        try {
+            snapshotSink.apply(snapshot).join();
+        } catch (RuntimeException error) {
+            logger.error("combat_kill_capture_failed entity_uuid=" + entityUuid, error);
+        }
     }
 
     private static BigDecimal level(double value) {

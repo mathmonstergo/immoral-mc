@@ -1,7 +1,11 @@
 package com.immortalmc.adapter;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.immortalmc.adapter.client.CombatKillEventRequest;
 import com.immortalmc.adapter.client.GameServiceClient;
 import com.immortalmc.adapter.client.PlayerLoginResult;
+import com.immortalmc.adapter.combat.BukkitCombatAttributionListener;
+import com.immortalmc.adapter.combat.CombatAttributionTracker;
 import com.immortalmc.adapter.citizens.CitizensIntegrationHandle;
 import com.immortalmc.adapter.citizens.CitizensIntegrationLoader;
 import com.immortalmc.adapter.citizens.CitizensNpcResolver;
@@ -18,6 +22,7 @@ import com.immortalmc.adapter.command.SpiritRootCommandMessages;
 import com.immortalmc.adapter.command.SpiritRootCommandRunner;
 import com.immortalmc.adapter.command.SpiritRootDetectorAdminMessages;
 import com.immortalmc.adapter.command.SpiritRootDetectorAdminRunner;
+import com.immortalmc.adapter.config.CombatSettings;
 import com.immortalmc.adapter.config.PluginSettings;
 import com.immortalmc.adapter.content.BukkitConfigEntityInteractionRepository;
 import com.immortalmc.adapter.content.EntityInteractionRegistry;
@@ -38,6 +43,11 @@ import com.immortalmc.adapter.interaction.BukkitEntityInteractionContext;
 import com.immortalmc.adapter.interaction.EntityInteractionActionRouter;
 import com.immortalmc.adapter.logging.AdapterLogger;
 import com.immortalmc.adapter.logging.PaperAdapterLogger;
+import com.immortalmc.adapter.mythicmobs.MythicMobsIntegrationHandle;
+import com.immortalmc.adapter.mythicmobs.MythicMobsIntegrationLoader;
+import com.immortalmc.adapter.outbox.OutboxDeliveryPolicy;
+import com.immortalmc.adapter.outbox.OutboxDeliveryWorker;
+import com.immortalmc.adapter.outbox.SqliteKillOutbox;
 import com.immortalmc.adapter.presentation.BukkitQuestOfferLabelPresenter;
 import com.immortalmc.adapter.presentation.BukkitQuestScoreboardView;
 import com.immortalmc.adapter.presentation.BukkitSpiritRootParticlePresenter;
@@ -70,6 +80,7 @@ import org.bukkit.Registry;
 import org.bukkit.Sound;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.entity.Player;
+import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -79,6 +90,10 @@ public final class ImmortalMainPlugin extends JavaPlugin {
     private QuestNpcCoordinator questNpcCoordinator;
     private QuestScoreboardRenderer questScoreboards;
     private BukkitTask questCoordinatorTask;
+    private BukkitCombatAttributionListener combatAttributionListener;
+    private SqliteKillOutbox combatOutbox;
+    private OutboxDeliveryWorker combatDeliveryWorker;
+    private MythicMobsIntegrationHandle mythicMobsIntegration;
 
     @Override
     public void onEnable() {
@@ -91,11 +106,50 @@ public final class ImmortalMainPlugin extends JavaPlugin {
 
         PluginSettings settings = PluginSettings.from(
                 getConfig().getString("game-service.base-url", "http://127.0.0.1:8000"));
+        CombatSettings combatSettings = CombatSettings.from(getConfig());
         AdapterLogger adapterLogger = new PaperAdapterLogger(getLogger());
         GameServiceClient gameServiceClient =
                 new GameServiceClient(settings.gameServiceBaseUri(), HttpClient.newHttpClient());
         QuestProviderCatalogCache questProviderCatalog = new QuestProviderCatalogCache();
         sessionCache = new PlayerSessionCache();
+        CombatAttributionTracker combatTracker = new CombatAttributionTracker(
+                combatSettings.maxSourceAge(),
+                combatSettings.maxActiveTargets());
+        combatOutbox = new SqliteKillOutbox(
+                getDataFolder().toPath().resolve(combatSettings.outboxFile()),
+                combatSettings.busyTimeout(),
+                combatSettings.writerQueueCapacity(),
+                Clock.systemUTC(),
+                new ObjectMapper());
+        combatDeliveryWorker = new OutboxDeliveryWorker(
+                combatOutbox,
+                requests -> gameServiceClient.sendCombatKills(requests),
+                new OutboxDeliveryPolicy(
+                        combatSettings.normalDeliveryInterval(),
+                        combatSettings.highLoadDeliveryInterval(),
+                        combatSettings.tpsThreshold(),
+                        combatSettings.batchSize(),
+                        combatSettings.highLoadBatchSize(),
+                        combatSettings.maxPendingAge(),
+                        combatSettings.leaseDuration(),
+                        combatSettings.maxAttempts(),
+                        Duration.ofSeconds(1),
+                        Duration.ofSeconds(60)),
+                Clock.systemUTC(),
+                adapterLogger);
+        combatAttributionListener = new BukkitCombatAttributionListener(
+                combatTracker,
+                sessionCache,
+                Clock.systemUTC(),
+                combatSettings.maxSourceAge());
+        getServer().getPluginManager().registerEvents(combatAttributionListener, this);
+        mythicMobsIntegration = MythicMobsIntegrationLoader.enableIfAvailable(
+                this,
+                combatSettings.serverId(),
+                combatTracker,
+                snapshot -> combatOutbox.append(CombatKillEventRequest.fromSnapshot(snapshot)),
+                adapterLogger,
+                Clock.systemUTC());
         QuestInteractionCache questCache = new QuestInteractionCache();
         questRequests = new QuestRequestCoordinator(
                 gameServiceClient,
@@ -257,6 +311,8 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 new EntityInteractionProtectionListener(entityInteractionRegistry, citizensNpcResolver),
                 this);
 
+        combatDeliveryWorker.start(() -> getServer().getTPS()[0]);
+
         questCoordinatorTask = getServer().getScheduler().runTaskTimer(this, () -> {
             questNpcIndex.replaceAll(questNpcSource.snapshot());
             questNpcCoordinator.tick(onlineQuestPlayers(), Instant.now());
@@ -269,11 +325,31 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 + "; NPC dialogues loaded: "
                 + loadedDialogues
                 + "; Citizens integration: "
-                + (citizensEnabled ? "enabled" : "unavailable"));
+                + (citizensEnabled ? "enabled" : "unavailable")
+                + "; MythicMobs integration: "
+                + (mythicMobsIntegration.available() ? "enabled" : "unavailable")
+                + "; combat outbox: "
+                + getDataFolder().toPath().resolve(combatSettings.outboxFile()));
     }
 
     @Override
     public void onDisable() {
+        if (mythicMobsIntegration != null) {
+            mythicMobsIntegration.close();
+            mythicMobsIntegration = null;
+        }
+        if (combatAttributionListener != null) {
+            HandlerList.unregisterAll(combatAttributionListener);
+            combatAttributionListener = null;
+        }
+        if (combatDeliveryWorker != null) {
+            combatDeliveryWorker.close();
+            combatDeliveryWorker = null;
+        }
+        if (combatOutbox != null) {
+            combatOutbox.close();
+            combatOutbox = null;
+        }
         if (questCoordinatorTask != null) {
             questCoordinatorTask.cancel();
             questCoordinatorTask = null;

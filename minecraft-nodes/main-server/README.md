@@ -63,6 +63,25 @@ tail -n 80 /home/adam/projects/immortal_mc/minecraft-nodes/main-server/logs/late
 Plugin debug/status details belong in Paper logs, not player chat. Player chat
 should only show intentional gameplay feedback.
 
+## MythicMobs free 5.12.1 smoke
+
+Use the official free-distribution jar, not the old Premium snapshot:
+
+```bash
+cp /home/adam/projects/immortal_mc/plugins-new-add/MythicMobs-5.12.1.jar \
+  /home/adam/projects/immortal_mc/minecraft-nodes/main-server/plugins/MythicMobs.jar
+```
+
+The verified jar SHA-256 is:
+
+```text
+3781927033898c75b0c4e21a8eee1756ca822d80160430c3da9de760c9137cd1
+```
+
+After Paper starts, confirm `MythicMobs` and `ImmortalMC` enable without
+`SEVERE`/linkage errors. Configure mobs through normal MythicMobs YAML; the
+top-level mob key must match the Game Service reward catalog exactly.
+
 `online-mode=false`, `enforce-secure-profile=false`, and
 `prevent-proxy-connections=false` are set for local-only testing. Do not use
 this config for a public server.
