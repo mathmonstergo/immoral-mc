@@ -62,11 +62,15 @@ immutable facts into an Adapter-owned request object:
 * dead entity UUID;
 * `event.getMobType().getInternalName()`;
 * Mythic mob level;
-* killer Minecraft UUID, only when `event.getKiller() instanceof Player`;
+* player/source identity from ImmortalMC's consumed lethal attribution record;
 * world/position and occurred-at timestamp as non-authoritative audit facts.
 
 Then release all Bukkit/Mythic object references and send the HTTP request
 asynchronously. Do not access Bukkit or Mythic objects from the HTTP callback.
+`MythicMobDeathEvent#getKiller()` is deliberately not used to reconstruct a
+missing source. Ordinary player melee/projectile damage is recorded earlier by
+the Bukkit attribution listener, while custom delayed effects must preserve an
+explicit `CombatSource`; missing attribution produces no reward event.
 
 The stable source event identity should be derived from the configured server
 ID plus the dead Mythic entity UUID. A new random UUID generated for every HTTP

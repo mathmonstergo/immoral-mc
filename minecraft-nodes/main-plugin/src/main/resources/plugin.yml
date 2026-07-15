@@ -6,8 +6,10 @@ author: sensen
 api-version: '1.21.11'
 libraries:
   - com.fasterxml.jackson.core:jackson-databind:2.18.2
+  - org.xerial:sqlite-jdbc:3.53.2.0
 softdepend:
   - Citizens
+  - MythicMobs
 commands:
   immortal:
     description: ImmortalMC adapter operations.

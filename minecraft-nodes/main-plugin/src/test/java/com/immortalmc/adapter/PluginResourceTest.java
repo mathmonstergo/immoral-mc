@@ -19,6 +19,8 @@ class PluginResourceTest {
         assertTrue(pluginYml.contains(
                 "usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue|quest>"));
         assertTrue(pluginYml.contains("com.fasterxml.jackson.core:jackson-databind:2.18.2"));
+        assertTrue(pluginYml.contains("org.xerial:sqlite-jdbc:3.53.2.0"));
+        assertTrue(pluginYml.contains("- MythicMobs"));
     }
 
     @Test
@@ -32,6 +34,13 @@ class PluginResourceTest {
         assertTrue(configYml.contains("scan-interval-ticks: 10"));
         assertTrue(configYml.contains("proximity-radius: 6.0"));
         assertTrue(configYml.contains("max-players-per-scan: 100"));
+        assertTrue(configYml.contains("server-id: \"main-1\""));
+        assertTrue(configYml.contains("max-source-age-seconds: 900"));
+        assertTrue(configYml.contains("max-active-targets: 20000"));
+        assertTrue(configYml.contains("normal-interval-ms: 1000"));
+        assertTrue(configYml.contains("high-load-interval-ms: 5000"));
+        assertTrue(configYml.contains("batch-size: 100"));
+        assertTrue(configYml.contains("max-pending-age-seconds: 30"));
     }
 
     @Test

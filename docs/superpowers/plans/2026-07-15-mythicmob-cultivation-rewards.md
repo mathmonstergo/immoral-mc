@@ -182,19 +182,19 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
 - Test: `minecraft-nodes/main-plugin/src/test/java/com/immortalmc/adapter/mythicmobs/MythicMobDeathListenerTest.java`
 - Test: `minecraft-nodes/main-plugin/src/test/java/com/immortalmc/adapter/mythicmobs/MythicMobsIntegrationLoaderTest.java`
 
-- [ ] **Step 1: Add compile-only Mythic-Dist 5.12.1** from the official Maven repository and add Xerial SQLite JDBC through the verified Paper library mechanism. Do not shade MythicMobs or include Premium jars.
-- [ ] **Step 2: Add `softdepend: [Citizens, MythicMobs]` and explicit config defaults** for server ID, attribution limits, delivery cadence, batch limits, and max pending age.
-- [ ] **Step 3: Write listener tests** using adapter-owned immutable fixtures for exact internal name, mob level, entity UUID, world, coordinates, killer/source mapping, stable event ID, non-player filtering, and incompatible/missing plugin states.
-- [ ] **Step 4: Implement the optional loader** following the Citizens integration pattern. Class loading of Mythic-linked types occurs only inside the enabled integration path. Missing MythicMobs logs unavailable; incompatible linkage logs severe and disables only this integration unless configured required.
-- [ ] **Step 5: Implement `MythicMobDeathListener`** on the Paper thread: read `MythicMobDeathEvent`, consume required lethal attribution, skip and diagnose deaths with no tracked source, build a compact immutable request with source-life/technique/cast metadata, and hand it to the durable outbox. Never calculate a reward or perform network work here.
-- [ ] **Step 6: Run integration tests**:
+- [x] **Step 1: Add compile-only Mythic-Dist 5.12.1** from the official Maven repository and add Xerial SQLite JDBC through the verified Paper library mechanism. Do not shade MythicMobs or include Premium jars.
+- [x] **Step 2: Add `softdepend: [Citizens, MythicMobs]` and explicit config defaults** for server ID, attribution limits, delivery cadence, batch limits, and max pending age.
+- [x] **Step 3: Write listener tests** using adapter-owned immutable fixtures for exact internal name, mob level, entity UUID, world, coordinates, source mapping, stable event ID, missing-attribution filtering, and incompatible/missing plugin states.
+- [x] **Step 4: Implement the optional loader** following the Citizens integration pattern. Class loading of Mythic-linked types occurs only inside the enabled integration path. Missing MythicMobs logs unavailable; incompatible linkage fails startup visibly with no generic entity fallback.
+- [x] **Step 5: Implement `MythicMobDeathListener`** on the Paper thread: read `MythicMobDeathEvent`, consume required lethal attribution, skip and diagnose deaths with no tracked source, build a compact immutable request with source-life/technique/cast metadata, and hand it to the durable outbox. Never calculate a reward or perform network work here.
+- [x] **Step 6: Run integration tests**:
 
   ```bash
   cd minecraft-nodes/main-plugin && ./gradlew test --tests '*MythicMobDeath*' --tests '*MythicMobsIntegrationLoaderTest'
   ```
 
   Expected: free API compile/test fixtures pass with MythicMobs absent/present paths.
-- [ ] **Step 7: Commit** `feat: capture MythicMobs death facts`.
+- [x] **Step 7: Commit** `feat: capture MythicMobs death facts`.
 
 ## Task 6: Implement SQLite WAL outbox and scheduled batch delivery
 

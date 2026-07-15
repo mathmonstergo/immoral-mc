@@ -1,6 +1,26 @@
 game-service:
   base-url: "http://127.0.0.1:8000"
 
+server-id: "main-1"
+
+combat:
+  attribution:
+    max-source-age-seconds: 900
+    max-active-targets: 20000
+  outbox:
+    file: "combat-outbox.sqlite3"
+    writer-queue-capacity: 4096
+    busy-timeout-ms: 5000
+  delivery:
+    normal-interval-ms: 1000
+    high-load-interval-ms: 5000
+    tps-threshold: 17.0
+    batch-size: 100
+    high-load-batch-size: 200
+    max-pending-age-seconds: 30
+    lease-seconds: 30
+    max-attempts: 20
+
 quest:
   scan-interval-ticks: 10
   proximity-radius: 6.0
