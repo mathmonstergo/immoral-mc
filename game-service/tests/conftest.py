@@ -3,7 +3,11 @@ from collections.abc import AsyncIterator
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from tests.support.postgres import MigratedPostgres, migrated_postgres_container
+from tests.support.postgres import (
+    MigratedPostgres,
+    migrated_postgres_container,
+    rollback_postgres_session,
+)
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
@@ -22,3 +26,9 @@ async def postgres_sessions(
     migrated_postgres: MigratedPostgres,
 ) -> async_sessionmaker[AsyncSession]:
     return migrated_postgres.sessions
+
+
+@pytest_asyncio.fixture
+async def postgres_session(postgres_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
+    async with rollback_postgres_session(postgres_engine) as session:
+        yield session

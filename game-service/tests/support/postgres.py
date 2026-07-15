@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +20,10 @@ from sqlalchemy.pool import NullPool
 from testcontainers.postgres import PostgresContainer
 
 GAME_SERVICE_ROOT = Path(__file__).resolve().parents[2]
+# PostgreSQL 17 Alpine, pinned so migration tests cannot drift with a mutable tag.
+POSTGRES_17_ALPINE_IMAGE = (
+    "postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,14 +63,34 @@ def check_migration_metadata(database_url: str) -> None:
 
 
 @asynccontextmanager
+async def rollback_postgres_session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
+    async with engine.connect() as connection:
+        transaction = await connection.begin()
+        session = AsyncSession(
+            bind=connection,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        try:
+            yield session
+        finally:
+            try:
+                await session.close()
+            finally:
+                if transaction.is_active:
+                    await transaction.rollback()
+
+
+@asynccontextmanager
 async def migrated_postgres_container() -> AsyncIterator[MigratedPostgres]:
-    container = PostgresContainer("postgres:17-alpine")
-    engine: AsyncEngine | None = None
-    await asyncio.to_thread(container.start)
-    try:
+    container = PostgresContainer(POSTGRES_17_ALPINE_IMAGE)
+    async with AsyncExitStack() as cleanup:
+        cleanup.push_async_callback(asyncio.to_thread, container.stop)
+        await asyncio.to_thread(container.start)
         database_url = _asyncpg_url(container)
         await asyncio.to_thread(_upgrade_to_head, database_url)
         engine = create_async_engine(database_url, poolclass=NullPool)
+        cleanup.push_async_callback(engine.dispose)
         sessions = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
         async with engine.connect() as connection:
             server_version = str(
@@ -78,7 +102,3 @@ async def migrated_postgres_container() -> AsyncIterator[MigratedPostgres]:
             sessions=sessions,
             server_version=server_version,
         )
-    finally:
-        if engine is not None:
-            await engine.dispose()
-        await asyncio.to_thread(container.stop)

@@ -7,12 +7,13 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 from tests.support.postgres import (
     MigratedPostgres,
     check_migration_metadata,
     downgrade_postgres,
     migrate_postgres,
+    rollback_postgres_session,
 )
 
 GAMEPLAY_TABLES = {
@@ -145,24 +146,89 @@ async def _insert_life(
     return life_id
 
 
-async def _assert_integrity_error(
+async def _assert_constraint_violation(
     session: AsyncSession,
     statement: str,
     parameters: dict[str, object],
+    *,
+    constraint_name: str,
+    sqlstate: str = "23514",
 ) -> None:
-    with pytest.raises(IntegrityError):
+    with pytest.raises(IntegrityError) as caught:
         async with session.begin_nested():
             await session.execute(text(statement), parameters)
+    assert caught.value.orig.sqlstate == sqlstate
+    assert caught.value.orig.__cause__.constraint_name == constraint_name
 
 
-async def _assert_database_error(
+async def _assert_trigger_rejection(
     session: AsyncSession,
     statement: str,
     parameters: dict[str, object],
+    *,
+    message: str,
 ) -> None:
-    with pytest.raises(DBAPIError):
+    with pytest.raises(DBAPIError) as caught:
         async with session.begin_nested():
             await session.execute(text(statement), parameters)
+    assert caught.value.orig.sqlstate == "P0001"
+    assert str(caught.value.orig.__cause__) == message
+
+
+async def _table_names(connection: AsyncConnection) -> set[str]:
+    return set(
+        (
+            await connection.execute(
+                text(
+                    """
+                    SELECT tablename
+                    FROM pg_tables
+                    WHERE schemaname = 'public'
+                    """
+                )
+            )
+        ).scalars()
+    )
+
+
+async def _function_names(connection: AsyncConnection) -> set[str]:
+    return set(
+        (
+            await connection.execute(
+                text(
+                    """
+                    SELECT proname
+                    FROM pg_proc
+                    JOIN pg_namespace ON pg_namespace.oid = pg_proc.pronamespace
+                    WHERE nspname = 'public'
+                    """
+                )
+            )
+        ).scalars()
+    )
+
+
+async def _trigger_names(connection: AsyncConnection) -> set[str]:
+    return set(
+        (
+            await connection.execute(
+                text(
+                    """
+                    SELECT tgname
+                    FROM pg_trigger
+                    JOIN pg_class ON pg_class.oid = pg_trigger.tgrelid
+                    JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
+                    WHERE nspname = 'public' AND NOT tgisinternal
+                    """
+                )
+            )
+        ).scalars()
+    )
+
+
+async def _assert_empty_gameplay_data(session: AsyncSession) -> None:
+    count = (await session.execute(text("SELECT count(*) FROM accounts"))).scalar_one()
+    assert count == 0
 
 
 @pytest.mark.asyncio
@@ -170,19 +236,7 @@ async def test_upgrade_creates_expected_tables_and_head_revision(
     postgres_engine: AsyncEngine,
 ) -> None:
     async with postgres_engine.connect() as connection:
-        table_names = set(
-            (
-                await connection.execute(
-                    text(
-                        """
-                        SELECT tablename
-                        FROM pg_tables
-                        WHERE schemaname = 'public'
-                        """
-                    )
-                )
-            ).scalars()
-        )
+        table_names = await _table_names(connection)
         revision = (
             await connection.execute(text("SELECT version_num FROM alembic_version"))
         ).scalar_one()
@@ -214,9 +268,17 @@ async def test_schema_has_exact_named_constraints_and_indexes(
             await connection.execute(
                 text(
                     """
-                    SELECT indexname, indexdef
-                    FROM pg_indexes
-                    WHERE schemaname = 'public'
+                    SELECT indexes.indexname, indexes.indexdef
+                    FROM pg_indexes AS indexes
+                    JOIN pg_class AS index_rel
+                      ON index_rel.relname = indexes.indexname
+                    JOIN pg_namespace AS index_ns
+                      ON index_ns.oid = index_rel.relnamespace
+                     AND index_ns.nspname = indexes.schemaname
+                    LEFT JOIN pg_constraint AS constraint_record
+                      ON constraint_record.conindid = index_rel.oid
+                    WHERE indexes.schemaname = 'public'
+                      AND constraint_record.oid IS NULL
                     """
                 )
             )
@@ -229,7 +291,7 @@ async def test_schema_has_exact_named_constraints_and_indexes(
         assert by_table[table_name] == expected
 
     index_definitions = {name: definition for name, definition in index_rows}
-    assert EXPECTED_INDEXES <= index_definitions.keys()
+    assert index_definitions.keys() == EXPECTED_INDEXES
     assert "WHERE ((status)::text = 'alive'::text)" in index_definitions[
         "ux_lives_one_alive_per_account"
     ]
@@ -255,21 +317,7 @@ async def test_schema_has_immutable_functions_and_triggers(
                 )
             )
         ).all()
-        trigger_names = set(
-            (
-                await connection.execute(
-                    text(
-                        """
-                        SELECT tgname
-                        FROM pg_trigger
-                        JOIN pg_class ON pg_class.oid = pg_trigger.tgrelid
-                        JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
-                        WHERE nspname = 'public' AND NOT tgisinternal
-                        """
-                    )
-                )
-            ).scalars()
-        )
+        trigger_names = await _trigger_names(connection)
 
     functions = {name: (volatility, parallel) for name, volatility, parallel in function_rows}
     assert EXPECTED_FUNCTIONS <= functions.keys()
@@ -279,20 +327,23 @@ async def test_schema_has_immutable_functions_and_triggers(
 
 @pytest.mark.asyncio
 async def test_identity_life_and_root_constraints_reject_invalid_rows(
-    postgres_sessions: async_sessionmaker[AsyncSession],
+    postgres_session: AsyncSession,
 ) -> None:
-    async with postgres_sessions() as session, session.begin():
-        await _assert_integrity_error(
+    async with postgres_session.begin():
+        session = postgres_session
+        await _assert_empty_gameplay_data(session)
+        await _assert_constraint_violation(
             session,
             """
             INSERT INTO accounts (account_id, minecraft_uuid, last_known_name)
             VALUES (:account_id, :minecraft_uuid, 'not valid!')
             """,
             {"account_id": uuid4(), "minecraft_uuid": uuid4()},
+            constraint_name="ck_accounts_last_known_name_format",
         )
         account_id = await _insert_account(session)
         now = datetime.now(UTC)
-        await _assert_integrity_error(
+        await _assert_constraint_violation(
             session,
             """
             INSERT INTO account_minecraft_names (
@@ -301,22 +352,26 @@ async def test_identity_life_and_root_constraints_reject_invalid_rows(
             ) VALUES (:observation_id, :account_id, 'Steve', 'STEVE', :now, :now)
             """,
             {"observation_id": uuid4(), "account_id": account_id, "now": now},
+            constraint_name="ck_account_name_normalized",
         )
         life_id = await _insert_life(session, account_id)
-        await _assert_integrity_error(
+        await _assert_constraint_violation(
             session,
             """
             INSERT INTO lives (life_id, account_id, generation_no, status)
             VALUES (:life_id, :account_id, 2, 'alive')
             """,
             {"life_id": uuid4(), "account_id": account_id},
+            constraint_name="ux_lives_one_alive_per_account",
+            sqlstate="23505",
         )
-        await _assert_integrity_error(
+        await _assert_constraint_violation(
             session,
             """
             UPDATE lives SET status = 'reincarnated' WHERE life_id = :life_id
             """,
             {"life_id": life_id},
+            constraint_name="ck_life_terminal_fields",
         )
         for elements in (
             ["wood", "metal"],
@@ -324,7 +379,7 @@ async def test_identity_life_and_root_constraints_reject_invalid_rows(
             ["metal", "void"],
             ["metal", None],
         ):
-            await _assert_integrity_error(
+            await _assert_constraint_violation(
                 session,
                 """
                 INSERT INTO life_spirit_roots (
@@ -332,8 +387,9 @@ async def test_identity_life_and_root_constraints_reject_invalid_rows(
                 ) VALUES (:life_id, 'dual', :elements, 1)
                 """,
                 {"life_id": life_id, "elements": elements},
+                constraint_name="ck_spirit_root_shape",
             )
-        await _assert_integrity_error(
+        await _assert_constraint_violation(
             session,
             """
             INSERT INTO life_spirit_roots (
@@ -342,14 +398,17 @@ async def test_identity_life_and_root_constraints_reject_invalid_rows(
             ) VALUES (:life_id, 'variant', ARRAY['earth'], 'ice', 1)
             """,
             {"life_id": life_id},
+            constraint_name="ck_spirit_root_shape",
         )
 
 
 @pytest.mark.asyncio
 async def test_valid_life_and_root_insert_then_become_immutable(
-    postgres_sessions: async_sessionmaker[AsyncSession],
+    postgres_session: AsyncSession,
 ) -> None:
-    async with postgres_sessions() as session, session.begin():
+    async with postgres_session.begin():
+        session = postgres_session
+        await _assert_empty_gameplay_data(session)
         account_id = await _insert_account(session, name="Alex")
         life_id = await _insert_life(session, account_id)
         await session.execute(
@@ -363,15 +422,17 @@ async def test_valid_life_and_root_insert_then_become_immutable(
             ),
             {"life_id": life_id},
         )
-        await _assert_database_error(
+        await _assert_trigger_rejection(
             session,
             "UPDATE life_spirit_roots SET generator_version = 2 WHERE life_id = :life_id",
             {"life_id": life_id},
+            message="spirit root is immutable",
         )
-        await _assert_database_error(
+        await _assert_trigger_rejection(
             session,
             "DELETE FROM life_spirit_roots WHERE life_id = :life_id",
             {"life_id": life_id},
+            message="spirit root is immutable",
         )
         died_at = datetime.now(UTC) + timedelta(seconds=1)
         await session.execute(
@@ -385,23 +446,27 @@ async def test_valid_life_and_root_insert_then_become_immutable(
             ),
             {"life_id": life_id, "died_at": died_at},
         )
-        await _assert_database_error(
+        await _assert_trigger_rejection(
             session,
             "UPDATE lives SET revision = revision + 1 WHERE life_id = :life_id",
             {"life_id": life_id},
+            message="reincarnated life is immutable",
         )
-        await _assert_database_error(
+        await _assert_trigger_rejection(
             session,
             "DELETE FROM lives WHERE life_id = :life_id",
             {"life_id": life_id},
+            message="life rows are not deleted",
         )
 
 
 @pytest.mark.asyncio
 async def test_quest_progress_only_allows_advancing_completion(
-    postgres_sessions: async_sessionmaker[AsyncSession],
+    postgres_session: AsyncSession,
 ) -> None:
-    async with postgres_sessions() as session, session.begin():
+    async with postgres_session.begin():
+        session = postgres_session
+        await _assert_empty_gameplay_data(session)
         account_id = await _insert_account(session, name="Questor")
         life_id = await _insert_life(session, account_id)
         accepted_at = datetime.now(UTC)
@@ -417,7 +482,7 @@ async def test_quest_progress_only_allows_advancing_completion(
             ),
             {"life_id": life_id, "accepted_at": accepted_at},
         )
-        await _assert_database_error(
+        await _assert_trigger_rejection(
             session,
             """
             UPDATE quest_progress
@@ -426,8 +491,9 @@ async def test_quest_progress_only_allows_advancing_completion(
             WHERE life_id = :life_id AND quest_id = 'first-steps'
             """,
             {"life_id": life_id, "completed_at": completed_at},
+            message="quest progress identity and acceptance facts are immutable",
         )
-        await _assert_database_error(
+        await _assert_trigger_rejection(
             session,
             """
             UPDATE quest_progress
@@ -435,6 +501,7 @@ async def test_quest_progress_only_allows_advancing_completion(
             WHERE life_id = :life_id AND quest_id = 'first-steps'
             """,
             {"life_id": life_id, "completed_at": completed_at},
+            message="quest progress revision must advance",
         )
         await session.execute(
             text(
@@ -447,7 +514,7 @@ async def test_quest_progress_only_allows_advancing_completion(
             ),
             {"life_id": life_id, "completed_at": completed_at},
         )
-        await _assert_database_error(
+        await _assert_trigger_rejection(
             session,
             """
             UPDATE quest_progress
@@ -455,24 +522,28 @@ async def test_quest_progress_only_allows_advancing_completion(
             WHERE life_id = :life_id AND quest_id = 'first-steps'
             """,
             {"life_id": life_id},
+            message="quest progress only transitions active to completed",
         )
-        await _assert_database_error(
+        await _assert_trigger_rejection(
             session,
             "DELETE FROM quest_progress WHERE life_id = :life_id",
             {"life_id": life_id},
+            message="quest progress rows are not deleted",
         )
 
 
 @pytest.mark.asyncio
 async def test_quest_operations_require_complete_finalization_and_then_freeze(
-    postgres_sessions: async_sessionmaker[AsyncSession],
+    postgres_session: AsyncSession,
 ) -> None:
-    async with postgres_sessions() as session, session.begin():
+    async with postgres_session.begin():
+        session = postgres_session
+        await _assert_empty_gameplay_data(session)
         account_id = await _insert_account(session, name="Operator")
         life_id = await _insert_life(session, account_id)
         operation_id = uuid4()
         fingerprint = "a" * 64
-        await _assert_integrity_error(
+        await _assert_constraint_violation(
             session,
             """
             INSERT INTO quest_operations (
@@ -489,6 +560,7 @@ async def test_quest_operations_require_complete_finalization_and_then_freeze(
                 "life_id": life_id,
                 "fingerprint": fingerprint,
             },
+            constraint_name="ck_quest_operation_finalization",
         )
         await session.execute(
             text(
@@ -509,7 +581,7 @@ async def test_quest_operations_require_complete_finalization_and_then_freeze(
                 "fingerprint": fingerprint,
             },
         )
-        await _assert_database_error(
+        await _assert_trigger_rejection(
             session,
             """
             UPDATE quest_operations
@@ -520,6 +592,7 @@ async def test_quest_operations_require_complete_finalization_and_then_freeze(
             WHERE operation_id = :operation_id
             """,
             {"operation_id": operation_id, "body": b'{"ok":true}'},
+            message="quest operation request identity is immutable",
         )
         await session.execute(
             text(
@@ -533,15 +606,17 @@ async def test_quest_operations_require_complete_finalization_and_then_freeze(
             ),
             {"operation_id": operation_id, "body": b'{"ok":true}'},
         )
-        await _assert_database_error(
+        await _assert_trigger_rejection(
             session,
             "UPDATE quest_operations SET changed = FALSE WHERE operation_id = :operation_id",
             {"operation_id": operation_id},
+            message="finalized quest operations are immutable",
         )
-        await _assert_database_error(
+        await _assert_trigger_rejection(
             session,
             "DELETE FROM quest_operations WHERE operation_id = :operation_id",
             {"operation_id": operation_id},
+            message="quest operation rows are not deleted",
         )
         stored_body = (
             await session.execute(
@@ -585,6 +660,26 @@ async def test_quest_operations_require_complete_finalization_and_then_freeze(
             ),
             {"operation_id": failed_operation_id, "body": b'{"error":"conflict"}'},
         )
+        failed_row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT state, changed, response_status, response_content_type,
+                           response_body, response_contract_version, finalized_at
+                    FROM quest_operations
+                    WHERE operation_id = :operation_id
+                    """
+                ),
+                {"operation_id": failed_operation_id},
+            )
+        ).one()
+        assert failed_row.state == "domain_failed"
+        assert failed_row.changed is False
+        assert failed_row.response_status == 409
+        assert failed_row.response_content_type == "application/json"
+        assert failed_row.response_body == b'{"error":"conflict"}'
+        assert failed_row.response_contract_version == 1
+        assert failed_row.finalized_at is not None
 
 
 @pytest.mark.asyncio
@@ -593,6 +688,20 @@ async def test_postgres_fixture_uses_requested_major_version(
 ) -> None:
     assert migrated_postgres.url.startswith("postgresql+asyncpg://")
     assert migrated_postgres.server_version.startswith("17.")
+
+
+@pytest.mark.asyncio
+async def test_rollback_session_does_not_persist_rows(
+    postgres_engine: AsyncEngine,
+) -> None:
+    async with rollback_postgres_session(postgres_engine) as session:
+        async with session.begin():
+            await _assert_empty_gameplay_data(session)
+            await _insert_account(session, name="Transient")
+
+    async with postgres_engine.connect() as connection:
+        count = (await connection.execute(text("SELECT count(*) FROM accounts"))).scalar_one()
+    assert count == 0
 
 
 @pytest.mark.asyncio
@@ -609,35 +718,12 @@ async def test_downgrade_removes_schema_and_upgrade_restores_head(
     await asyncio.to_thread(downgrade_postgres, migrated_postgres.url, "base")
     try:
         async with migrated_postgres.engine.connect() as connection:
-            table_names = set(
-                (
-                    await connection.execute(
-                        text(
-                            """
-                            SELECT tablename
-                            FROM pg_tables
-                            WHERE schemaname = 'public'
-                            """
-                        )
-                    )
-                ).scalars()
-            )
-            function_names = set(
-                (
-                    await connection.execute(
-                        text(
-                            """
-                            SELECT proname
-                            FROM pg_proc
-                            JOIN pg_namespace ON pg_namespace.oid = pg_proc.pronamespace
-                            WHERE nspname = 'public'
-                            """
-                        )
-                    )
-                ).scalars()
-            )
+            table_names = await _table_names(connection)
+            function_names = await _function_names(connection)
+            trigger_names = await _trigger_names(connection)
         assert table_names == {"alembic_version"}
         assert EXPECTED_FUNCTIONS.isdisjoint(function_names)
+        assert EXPECTED_TRIGGERS.isdisjoint(trigger_names)
     finally:
         await asyncio.to_thread(migrate_postgres, migrated_postgres.url, "head")
 
@@ -645,4 +731,10 @@ async def test_downgrade_removes_schema_and_upgrade_restores_head(
         revision = (
             await connection.execute(text("SELECT version_num FROM alembic_version"))
         ).scalar_one()
+        restored_tables = await _table_names(connection)
+        restored_functions = await _function_names(connection)
+        restored_triggers = await _trigger_names(connection)
     assert revision == "20260714_001"
+    assert restored_tables - {"alembic_version"} == GAMEPLAY_TABLES
+    assert EXPECTED_FUNCTIONS <= restored_functions
+    assert restored_triggers == EXPECTED_TRIGGERS
