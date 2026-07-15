@@ -25,7 +25,9 @@ def create_app(
     )
     app.state.player_service = PlayerService(uow_factory)
     app.state.quest_service = QuestService(uow_factory)
-    app.state.readiness_check = readiness_check or not_configured_readiness
+    app.state.readiness_check = (
+        readiness_check if readiness_check is not None else not_configured_readiness
+    )
     app.add_exception_handler(DomainError, domain_error_handler)
     app.include_router(api_router)
     return app

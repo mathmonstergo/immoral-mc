@@ -18,6 +18,7 @@ def test_entrypoint_import_requires_database_url(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("database_url", raising=False)
     sys.modules.pop("immortal_mmo.entrypoint", None)
 
     with pytest.raises(ValidationError, match="database_url"):
@@ -27,6 +28,23 @@ def test_entrypoint_import_requires_database_url(
 def test_application_composition_requires_explicit_unit_of_work_factory() -> None:
     with pytest.raises(TypeError):
         create_app()
+
+
+def test_application_composition_preserves_a_falsey_readiness_check() -> None:
+    class FalseyReadinessCheck:
+        def __bool__(self) -> bool:
+            return False
+
+        async def __call__(self) -> object:
+            raise AssertionError("not called by composition")
+
+    readiness_check = FalseyReadinessCheck()
+    app = create_app(
+        uow_factory=lambda **kwargs: None,
+        readiness_check=readiness_check,
+    )
+
+    assert app.state.readiness_check is readiness_check
 
 
 def test_production_modules_do_not_import_test_fakes_or_in_memory_repositories() -> None:
