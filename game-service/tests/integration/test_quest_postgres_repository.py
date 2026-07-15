@@ -661,38 +661,39 @@ async def test_current_life_query_can_use_partial_alive_index_with_history(
     del clean_postgres_data
     _, _, account_id, _ = await logged_in(postgres_sessions, 111)
     async with postgres_sessions.begin() as session:
-        for index in range(200):
-            other_account_id = uuid4()
-            await session.execute(
-                text(
-                    """
-                    INSERT INTO accounts (
-                        account_id, minecraft_uuid, last_known_name
-                    ) VALUES (:account_id, :minecraft_uuid, :player_name)
-                    """
-                ),
-                {
-                    "account_id": other_account_id,
-                    "minecraft_uuid": uuid4(),
-                    "player_name": f"Hist{index}",
-                },
+        await session.execute(
+            text(
+                """
+                INSERT INTO accounts (
+                    account_id, minecraft_uuid, last_known_name
+                )
+                SELECT
+                    md5('history-account-' || generation)::uuid,
+                    md5('history-minecraft-' || generation)::uuid,
+                    'Hist' || generation
+                FROM generate_series(1, 5000) AS history(generation)
+                """
             )
-            await session.execute(
-                text(
-                    """
-                    INSERT INTO lives (
-                        life_id, account_id, generation_no, status,
-                        died_at, death_cause_code
-                    ) VALUES (
-                        :life_id, :account_id, 1, 'reincarnated',
-                        now(), 'test_history'
-                    )
-                    """
-                ),
-                {"life_id": uuid4(), "account_id": other_account_id},
+        )
+        await session.execute(
+            text(
+                """
+                INSERT INTO lives (
+                    life_id, account_id, generation_no, status,
+                    died_at, death_cause_code
+                )
+                SELECT
+                    md5('history-life-' || generation)::uuid,
+                    md5('history-account-' || generation)::uuid,
+                    1,
+                    'reincarnated',
+                    now(),
+                    'test_history'
+                FROM generate_series(1, 5000) AS history(generation)
+                """
             )
+        )
         await session.execute(text("ANALYZE lives"))
-        await session.execute(text("SET LOCAL enable_seqscan = off"))
         plan = (
             await session.execute(
                 text(
@@ -705,6 +706,5 @@ async def test_current_life_query_can_use_partial_alive_index_with_history(
                 {"account_id": account_id},
             )
         ).scalars().all()
-        await session.execute(text("RESET enable_seqscan"))
 
     assert "ux_lives_one_alive_per_account" in "\n".join(plan)
