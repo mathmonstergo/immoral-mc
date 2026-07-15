@@ -149,9 +149,22 @@ policies are deferred, but the tracker boundary permits them without changing
 the outbox authority model.
 
 At death, the listener consumes the most recent lethal attribution record. If
-no ImmortalMC record exists, it may use the Mythic/Paper killer only when it
-resolves directly to a Player. Attribution entries expire and are cleared on
-death, despawn, unload, and plugin shutdown.
+no ImmortalMC record exists, it may use the Mythic/Paper killer only when the
+lethal Bukkit `DamageSource` itself resolves to a direct/indirect Player. A
+generic `getKiller()` value cannot resurrect ownership for an untracked poison,
+fire, custom timer, or post-restart effect. Those ambiguous sources produce no
+player reward and a visible attribution diagnostic. Attribution entries expire
+and are cleared on death, despawn, unload, and plugin shutdown.
+
+The tracker is bounded by both effect expiry and process limits. Each technique
+source declares an expiry (longer effects must renew their source), and the
+Adapter enforces a maximum source age and maximum active-target count. The
+initial operational defaults are 900 seconds and 20,000 targets; eviction is a
+visible metric and never silently becomes a player reward.
+
+The tracker observes final-priority, uncancelled damage events. It records a
+source only after other plugins have had a chance to cancel or modify the
+damage, so blocked hits and pre-mitigation values cannot become lethal credit.
 
 On the Paper thread, the listener copies these values and then releases all
 Bukkit/Mythic object references:
@@ -193,6 +206,11 @@ The version-one request is conceptually:
   "occurred_at": "2026-07-15T12:00:00Z"
 }
 ```
+
+For version 1, the request `event_id` is the Game Service
+`source_event_id` after UUID parsing; there is no second client-generated
+idempotency key. `kill_event_id` is the separate PostgreSQL row identity
+created when the source fact is first accepted.
 
 Mob level crosses the boundary as a bounded decimal string and is parsed into a
 fixed-precision decimal. NaN, infinities, negative values, excessive precision,
@@ -524,7 +542,46 @@ unique conflict is handled by rolling back/retrying the short transaction and
 loading the committed source result; code never continues in an aborted
 SQLAlchemy transaction.
 
-## 9. HTTP Outcomes
+## 9. HTTP Contract and Outcomes
+
+The Adapter sends batches to:
+
+```text
+POST /api/v1/combat/mythicmob-kills/batch
+Content-Type: application/json
+```
+
+The request contains `contract_version` and an `events` array of at most the
+configured batch size. The response is HTTP 200 with one independent result per
+input event:
+
+```json
+{
+  "contract_version": 1,
+  "results": [
+    {
+      "event_id": "uuid",
+      "outcome": "accepted",
+      "kill_event_id": "uuid",
+      "life_id": "uuid",
+      "reward_amount": 120,
+      "unrefined_balance": 4800
+    },
+    {
+      "event_id": "uuid",
+      "outcome": "not_rewardable",
+      "kill_event_id": "uuid",
+      "reward_amount": null
+    }
+  ]
+}
+```
+
+HTTP 429/503/5xx applies to the whole batch and is retryable; the optional
+`Retry-After` header informs the next scheduled attempt. A successful HTTP
+response always includes a result for every submitted event. The Adapter
+dead-letters a response that is missing, duplicates, or reassigns an event ID
+instead of guessing which rows were processed.
 
 The batch endpoint returns one stable result per event. All valid terminal
 domain outcomes are safe for the Adapter to acknowledge:

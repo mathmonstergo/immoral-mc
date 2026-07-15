@@ -77,6 +77,9 @@ short local commit, while all network delivery is asynchronous.
   damage. A lethal damage-over-time tick, projectile, summon, trap, or formation
   credits the player/life captured by its combat source. Highest-damage and
   contribution-threshold policies are deferred.
+* Combat attribution is bounded by declared effect expiry plus adapter limits;
+  evicted or post-restart ambiguous delayed effects never silently become
+  player rewards.
 * Preserve future party/contribution sharing by making reward deduplication
   unique per `(source event, recipient life)` rather than assuming one source
   event can have only one recipient forever.
