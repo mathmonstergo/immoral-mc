@@ -20,6 +20,16 @@ async def test_fake_unit_of_work_rolls_back_uncommitted_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fake_revision_read_returns_zero_without_creating_aggregate_state() -> None:
+    factory = FakeUnitOfWorkFactory(FakeStore())
+    life_id = UUID(int=99)
+
+    async with factory() as uow:
+        assert await uow.quests.get_quest_revision(life_id, for_update=False) == 0
+        assert life_id not in uow._working_state.quest_revisions
+
+
+@pytest.mark.asyncio
 async def test_fake_unit_of_work_commits_atomically_and_operations_are_global() -> None:
     factory = FakeUnitOfWorkFactory(FakeStore())
     account_id = UUID(int=2)

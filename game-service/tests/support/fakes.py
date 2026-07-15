@@ -151,7 +151,6 @@ class FakeQuestRepository:
         self._state.operations[operation.operation_id] = operation
         return True
 
-
     async def finalize_operation(
         self,
         operation_id: UUID,
@@ -183,8 +182,9 @@ class FakeQuestRepository:
 
     async def get_quest_revision(self, life_id: UUID, *, for_update: bool) -> int:
         self._ensure_active()
-        del for_update
-        return self._state.quest_revisions.setdefault(life_id, 0)
+        if for_update:
+            return self._state.quest_revisions.setdefault(life_id, 0)
+        return self._state.quest_revisions.get(life_id, 0)
 
     async def increment_quest_revision(self, life_id: UUID) -> int:
         self._ensure_active()
