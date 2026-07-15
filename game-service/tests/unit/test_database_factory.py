@@ -171,24 +171,44 @@ def make_uow_factory(
     RecordingSessionFactory,
     RecordingRepositoryFactory,
     RecordingRepositoryFactory,
+    RecordingRepositoryFactory,
+    RecordingRepositoryFactory,
 ]:
     sessions = RecordingSessionFactory(events)
     players = RecordingRepositoryFactory("players", events)
     quests = RecordingRepositoryFactory("quests", events)
-    return SqlAlchemyUnitOfWorkFactory(sessions, players, quests), sessions, players, quests
+    combat = RecordingRepositoryFactory("combat", events)
+    cultivation = RecordingRepositoryFactory("cultivation", events)
+    return (
+        SqlAlchemyUnitOfWorkFactory(sessions, players, quests, combat, cultivation),
+        sessions,
+        players,
+        quests,
+        combat,
+        cultivation,
+    )
 
 
 @pytest.mark.asyncio
 async def test_uow_configures_default_isolation_before_binding_shared_session() -> None:
     events: list[str] = []
-    factory, sessions, players, quests = make_uow_factory(events)
+    factory, sessions, players, quests, combat, cultivation = make_uow_factory(events)
 
     async with factory() as uow:
         session = sessions.sessions[0]
 
-        assert events == ["session", "connection:READ COMMITTED", "players", "quests"]
+        assert events == [
+            "session",
+            "connection:READ COMMITTED",
+            "players",
+            "quests",
+            "combat",
+            "cultivation",
+        ]
         assert (players.repository, players.session) == (uow.players, session)
         assert (quests.repository, quests.session) == (uow.quests, session)
+        assert (combat.repository, combat.session) == (uow.combat, session)
+        assert (cultivation.repository, cultivation.session) == (uow.cultivation, session)
         await uow.commit()
         assert session.in_transaction() is False
 
@@ -197,6 +217,8 @@ async def test_uow_configures_default_isolation_before_binding_shared_session() 
         "connection:READ COMMITTED",
         "players",
         "quests",
+        "combat",
+        "cultivation",
         "commit",
         "close",
     ]
@@ -205,7 +227,7 @@ async def test_uow_configures_default_isolation_before_binding_shared_session() 
 @pytest.mark.asyncio
 async def test_uow_maps_repeatable_read_without_starting_a_second_transaction() -> None:
     events: list[str] = []
-    factory, _, _, _ = make_uow_factory(events)
+    factory, _, _, _, _, _ = make_uow_factory(events)
 
     async with factory(isolation="repeatable_read") as uow:
         await uow.rollback()
@@ -215,6 +237,8 @@ async def test_uow_maps_repeatable_read_without_starting_a_second_transaction() 
         "connection:REPEATABLE READ",
         "players",
         "quests",
+        "combat",
+        "cultivation",
         "rollback",
         "close",
     ]
@@ -223,7 +247,7 @@ async def test_uow_maps_repeatable_read_without_starting_a_second_transaction() 
 @pytest.mark.asyncio
 async def test_uow_rolls_back_and_closes_when_context_raises() -> None:
     events: list[str] = []
-    factory, _, _, _ = make_uow_factory(events)
+    factory, _, _, _, _, _ = make_uow_factory(events)
 
     with pytest.raises(RuntimeError, match="boom"):
         async with factory():
@@ -234,6 +258,8 @@ async def test_uow_rolls_back_and_closes_when_context_raises() -> None:
         "connection:READ COMMITTED",
         "players",
         "quests",
+        "combat",
+        "cultivation",
         "rollback",
         "close",
     ]
@@ -242,7 +268,7 @@ async def test_uow_rolls_back_and_closes_when_context_raises() -> None:
 @pytest.mark.asyncio
 async def test_uow_rolls_back_uncommitted_successful_context() -> None:
     events: list[str] = []
-    factory, _, _, _ = make_uow_factory(events)
+    factory, _, _, _, _, _ = make_uow_factory(events)
 
     async with factory():
         pass
@@ -256,7 +282,11 @@ async def test_uow_cleans_up_when_isolation_configuration_fails() -> None:
     session = FailingConnectionSession(events)
     players = RecordingRepositoryFactory("players", events)
     quests = RecordingRepositoryFactory("quests", events)
-    factory = SqlAlchemyUnitOfWorkFactory(FixedSessionFactory(session), players, quests)
+    combat = RecordingRepositoryFactory("combat", events)
+    cultivation = RecordingRepositoryFactory("cultivation", events)
+    factory = SqlAlchemyUnitOfWorkFactory(
+        FixedSessionFactory(session), players, quests, combat, cultivation
+    )
 
     with pytest.raises(RuntimeError, match="connection failed"):
         async with factory():
@@ -270,6 +300,8 @@ async def test_uow_cleans_up_when_isolation_configuration_fails() -> None:
     ]
     assert players.repository is None
     assert quests.repository is None
+    assert combat.repository is None
+    assert cultivation.repository is None
 
 
 @pytest.mark.asyncio
@@ -278,7 +310,11 @@ async def test_uow_cleans_up_when_player_repository_factory_fails() -> None:
     session = RecordingSession(events)
     players = FailingRepositoryFactory("players", events, RuntimeError("players failed"))
     quests = RecordingRepositoryFactory("quests", events)
-    factory = SqlAlchemyUnitOfWorkFactory(FixedSessionFactory(session), players, quests)
+    combat = RecordingRepositoryFactory("combat", events)
+    cultivation = RecordingRepositoryFactory("cultivation", events)
+    factory = SqlAlchemyUnitOfWorkFactory(
+        FixedSessionFactory(session), players, quests, combat, cultivation
+    )
 
     with pytest.raises(RuntimeError, match="players failed"):
         async with factory():
@@ -292,6 +328,8 @@ async def test_uow_cleans_up_when_player_repository_factory_fails() -> None:
         "close",
     ]
     assert quests.repository is None
+    assert combat.repository is None
+    assert cultivation.repository is None
 
 
 @pytest.mark.asyncio
@@ -300,7 +338,11 @@ async def test_uow_cleans_up_when_quest_repository_factory_fails() -> None:
     session = RecordingSession(events)
     players = RecordingRepositoryFactory("players", events)
     quests = FailingRepositoryFactory("quests", events, RuntimeError("quests failed"))
-    factory = SqlAlchemyUnitOfWorkFactory(FixedSessionFactory(session), players, quests)
+    combat = RecordingRepositoryFactory("combat", events)
+    cultivation = RecordingRepositoryFactory("cultivation", events)
+    factory = SqlAlchemyUnitOfWorkFactory(
+        FixedSessionFactory(session), players, quests, combat, cultivation
+    )
 
     with pytest.raises(RuntimeError, match="quests failed"):
         async with factory():
@@ -314,6 +356,38 @@ async def test_uow_cleans_up_when_quest_repository_factory_fails() -> None:
         "rollback",
         "close",
     ]
+    assert combat.repository is None
+    assert cultivation.repository is None
+
+
+@pytest.mark.asyncio
+async def test_uow_cleans_up_when_cultivation_repository_factory_fails() -> None:
+    events: list[str] = []
+    session = RecordingSession(events)
+    players = RecordingRepositoryFactory("players", events)
+    quests = RecordingRepositoryFactory("quests", events)
+    combat = RecordingRepositoryFactory("combat", events)
+    cultivation = FailingRepositoryFactory(
+        "cultivation", events, RuntimeError("cultivation failed")
+    )
+    factory = SqlAlchemyUnitOfWorkFactory(
+        FixedSessionFactory(session), players, quests, combat, cultivation
+    )
+
+    with pytest.raises(RuntimeError, match="cultivation failed"):
+        async with factory():
+            pass
+
+    assert events == [
+        "session",
+        "connection:READ COMMITTED",
+        "players",
+        "quests",
+        "combat",
+        "cultivation",
+        "rollback",
+        "close",
+    ]
 
 
 @pytest.mark.asyncio
@@ -322,7 +396,11 @@ async def test_uow_cleans_up_and_stops_factory_chain_when_startup_is_cancelled()
     session = RecordingSession(events)
     players = FailingRepositoryFactory("players", events, asyncio.CancelledError("cancelled"))
     quests = RecordingRepositoryFactory("quests", events)
-    factory = SqlAlchemyUnitOfWorkFactory(FixedSessionFactory(session), players, quests)
+    combat = RecordingRepositoryFactory("combat", events)
+    cultivation = RecordingRepositoryFactory("cultivation", events)
+    factory = SqlAlchemyUnitOfWorkFactory(
+        FixedSessionFactory(session), players, quests, combat, cultivation
+    )
 
     with pytest.raises(asyncio.CancelledError, match="cancelled"):
         async with factory():
@@ -336,3 +414,5 @@ async def test_uow_cleans_up_and_stops_factory_chain_when_startup_is_cancelled()
         "close",
     ]
     assert quests.repository is None
+    assert combat.repository is None
+    assert cultivation.repository is None

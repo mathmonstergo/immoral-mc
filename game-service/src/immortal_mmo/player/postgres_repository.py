@@ -89,6 +89,16 @@ class PostgresPlayerRepository:
         ).scalar_one_or_none()
         return account_from_row(row) if row is not None else None
 
+    async def lock_account_by_minecraft_uuid(self, minecraft_uuid: UUID) -> Account | None:
+        row = (
+            await self._session.execute(
+                select(AccountRow)
+                .where(AccountRow.minecraft_uuid == minecraft_uuid)
+                .with_for_update(of=AccountRow)
+            )
+        ).scalar_one_or_none()
+        return account_from_row(row) if row is not None else None
+
     async def get_current_life(self, account_id: UUID, *, for_update: bool) -> Life | None:
         statement = select(LifeRow).where(
             LifeRow.account_id == account_id,

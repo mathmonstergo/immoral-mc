@@ -27,6 +27,10 @@ GAMEPLAY_TABLES = {
     "life_quest_states",
     "quest_progress",
     "quest_operations",
+    "life_cultivation_states",
+    "combat_kill_events",
+    "life_mob_kill_counters",
+    "cultivation_resource_entries",
 }
 
 EXPECTED_CONSTRAINTS = {
@@ -86,6 +90,43 @@ EXPECTED_CONSTRAINTS = {
         "ck_quest_operation_content_type",
         "ck_quest_operation_finalization",
     },
+    "life_cultivation_states": {
+        "pk_life_cultivation_states",
+        "fk_life_cultivation_states_life_id_lives",
+        "ck_life_cultivation_states_unrefined_nonnegative",
+        "ck_life_cultivation_states_realized_nonnegative",
+        "ck_life_cultivation_states_revision_positive",
+    },
+    "combat_kill_events": {
+        "pk_combat_kill_events",
+        "fk_combat_kill_events_source_life_id_lives",
+        "fk_combat_kill_events_account_id_accounts",
+        "fk_combat_kill_events_life_id_lives",
+        "uq_combat_kill_source",
+        "ck_combat_kill_source_type",
+        "ck_combat_kill_level",
+        "ck_combat_kill_attribution",
+        "ck_combat_kill_outcome",
+        "ck_combat_kill_telemetry",
+        "ck_combat_kill_detail",
+        "ck_combat_kill_reward_shape",
+    },
+    "life_mob_kill_counters": {
+        "pk_life_mob_kill_counters",
+        "fk_life_mob_kill_counters_life_id_lives",
+        "ck_life_mob_kill_counters_count_positive",
+        "ck_life_mob_kill_time",
+    },
+    "cultivation_resource_entries": {
+        "pk_cultivation_resource_entries",
+        "fk_cultivation_resource_entries_life_id_lives",
+        "fk_cultivation_entries_kill_event",
+        "ck_cultivation_resource_code",
+        "ck_cultivation_entry_type",
+        "ck_cultivation_entry_delta",
+        "ck_cultivation_entry_balance_nonnegative",
+        "ck_cultivation_combat_source",
+    },
 }
 
 EXPECTED_INDEXES = {
@@ -94,6 +135,9 @@ EXPECTED_INDEXES = {
     "ix_quest_progress_active_life",
     "ix_quest_progress_revision",
     "ix_quest_operations_account_created",
+    "ix_combat_kills_life_time",
+    "ix_combat_kills_mob_time",
+    "ux_cultivation_kill_recipient",
 }
 
 EXPECTED_FUNCTIONS = {
@@ -248,7 +292,7 @@ async def test_upgrade_creates_expected_tables_and_head_revision(
 
     assert table_names - {"alembic_version"} == GAMEPLAY_TABLES
     assert "alembic_version" in table_names
-    assert revision == "20260714_001"
+    assert revision == "20260715_002"
 
 
 @pytest.mark.asyncio
@@ -713,7 +757,7 @@ async def test_alembic_cli_uses_database_url_from_environment(
     )
 
     assert result.returncode == 0, result.stderr
-    assert "20260714_001 (head)" in result.stdout
+    assert "20260715_002 (head)" in result.stdout
 
 
 @pytest.mark.asyncio
@@ -760,7 +804,7 @@ async def test_downgrade_removes_schema_and_upgrade_restores_head(
         restored_tables = await _table_names(connection)
         restored_functions = await _function_names(connection)
         restored_triggers = await _trigger_names(connection)
-    assert revision == "20260714_001"
+    assert revision == "20260715_002"
     assert restored_tables - {"alembic_version"} == GAMEPLAY_TABLES
     assert EXPECTED_FUNCTIONS <= restored_functions
     assert restored_triggers == EXPECTED_TRIGGERS

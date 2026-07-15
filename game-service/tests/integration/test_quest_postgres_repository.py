@@ -9,6 +9,8 @@ from sqlalchemy import event, func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from tests.support.fakes import processing_operation
 
+from immortal_mmo.combat.postgres_repository import PostgresCombatRepository
+from immortal_mmo.cultivation.postgres_repository import PostgresCultivationRepository
 from immortal_mmo.db.uow import SqlAlchemyUnitOfWorkFactory
 from immortal_mmo.player.db_models import LifeRow
 from immortal_mmo.player.postgres_repository import PostgresPlayerRepository
@@ -47,6 +49,8 @@ def services(
         sessions,
         PostgresPlayerRepository,
         quest_repository,
+        PostgresCombatRepository,
+        PostgresCultivationRepository,
     )
     return PlayerService(factory), QuestService(factory)
 
@@ -78,6 +82,8 @@ async def test_repository_lazily_locks_revision_and_round_trips_progress_and_byt
         postgres_sessions,
         PostgresPlayerRepository,
         PostgresQuestRepository,
+        PostgresCombatRepository,
+        PostgresCultivationRepository,
     )
     operation = processing_operation(
         operation_id=operation_id,
@@ -122,6 +128,8 @@ async def test_repository_lazily_locks_revision_and_round_trips_progress_and_byt
         postgres_sessions,
         PostgresPlayerRepository,
         PostgresQuestRepository,
+        PostgresCombatRepository,
+        PostgresCultivationRepository,
     )
     async with restarted() as uow:
         stored = await uow.quests.get_operation(operation_id)
@@ -144,6 +152,8 @@ async def test_repository_revision_read_does_not_insert_aggregate_row(
         postgres_sessions,
         PostgresPlayerRepository,
         PostgresQuestRepository,
+        PostgresCombatRepository,
+        PostgresCultivationRepository,
     )
 
     async with factory(isolation="repeatable_read") as uow:
@@ -629,6 +639,8 @@ async def test_provider_inspection_query_count_is_bounded_independent_of_quest_c
         postgres_sessions,
         PostgresPlayerRepository,
         PostgresQuestRepository,
+        PostgresCombatRepository,
+        PostgresCultivationRepository,
     )
     service = QuestService(factory, catalog)
     statements: list[str] = []

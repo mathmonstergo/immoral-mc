@@ -65,6 +65,11 @@ class FakePlayerRepository:
         self._ensure_active()
         return self._state.accounts.get(account_id)
 
+    async def lock_account_by_minecraft_uuid(self, minecraft_uuid: UUID) -> Account | None:
+        self._ensure_active()
+        account_id = self._state.account_ids_by_minecraft_uuid.get(minecraft_uuid)
+        return self._state.accounts.get(account_id) if account_id is not None else None
+
     async def get_current_life(self, account_id: UUID, *, for_update: bool) -> Life | None:
         self._ensure_active()
         del for_update

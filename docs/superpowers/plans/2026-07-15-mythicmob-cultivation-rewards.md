@@ -84,11 +84,11 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
 - Test: `game-service/tests/integration/test_combat_migrations.py`
 - Test: `game-service/tests/integration/test_combat_postgres_repository.py`
 
-- [ ] **Step 1: Write migration tests** asserting creation of `life_cultivation_states`, `combat_kill_events`, `life_mob_kill_counters`, and `cultivation_resource_entries`; check source uniqueness, attribution/outcome constraints, compact/detail payload shape, and partial combat-reward uniqueness.
-- [ ] **Step 2: Write repository tests** for source reservation, immutable replay load, current-life lock, counter upsert, cultivation-state creation/update, reward-ledger insertion, and rollback behavior.
-- [ ] **Step 3: Implement the Alembic migration** exactly as the approved design: UUID identities, `NUMERIC(12,3)` level, source-life/account/life references with `RESTRICT`, append-only combat row, counter primary key, reserve state, and partial unique index `(kill_event_id, life_id, resource_code) WHERE entry_type='combat_reward'`.
-- [ ] **Step 4: Implement typed SQLAlchemy rows** with `Mapped` annotations and naming/constraint conventions matching `player/db_models.py`; do not add cascade deletes or localized text columns.
-- [ ] **Step 5: Implement a session-bound repository** with methods for:
+- [x] **Step 1: Write migration tests** asserting creation of `life_cultivation_states`, `combat_kill_events`, `life_mob_kill_counters`, and `cultivation_resource_entries`; check source uniqueness, attribution/outcome constraints, compact/detail payload shape, and partial combat-reward uniqueness.
+- [x] **Step 2: Write repository tests** for source reservation, immutable replay load, current-life lock, counter upsert, cultivation-state creation/update, reward-ledger insertion, and rollback behavior.
+- [x] **Step 3: Implement the Alembic migration** exactly as the approved design: UUID identities, `NUMERIC(12,3)` level, source-life/account/life references with `RESTRICT`, append-only combat row, counter primary key, reserve state, and partial unique index `(kill_event_id, life_id, resource_code) WHERE entry_type='combat_reward'`.
+- [x] **Step 4: Implement typed SQLAlchemy rows** with `Mapped` annotations and naming/constraint conventions matching `player/db_models.py`; do not add cascade deletes or localized text columns.
+- [x] **Step 5: Implement session-bound Combat and Cultivation repositories** with methods for:
 
   ```python
   reserve_or_load_source(session, source_event_id, immutable_fingerprint)
@@ -107,15 +107,15 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
   ```
 
   Unique conflicts must roll back/retry the short transaction; never continue using an aborted SQLAlchemy transaction.
-- [ ] **Step 6: Expose `combat` from `SqlAlchemyUnitOfWork`** using the same session and isolation level as player/quest repositories. Update factories in `entrypoint.py` and composition tests.
-- [ ] **Step 7: Run migration/repository tests**:
+- [x] **Step 6: Expose `combat` and `cultivation` from `SqlAlchemyUnitOfWork`** using the same session and isolation level as player/quest repositories. Update factories in `entrypoint.py` and composition tests.
+- [x] **Step 7: Run migration/repository tests**:
 
   ```bash
   cd game-service && uv run pytest tests/integration/test_combat_migrations.py tests/integration/test_combat_postgres_repository.py -q
   ```
 
   Expected: PostgreSQL migration, constraints, locks, and rollback tests pass.
-- [ ] **Step 8: Commit** `feat: persist combat kills and cultivation reserve`.
+- [x] **Step 8: Commit** `feat: persist combat kills and cultivation reserve`.
 
 ## Task 3: Implement Game Service transaction and batch API
 

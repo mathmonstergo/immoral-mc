@@ -5,6 +5,8 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.support.fakes import NoOpQuestRepository
 
+from immortal_mmo.combat.postgres_repository import PostgresCombatRepository
+from immortal_mmo.cultivation.postgres_repository import PostgresCultivationRepository
 from immortal_mmo.db.uow import SqlAlchemyUnitOfWorkFactory
 from immortal_mmo.main import create_app
 
@@ -17,6 +19,8 @@ def client(sessions: async_sessionmaker[AsyncSession]) -> httpx.AsyncClient:
             sessions,
             PostgresPlayerRepository,
             NoOpQuestRepository,
+            PostgresCombatRepository,
+            PostgresCultivationRepository,
         )
     )
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")

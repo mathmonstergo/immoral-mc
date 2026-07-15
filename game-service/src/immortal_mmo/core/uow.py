@@ -1,6 +1,8 @@
 from types import TracebackType
 from typing import Literal, Protocol
 
+from immortal_mmo.combat.repository import CombatRepository
+from immortal_mmo.cultivation.repository import CultivationRepository
 from immortal_mmo.player.repository import PlayerRepository
 from immortal_mmo.quest.repository import QuestRepository
 
@@ -10,6 +12,8 @@ IsolationLevel = Literal["read_committed", "repeatable_read"]
 class UnitOfWork(Protocol):
     players: PlayerRepository
     quests: QuestRepository
+    combat: CombatRepository
+    cultivation: CultivationRepository
 
     async def __aenter__(self) -> "UnitOfWork": ...
 

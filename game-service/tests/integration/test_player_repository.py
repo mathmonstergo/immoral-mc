@@ -10,6 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.support.fakes import NoOpQuestRepository
 
+from immortal_mmo.combat.postgres_repository import PostgresCombatRepository
+from immortal_mmo.cultivation.postgres_repository import PostgresCultivationRepository
 from immortal_mmo.db.uow import SqlAlchemyUnitOfWorkFactory
 from immortal_mmo.player.db_models import (
     AccountMinecraftNameRow,
@@ -32,6 +34,8 @@ def player_service(
             sessions,
             PostgresPlayerRepository,
             NoOpQuestRepository,
+            PostgresCombatRepository,
+            PostgresCultivationRepository,
         ),
         spirit_root_generator=generator,
     )
@@ -191,6 +195,8 @@ async def test_database_rejects_second_alive_life_through_repository(
         postgres_sessions,
         PostgresPlayerRepository,
         NoOpQuestRepository,
+        PostgresCombatRepository,
+        PostgresCultivationRepository,
     )
     async with factory() as uow:
         account = await uow.players.upsert_account(uuid4(), "DoubleLife")
