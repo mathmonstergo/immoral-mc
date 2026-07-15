@@ -116,12 +116,13 @@ curl -fsS -X PUT "http://127.0.0.1:8000/api/v1/players/$ACCOUNT_ID/current-life/
   -d '{"provider_id":"old-man"}' > /tmp/accept-after.json
 ```
 
-Assert the login snapshot and frozen accept response are unchanged:
+Assert the account/life identity and frozen accept response are unchanged. The
+first login happened before root detection, so its initial `spirit_root: null`
+must not be compared with the post-restart login snapshot:
 
 ```bash
-cmp /tmp/login-before.json /tmp/login-after.json
 cmp /tmp/accept-before.json /tmp/accept-after.json
-python3 -c 'import json; assert json.load(open("/tmp/root-after.json"))["already_detected"] is True'
+python3 -c 'import json; before=json.load(open("/tmp/login-before.json")); after=json.load(open("/tmp/login-after.json")); root_before=json.load(open("/tmp/root-before.json")); root_after=json.load(open("/tmp/root-after.json")); assert before["account"]["account_id"] == after["account"]["account_id"]; assert before["current_life"]["life_id"] == after["current_life"]["life_id"]; assert root_after["already_detected"] is True; assert root_before["spirit_root"] == root_after["spirit_root"]'
 ```
 
 Turn in, restart once more, and replay the same turn-in operation:
