@@ -201,6 +201,51 @@ async def test_same_operation_domain_failure_concurrently_replays_exact_bytes(
 
 
 @pytest.mark.asyncio
+async def test_same_operation_turn_in_concurrently_completes_once_and_replays_exact_bytes(
+    postgres_sessions: async_sessionmaker[AsyncSession],
+    clean_postgres_data: None,
+) -> None:
+    del clean_postgres_data
+    players, quests, account_id, life_id = await logged_in(postgres_sessions, 116)
+    await quests.accept(account_id, "first-steps", "old-man", uuid4())
+    await players.detect_current_life_spirit_root(account_id)
+    operation_id = uuid4()
+
+    first, second = await asyncio.gather(
+        quests.turn_in(account_id, "first-steps", "old-man", operation_id),
+        quests.turn_in(account_id, "first-steps", "old-man", operation_id),
+    )
+
+    assert first.status_code == second.status_code == 200
+    assert first.content_type == second.content_type == "application/json"
+    assert first.body == second.body
+    assert first.contract_version == second.contract_version == 1
+    assert body(first)["changed"] is True
+
+    _, restarted = services(postgres_sessions)
+    replayed = await restarted.turn_in(
+        account_id,
+        "first-steps",
+        "old-man",
+        operation_id,
+    )
+    assert (replayed.status_code, replayed.content_type, replayed.body) == (
+        first.status_code,
+        first.content_type,
+        first.body,
+    )
+    async with postgres_sessions() as session:
+        assert await session.scalar(select(func.count()).select_from(QuestProgressRow)) == 1
+        progress = await session.get(QuestProgressRow, (life_id, "first-steps"))
+        assert progress is not None
+        assert progress.status == "completed"
+        assert progress.revision == 2
+        assert await session.scalar(
+            select(LifeQuestStateRow.revision).where(LifeQuestStateRow.life_id == life_id)
+        ) == 2
+
+
+@pytest.mark.asyncio
 async def test_same_operation_concurrent_different_accounts_exposes_committed_winner(
     postgres_sessions: async_sessionmaker[AsyncSession],
     clean_postgres_data: None,
@@ -228,12 +273,12 @@ async def test_same_operation_concurrent_different_accounts_exposes_committed_wi
 
 
 @pytest.mark.asyncio
-async def test_different_operation_accepts_and_turn_ins_change_once_per_transition(
+async def test_different_operation_accepts_change_once_and_increment_revision_once(
     postgres_sessions: async_sessionmaker[AsyncSession],
     clean_postgres_data: None,
 ) -> None:
     del clean_postgres_data
-    players, quests, account_id, life_id = await logged_in(postgres_sessions, 103)
+    _, quests, account_id, life_id = await logged_in(postgres_sessions, 103)
 
     accepts = await asyncio.gather(
         quests.accept(account_id, "first-steps", "old-man", uuid4()),
@@ -243,6 +288,24 @@ async def test_different_operation_accepts_and_turn_ins_change_once_per_transiti
     assert {body(response)["interaction_state"]["revision"]["quest"] for response in accepts} == {
         1
     }
+    async with postgres_sessions() as session:
+        progress = await session.get(QuestProgressRow, (life_id, "first-steps"))
+        assert progress is not None
+        assert progress.status == "active"
+        assert progress.revision == 1
+        assert await session.scalar(
+            select(LifeQuestStateRow.revision).where(LifeQuestStateRow.life_id == life_id)
+        ) == 1
+
+
+@pytest.mark.asyncio
+async def test_different_operation_turn_ins_change_once_and_increment_revision_once(
+    postgres_sessions: async_sessionmaker[AsyncSession],
+    clean_postgres_data: None,
+) -> None:
+    del clean_postgres_data
+    players, quests, account_id, life_id = await logged_in(postgres_sessions, 117)
+    await quests.accept(account_id, "first-steps", "old-man", uuid4())
 
     await players.detect_current_life_spirit_root(account_id)
     turn_ins = await asyncio.gather(
