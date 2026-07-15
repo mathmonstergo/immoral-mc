@@ -138,8 +138,39 @@ cmp /tmp/turn-in-before.json /tmp/turn-in-after.json
 ```
 
 After the source-database smoke succeeds, create the dump and isolated restore
-using the commands above. Switch `DATABASE_URL` to `immortal_restore`, start a
-fresh service process, run `alembic current`, then rerun the post-restart login,
-spirit-root read, accept replay, and turn-in replay with the same UUID and
-idempotency keys. The restored database must return the same durable state and
-the replay response files must still compare byte-for-byte.
+using the commands above. With `DATABASE_URL` pointing to `immortal_restore`,
+verify the revision and start a fresh service process in Terminal A:
+
+```bash
+cd game-service
+.venv/bin/alembic current
+cd ..
+DATABASE_URL=postgresql+asyncpg://immortal:immortal_dev_only@127.0.0.1:5432/immortal_restore ./scripts/start-game-service.sh
+```
+
+In Terminal B, replay the same durable reads and operation IDs against the
+restored database:
+
+```bash
+MINECRAFT_UUID=00000000-0000-0000-0000-000000000077
+LOGIN_RESTORED=$(curl -fsS -X POST http://127.0.0.1:8000/api/v1/players/login \
+  -H 'content-type: application/json' \
+  -d "{\"minecraft_uuid\":\"$MINECRAFT_UUID\",\"player_name\":\"SmokePlayer\"}")
+printf '%s' "$LOGIN_RESTORED" > /tmp/login-restored.json
+RESTORED_ACCOUNT_ID=$(printf '%s' "$LOGIN_RESTORED" | python3 -c 'import json,sys; print(json.load(sys.stdin)["account"]["account_id"])')
+
+curl -fsS -X POST "http://127.0.0.1:8000/api/v1/players/$RESTORED_ACCOUNT_ID/current-life/spirit-root" > /tmp/root-restored.json
+curl -fsS -X PUT "http://127.0.0.1:8000/api/v1/players/$RESTORED_ACCOUNT_ID/current-life/quests/first-steps/accept" \
+  -H 'content-type: application/json' -H 'Idempotency-Key: 00000000-0000-0000-0000-000000000078' \
+  -d '{"provider_id":"old-man"}' > /tmp/accept-restored.json
+curl -fsS -X PUT "http://127.0.0.1:8000/api/v1/players/$RESTORED_ACCOUNT_ID/current-life/quests/first-steps/turn-in" \
+  -H 'content-type: application/json' -H 'Idempotency-Key: 00000000-0000-0000-0000-000000000079' \
+  -d '{"provider_id":"old-man"}' > /tmp/turn-in-restored.json
+
+cmp /tmp/login-after.json /tmp/login-restored.json
+cmp /tmp/accept-before.json /tmp/accept-restored.json
+cmp /tmp/turn-in-before.json /tmp/turn-in-restored.json
+python3 -c 'import json; before=json.load(open("/tmp/root-after.json")); restored=json.load(open("/tmp/root-restored.json")); assert restored["already_detected"] is True; assert restored["spirit_root"] == before["spirit_root"]'
+```
+
+All comparisons must succeed; otherwise the restore drill is incomplete.
