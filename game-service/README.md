@@ -139,7 +139,8 @@ cmp /tmp/turn-in-before.json /tmp/turn-in-after.json
 
 After the source-database smoke succeeds, create the dump and isolated restore
 using the commands above. With `DATABASE_URL` pointing to `immortal_restore`,
-verify the revision and start a fresh service process in Terminal A:
+stop the source-database service in Terminal A with `Ctrl-C`, then verify the
+revision and start a fresh service process in Terminal A:
 
 ```bash
 cd game-service
