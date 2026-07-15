@@ -543,3 +543,44 @@ Added the authoritative quest-provider catalog API and Citizens selection-based 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: PostgreSQL 持久化与生产部署收口
+
+**Date**: 2026-07-15
+**Task**: PostgreSQL 持久化与生产部署收口
+**Branch**: `main`
+
+### Summary
+
+完成异步 PostgreSQL Player/Quest 持久化、全局幂等精确回放、生产入口与 readiness、本地 Compose/Alembic/备份恢复流程；通过 130 个 Python 测试、Ruff、compileall、pip check、clean-break 审计、真实重启与 dump/restore 回放，以及 JDK 21 下 Gradle test build。任务已归档，下一步为继续 Cultivation/Seclusion gameplay vertical slice。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b28e226` | (see git log) |
+| `26822e7` | (see git log) |
+| `dce373c` | (see git log) |
+| `bea59f1` | (see git log) |
+| `013e390` | (see git log) |
+| `19d6537` | (see git log) |
+| `bae4752` | (see git log) |
+| `29359ce` | (see git log) |
+| `543ab19` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

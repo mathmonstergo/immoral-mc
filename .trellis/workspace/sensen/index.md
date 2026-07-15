@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 16
-- **Last Active**: 2026-07-13
+- **Total Sessions**: 17
+- **Last Active**: 2026-07-15
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~545 | Active |
+| `journal-1.md` | ~586 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 17 | 2026-07-15 | PostgreSQL 持久化与生产部署收口 | `b28e226`, `26822e7`, `dce373c`, `bea59f1`, `013e390`, `19d6537`, `bae4752`, `29359ce`, `543ab19` | `main` |
 | 16 | 2026-07-13 | Citizens quest provider authoring | `0dc1b3c`, `30ceda3` | `main` |
 | 15 | 2026-07-13 | Resume and verify custom quest vertical slice | `e0f42ac`, `de5162d`, `ebfa975`, `29cb0df`, `de1c8c4` | `main` |
 | 14 | 2026-07-13 | Citizens NPC adapter | `eea08f7` | `main` |
