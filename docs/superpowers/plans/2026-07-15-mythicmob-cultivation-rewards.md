@@ -149,9 +149,9 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
 - Create: `minecraft-nodes/main-plugin/src/main/java/com/immortalmc/adapter/combat/CombatAttributionTracker.java`
 - Test: `minecraft-nodes/main-plugin/src/test/java/com/immortalmc/adapter/combat/CombatAttributionTrackerTest.java`
 
-- [ ] **Step 1: Write failing Java tests** for direct player damage, projectile shooter, DoT owner propagation, summon/trap/formation owner propagation, lethal-source selection, cancelled-damage exclusion, source-life mismatch metadata, expiry, max-target eviction, despawn cleanup, and ambiguous post-restart damage returning no attribution.
-- [ ] **Step 2: Implement immutable `CombatSource`** with `playerUuid`, optional `sourceLifeId`, optional `techniqueId`, optional `castId`, attribution kind, and expiry. Require non-null player UUID and validate source age at construction.
-- [ ] **Step 3: Implement tracker operations**:
+- [x] **Step 1: Write failing Java tests** for direct player damage, projectile shooter, DoT owner propagation, summon/trap/formation owner propagation, lethal-source selection, cancelled-damage exclusion, source-life mismatch metadata, expiry, max-target eviction, despawn cleanup, and ambiguous post-restart damage returning no attribution.
+- [x] **Step 2: Implement immutable `CombatSource`** with `playerUuid`, optional `sourceLifeId`, optional `techniqueId`, optional `castId`, attribution kind, and expiry. Require non-null player UUID and validate source age at construction.
+- [x] **Step 3: Implement tracker operations**:
 
   ```java
   void recordDamage(UUID target, CombatSource source, double finalDamage, boolean lethal, Instant at);
@@ -161,14 +161,14 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
   ```
 
   Keep a bounded map keyed by target entity UUID. A dedicated final-priority Bukkit listener records ordinary player melee as `direct` and player-owned projectiles as `projectile`. Custom DoT/summon/trap/formation damage must enter through the shared source gateway. If no tracked source exists at death, return no attribution; never reconstruct ownership from `getKiller()`.
-- [ ] **Step 4: Run Java combat tests**:
+- [x] **Step 4: Run Java combat tests**:
 
   ```bash
   cd minecraft-nodes/main-plugin && ./gradlew test --tests '*CombatAttributionTrackerTest'
   ```
 
   Expected: all source-kind and lifecycle tests pass.
-- [ ] **Step 5: Commit** `feat: attribute lethal combat sources`.
+- [x] **Step 5: Commit** `feat: attribute lethal combat sources`.
 
 ## Task 5: Add MythicMobs typed integration
 
