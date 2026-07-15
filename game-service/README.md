@@ -1,41 +1,145 @@
 # Immortal MMO Game Service
 
-FastAPI backend service for the Immortal Minecraft MMORPG.
+FastAPI backend service for the Immortal Minecraft MMORPG. PostgreSQL is the
+authoritative store; the local Compose service is disposable development
+infrastructure only.
 
-## Local Setup
+## Local setup
+
+From the repository root:
 
 ```bash
+cp game-service/.env.example game-service/.env
+set -a
+source game-service/.env
+set +a
+docker compose up -d --wait postgres
+```
+
+The Compose healthcheck waits for PostgreSQL on `127.0.0.1:5432`. The service
+uses the strict `postgresql+asyncpg://` URL from `DATABASE_URL`.
+
+## Install, migrate, and start
+
+```bash
+cd game-service
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/alembic upgrade head
+.venv/bin/alembic current
+cd ..
+./scripts/start-game-service.sh
 ```
 
-## Run Tests
+`start-game-service.sh` installs the editable dev environment when needed,
+requires `DATABASE_URL`, and starts `immortal_mmo.entrypoint:app`. It never
+runs migrations automatically. Run the migration commands explicitly after
+starting a new database or applying a migration.
+
+Open the API documentation at <http://127.0.0.1:8000/docs>.
+
+## Disposable development reset
+
+This permanently deletes the local PostgreSQL volume and all development data:
 
 ```bash
-.venv/bin/python -m pytest
+docker compose down -v
+docker compose up -d --wait postgres
+cd game-service
+.venv/bin/alembic upgrade head
+.venv/bin/alembic current
+cd ..
 ```
 
-## Lint
+## Backup and isolated restore
+
+Create a custom-format dump from the running local database:
 
 ```bash
-.venv/bin/python -m ruff check .
+docker compose exec -T postgres pg_dump -U immortal -d immortal -Fc > /tmp/immortal-dev.dump
 ```
 
-## Run Service
+Restore it into a separate database in the same local PostgreSQL container:
 
 ```bash
-.venv/bin/python -m uvicorn immortal_mmo.main:app --reload
+docker compose exec -T postgres dropdb --if-exists -U immortal immortal_restore
+docker compose exec -T postgres createdb -U immortal -O immortal immortal_restore
+docker compose exec -T postgres pg_restore --exit-on-error -U immortal -d immortal_restore < /tmp/immortal-dev.dump
 ```
 
-Then open:
+Verify the restored database revision before starting a service against it:
 
-```text
-http://127.0.0.1:8000/docs
+```bash
+export DATABASE_URL=postgresql+asyncpg://immortal:immortal_dev_only@127.0.0.1:5432/immortal_restore
+cd game-service
+.venv/bin/alembic current
+cd ..
 ```
 
-## Storage Limitation
+Start the service with that restored URL in a separate terminal:
 
-Player and quest state currently use process-local in-memory repositories. Run
-the MVP with exactly one Uvicorn process and one worker. State is not shared
-between workers and is lost whenever the process restarts; PostgreSQL-backed
-storage is required before operational player data is retained.
+```bash
+DATABASE_URL=postgresql+asyncpg://immortal:immortal_dev_only@127.0.0.1:5432/immortal_restore ./scripts/start-game-service.sh
+```
+
+## Restart and restore smoke
+
+Run the service in Terminal A, and run the following from Terminal B. Keep the
+same UUIDs and idempotency keys across every restart; the response body files
+are the byte-level replay checks.
+
+```bash
+MINECRAFT_UUID=00000000-0000-0000-0000-000000000077
+LOGIN_BODY=$(curl -fsS -X POST http://127.0.0.1:8000/api/v1/players/login \
+  -H 'content-type: application/json' \
+  -d "{\"minecraft_uuid\":\"$MINECRAFT_UUID\",\"player_name\":\"SmokePlayer\"}")
+ACCOUNT_ID=$(printf '%s' "$LOGIN_BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["account"]["account_id"])')
+
+printf '%s' "$LOGIN_BODY" > /tmp/login-before.json
+curl -fsS -X POST "http://127.0.0.1:8000/api/v1/players/$ACCOUNT_ID/current-life/spirit-root" > /tmp/root-before.json
+curl -fsS -X PUT "http://127.0.0.1:8000/api/v1/players/$ACCOUNT_ID/current-life/quests/first-steps/accept" \
+  -H 'content-type: application/json' -H 'Idempotency-Key: 00000000-0000-0000-0000-000000000078' \
+  -d '{"provider_id":"old-man"}' > /tmp/accept-before.json
+```
+
+Stop Terminal A with `Ctrl-C`, start it again with the same `DATABASE_URL`,
+then run this from Terminal B to save the second responses:
+
+```bash
+LOGIN_AFTER=$(curl -fsS -X POST http://127.0.0.1:8000/api/v1/players/login \
+  -H 'content-type: application/json' \
+  -d "{\"minecraft_uuid\":\"$MINECRAFT_UUID\",\"player_name\":\"SmokePlayer\"}")
+printf '%s' "$LOGIN_AFTER" > /tmp/login-after.json
+curl -fsS -X POST "http://127.0.0.1:8000/api/v1/players/$ACCOUNT_ID/current-life/spirit-root" > /tmp/root-after.json
+curl -fsS -X PUT "http://127.0.0.1:8000/api/v1/players/$ACCOUNT_ID/current-life/quests/first-steps/accept" \
+  -H 'content-type: application/json' -H 'Idempotency-Key: 00000000-0000-0000-0000-000000000078' \
+  -d '{"provider_id":"old-man"}' > /tmp/accept-after.json
+```
+
+Assert the login snapshot and frozen accept response are unchanged:
+
+```bash
+cmp /tmp/login-before.json /tmp/login-after.json
+cmp /tmp/accept-before.json /tmp/accept-after.json
+python3 -c 'import json; assert json.load(open("/tmp/root-after.json"))["already_detected"] is True'
+```
+
+Turn in, restart once more, and replay the same turn-in operation:
+
+```bash
+curl -fsS -X PUT "http://127.0.0.1:8000/api/v1/players/$ACCOUNT_ID/current-life/quests/first-steps/turn-in" \
+  -H 'content-type: application/json' -H 'Idempotency-Key: 00000000-0000-0000-0000-000000000079' \
+  -d '{"provider_id":"old-man"}' > /tmp/turn-in-before.json
+# Restart Terminal A with the same DATABASE_URL, then run the identical command again:
+curl -fsS -X PUT "http://127.0.0.1:8000/api/v1/players/$ACCOUNT_ID/current-life/quests/first-steps/turn-in" \
+  -H 'content-type: application/json' -H 'Idempotency-Key: 00000000-0000-0000-0000-000000000079' \
+  -d '{"provider_id":"old-man"}' > /tmp/turn-in-after.json
+cmp /tmp/turn-in-before.json /tmp/turn-in-after.json
+```
+
+After the source-database smoke succeeds, create the dump and isolated restore
+using the commands above. Switch `DATABASE_URL` to `immortal_restore`, start a
+fresh service process, run `alembic current`, then rerun the post-restart login,
+spirit-root read, accept replay, and turn-in replay with the same UUID and
+idempotency keys. The restored database must return the same durable state and
+the replay response files must still compare byte-for-byte.

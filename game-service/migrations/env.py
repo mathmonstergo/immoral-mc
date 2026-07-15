@@ -8,6 +8,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from immortal_mmo.core.config import Settings
 from immortal_mmo.db.base import Base
 from immortal_mmo.player import db_models as player_db_models  # noqa: F401
 from immortal_mmo.quest import db_models as quest_db_models  # noqa: F401
@@ -16,6 +17,10 @@ config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+if not config.get_main_option("sqlalchemy.url"):
+    database_url = Settings().database_url
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

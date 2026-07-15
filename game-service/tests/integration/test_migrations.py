@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -107,6 +110,8 @@ EXPECTED_TRIGGERS = {
     "trg_quest_progress_prevent_reversal_delete",
     "trg_quest_operations_prevent_rewrite_delete",
 }
+
+GAME_SERVICE_ROOT = Path(__file__).resolve().parents[2]
 
 
 async def _insert_account(session: AsyncSession, *, name: str = "Steve") -> UUID:
@@ -688,6 +693,27 @@ async def test_postgres_fixture_uses_requested_major_version(
 ) -> None:
     assert migrated_postgres.url.startswith("postgresql+asyncpg://")
     assert migrated_postgres.server_version.startswith("17.")
+
+
+@pytest.mark.asyncio
+async def test_alembic_cli_uses_database_url_from_environment(
+    migrated_postgres: MigratedPostgres,
+) -> None:
+    environment = os.environ.copy()
+    environment["DATABASE_URL"] = migrated_postgres.url
+
+    result = await asyncio.to_thread(
+        subprocess.run,
+        [str(GAME_SERVICE_ROOT / ".venv/bin/alembic"), "current"],
+        cwd=GAME_SERVICE_ROOT,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "20260714_001 (head)" in result.stdout
 
 
 @pytest.mark.asyncio
