@@ -1,7 +1,7 @@
 from uuid import UUID
 
+from immortal_mmo.player.mappers import to_spirit_root_schema
 from immortal_mmo.player.models import BASE_ELEMENT_ORDER, SpiritRootGenerator
-from immortal_mmo.player.schemas import to_spirit_root_schema
 
 
 def test_spirit_root_generator_emits_canonical_codes_in_stable_order() -> None:
@@ -57,4 +57,3 @@ def test_generator_covers_all_non_variant_quality_shapes() -> None:
         ).generate(UUID(int=count))
         assert root.quality_code == quality
         assert len(root.base_element_codes) == count
-

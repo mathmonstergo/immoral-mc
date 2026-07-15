@@ -151,6 +151,7 @@ class FakeQuestRepository:
         self._state.operations[operation.operation_id] = operation
         return True
 
+
     async def finalize_operation(
         self,
         operation_id: UUID,
@@ -231,6 +232,80 @@ class FakeQuestRepository:
             revision=revision,
         )
         return True
+
+
+class NoOpQuestRepository:
+    """Task-4-only guard proving Player tests never cross into Quest persistence."""
+
+    def __init__(self, session: object) -> None:
+        del session
+
+    @staticmethod
+    def _unexpected() -> None:
+        raise AssertionError("Player flow unexpectedly called the Quest repository")
+
+    async def get_operation(self, operation_id: UUID) -> StoredQuestOperation | None:
+        del operation_id
+        self._unexpected()
+
+    async def reserve_operation(self, operation: StoredQuestOperation) -> bool:
+        del operation
+        self._unexpected()
+
+    async def finalize_operation(
+        self,
+        operation_id: UUID,
+        *,
+        state: QuestOperationState,
+        changed: bool,
+        response_status: int,
+        response_content_type: str,
+        response_body: bytes,
+        response_contract_version: int,
+        finalized_at: datetime,
+    ) -> StoredQuestOperation:
+        del (
+            operation_id,
+            state,
+            changed,
+            response_status,
+            response_content_type,
+            response_body,
+            response_contract_version,
+            finalized_at,
+        )
+        self._unexpected()
+
+    async def get_quest_revision(self, life_id: UUID, *, for_update: bool) -> int:
+        del life_id, for_update
+        self._unexpected()
+
+    async def increment_quest_revision(self, life_id: UUID) -> int:
+        del life_id
+        self._unexpected()
+
+    async def get_progresses(
+        self,
+        life_id: UUID,
+        quest_ids: Collection[str],
+    ) -> dict[str, QuestProgress]:
+        del life_id, quest_ids
+        self._unexpected()
+
+    async def insert_progress_if_absent(self, progress: QuestProgress) -> bool:
+        del progress
+        self._unexpected()
+
+    async def complete_progress_if_active(
+        self,
+        life_id: UUID,
+        quest_id: str,
+        *,
+        completed_at: datetime,
+        revision: int,
+    ) -> bool:
+        del life_id, quest_id, completed_at, revision
+        self._unexpected()
 
 
 class FakeUnitOfWork:

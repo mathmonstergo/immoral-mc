@@ -1,14 +1,22 @@
 from uuid import UUID
 
+from sqlalchemy.exc import DBAPIError
+
 from immortal_mmo.core.errors import ConflictError, NotFoundError
 from immortal_mmo.core.uow import UnitOfWorkFactory
+from immortal_mmo.player.mappers import to_login_response, to_spirit_root_schema
 from immortal_mmo.player.models import CurrentLifeQuestFacts, SpiritRootGenerator
 from immortal_mmo.player.schemas import (
     PlayerLoginResponse,
     SpiritRootDetectionResponse,
-    to_login_response,
-    to_spirit_root_schema,
 )
+
+RETRYABLE_LOGIN_SQLSTATES = {"40001", "40P01"}
+RETRYABLE_LOGIN_UNIQUE_CONSTRAINTS = {
+    "uq_accounts_minecraft_uuid",
+    "uq_life_generation",
+    "ux_lives_one_alive_per_account",
+}
 
 
 class PlayerAccountNotFoundError(NotFoundError):
@@ -32,6 +40,15 @@ class PlayerService:
         self._spirit_root_generator = spirit_root_generator or SpiritRootGenerator()
 
     async def login(self, minecraft_uuid: UUID, player_name: str) -> PlayerLoginResponse:
+        for attempt in range(2):
+            try:
+                return await self._login_once(minecraft_uuid, player_name)
+            except DBAPIError as error:
+                if attempt == 1 or not _is_retryable_login_error(error):
+                    raise
+        raise AssertionError("login retry loop exhausted")
+
+    async def _login_once(self, minecraft_uuid: UUID, player_name: str) -> PlayerLoginResponse:
         async with self._uow_factory(isolation="read_committed") as uow:
             account = await uow.players.upsert_account(minecraft_uuid, player_name)
             account = await uow.players.lock_account(account.account_id)
@@ -92,3 +109,33 @@ class PlayerService:
                 raise PlayerLifecycleError()
             await uow.commit()
             return facts
+
+
+def _postgres_error_detail(error: BaseException, attribute: str) -> str | None:
+    pending: list[BaseException] = [error]
+    visited: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in visited:
+            continue
+        visited.add(id(current))
+        value = getattr(current, attribute, None)
+        if isinstance(value, str):
+            return value
+        for nested_attribute in ("orig", "__cause__", "__context__"):
+            nested = getattr(current, nested_attribute, None)
+            if isinstance(nested, BaseException):
+                pending.append(nested)
+    return None
+
+
+def _is_retryable_login_error(error: DBAPIError) -> bool:
+    sqlstate = _postgres_error_detail(error, "sqlstate") or _postgres_error_detail(
+        error, "pgcode"
+    )
+    if sqlstate in RETRYABLE_LOGIN_SQLSTATES:
+        return True
+    if sqlstate != "23505":
+        return False
+    constraint_name = _postgres_error_detail(error, "constraint_name")
+    return constraint_name in RETRYABLE_LOGIN_UNIQUE_CONSTRAINTS

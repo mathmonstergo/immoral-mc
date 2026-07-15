@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from tests.support.postgres import (
@@ -32,3 +33,24 @@ async def postgres_sessions(
 async def postgres_session(postgres_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
     async with rollback_postgres_session(postgres_engine) as session:
         yield session
+
+
+@pytest_asyncio.fixture
+async def clean_postgres_data(postgres_engine: AsyncEngine) -> AsyncIterator[None]:
+    statement = text(
+        """
+        TRUNCATE TABLE
+            quest_operations,
+            quest_progress,
+            life_quest_states,
+            life_spirit_roots,
+            lives,
+            account_minecraft_names,
+            accounts
+        """
+    )
+    async with postgres_engine.begin() as connection:
+        await connection.execute(statement)
+    yield
+    async with postgres_engine.begin() as connection:
+        await connection.execute(statement)
