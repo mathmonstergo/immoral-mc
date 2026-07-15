@@ -47,9 +47,9 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
 - Test: `game-service/tests/unit/test_combat_catalog.py`
 - Test: `game-service/tests/unit/test_combat_schemas.py`
 
-- [ ] **Step 1: Add failing catalog tests** for exact internal-name lookup, unknown IDs returning `not_rewardable`, compact/detailed telemetry, decimal level bounds, deterministic integer reward output, and overflow rejection.
-- [ ] **Step 2: Add failing schema tests** for batch requests capped by configured size, decimal-string mob levels, UUID validation, attribution kinds, optional source-life/technique/cast fields, and per-event result decoding.
-- [ ] **Step 3: Implement frozen domain values** with explicit literals:
+- [x] **Step 1: Add failing catalog tests** for exact internal-name lookup, unknown IDs returning `not_rewardable`, compact/detailed telemetry, decimal level bounds, deterministic integer reward output, and overflow rejection.
+- [x] **Step 2: Add failing schema tests** for batch requests capped by configured size, decimal-string mob levels, UUID validation, attribution kinds, optional source-life/technique/cast fields, and per-event result decoding.
+- [x] **Step 3: Implement frozen domain values** with explicit literals:
 
   ```python
   AttributionKind = Literal[
@@ -63,15 +63,15 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
   ```
 
   Use `Decimal` for mob levels and checked integer arithmetic for reward amounts. Keep the adapter amount-free: the request models contain no reward field.
-- [ ] **Step 4: Implement catalog loading** from a version-controlled YAML/JSON content file with duplicate-ID, profile, curve, telemetry, level-bound, and overflow validation. A missing/invalid catalog raises a startup error; an unknown mob ID has an explicit terminal result rather than a default amount.
-- [ ] **Step 5: Run focused tests**:
+- [x] **Step 4: Implement catalog loading** from a version-controlled YAML/JSON content file with duplicate-ID, profile, curve, telemetry, level-bound, and overflow validation. A missing/invalid catalog raises a startup error; an unknown mob ID has an explicit terminal result rather than a default amount.
+- [x] **Step 5: Run focused tests**:
 
   ```bash
   cd game-service && uv run pytest tests/unit/test_combat_catalog.py tests/unit/test_combat_schemas.py -q
   ```
 
   Expected: all new tests pass.
-- [ ] **Step 6: Commit** `feat: add combat reward domain contracts`.
+- [x] **Step 6: Commit** `feat: add combat reward domain contracts`.
 
 ## Task 2: Add PostgreSQL schema and persistence rows
 
