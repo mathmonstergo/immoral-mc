@@ -111,9 +111,47 @@ not progression authority.
 
 ## 5. Adapter Event Contract
 
-The listener accepts only `MythicMobDeathEvent` instances whose killer is a
-Paper `Player`. Environmental deaths, despawns, and non-player kills do not
+The death listener accepts only kills resolved to a player-owned combat source.
+Environmental deaths, despawns, and damage without player ownership do not
 enter the reward outbox in this slice.
+
+### 5.1 Combat attribution
+
+`MythicMobDeathEvent#getKiller()` is an integration input and compatibility
+fallback, not the sole authority. Its API describes the mob's killer but does
+not guarantee that every future custom delayed mechanic preserves the original
+player through its final tick.
+
+ImmortalMC owns a bounded in-memory `CombatAttributionTracker` keyed by target
+entity UUID. It records final uncancelled damage and resolves a `CombatSource`
+containing:
+
+* owning player UUID;
+* source life ID captured from the authenticated player session when available;
+* optional stable technique ID;
+* optional cast/effect UUID;
+* attribution kind: `direct`, `projectile`, `damage_over_time`, `summon`,
+  `trap`, `formation`, or `bukkit_fallback`;
+* actual final damage and occurrence time.
+
+Paper's `DamageSource#getCausingEntity()` and direct/projectile owner APIs cover
+ordinary melee and indirect Bukkit damage. Every future ImmortalMC technique
+must apply damage through a shared combat-damage gateway. The gateway copies the
+same `CombatSource` into projectiles, summons, traps, formations, and every
+damage-over-time tick instead of applying anonymous damage.
+
+The first policy credits the owner of the lethal attributable damage. If a
+player's poison tick kills the mob, that player receives the kill even when the
+direct damaging object is not a Player. If another player's attack is lethal,
+the other player receives it. Environment-only lethal damage has no player
+credit. Highest-total-damage and contribution-threshold/multi-recipient Boss
+policies are deferred, but the tracker boundary permits them without changing
+the outbox authority model.
+
+At death, the listener consumes the most recent lethal attribution record. If
+no ImmortalMC record exists, it may use the Mythic/Paper killer only when it
+resolves directly to a Player. Attribution entries expire and are cleared on
+death, despawn, unload, and plugin shutdown.
 
 On the Paper thread, the listener copies these values and then releases all
 Bukkit/Mythic object references:
@@ -123,7 +161,8 @@ Bukkit/Mythic object references:
 * dead entity UUID;
 * exact Mythic internal name;
 * finite Mythic mob level;
-* killer Minecraft UUID;
+* credited player Minecraft UUID and optional source life ID;
+* attribution kind, optional technique ID, and optional cast/effect UUID;
 * world key and coordinates;
 * UTC occurrence timestamp;
 * request contract version.
@@ -143,6 +182,10 @@ The version-one request is conceptually:
   "mob_internal_name": "AzureWolf",
   "mob_level": "12.000",
   "killer_uuid": "uuid",
+  "source_life_id": "uuid",
+  "attribution_kind": "damage_over_time",
+  "technique_id": "venom_mist",
+  "cast_id": "uuid",
   "world": "minecraft:overworld",
   "x": 120.5,
   "y": 64.0,
@@ -154,6 +197,9 @@ The version-one request is conceptually:
 Mob level crosses the boundary as a bounded decimal string and is parsed into a
 fixed-precision decimal. NaN, infinities, negative values, excessive precision,
 and configured upper-bound violations are invalid requests, not coercions.
+The Game Service treats `source_life_id` as a claim: it must match the locked
+current alive life. A delayed effect from a dead/reincarnated life cannot credit
+the new life.
 
 ## 6. SQLite Durable Outbox
 
@@ -238,7 +284,38 @@ After append success, the kill survives ordinary process crashes and power loss
 to the guarantees of SQLite FULL and the filesystem. A failed local commit is a
 visible capture failure; no local reward fallback is granted.
 
-### 6.5 Retry outcomes
+### 6.5 Scheduled batch delivery
+
+Durable capture and remote delivery have separate timing. SQLite capture occurs
+immediately; Game Service delivery is eventually consistent and uses an
+in-process `ScheduledExecutorService`, not an operating-system cron job.
+
+The worker claims up to a configured batch size and sends one HTTP batch with a
+per-event result list. One invalid or terminal event does not block unrelated
+events. If the batch request times out after partial or complete Game Service
+commits, the ambiguous subset may be retried safely because every event has an
+independent idempotency key.
+
+Initial configurable defaults are:
+
+```yaml
+combat-outbox:
+  delivery-interval-ms: 1000
+  high-load-delivery-interval-ms: 10000
+  batch-size: 50
+  max-batch-size: 200
+  max-pending-age-seconds: 60
+  high-load-tps-threshold: 18.0
+```
+
+The worker uses normal cadence while TPS is healthy. Below the configured TPS
+threshold, or while Game Service returns overload signals, it increases the
+interval and consolidates pending rows into bounded batches. Once the oldest
+pending event reaches the maximum age, it remains eligible for the next worker
+run even under high load. Configuration changes require a plugin reload/restart
+in the first slice; online scheduling editors are out of scope.
+
+### 6.6 Retry outcomes
 
 Transport errors, timeouts, HTTP 408/429, and 5xx responses use capped
 exponential backoff with jitter. The row retains attempt count, next-attempt
@@ -291,6 +368,10 @@ CREATE TABLE combat_kill_events (
     mob_internal_name      VARCHAR(128) NOT NULL,
     mob_level              NUMERIC(12,3) NOT NULL,
     killer_minecraft_uuid  UUID NOT NULL,
+    source_life_id         UUID NULL REFERENCES lives(life_id) ON DELETE RESTRICT,
+    attribution_kind       VARCHAR(32) NOT NULL,
+    technique_id           VARCHAR(128) NULL,
+    cast_id                UUID NULL,
     account_id             UUID NULL REFERENCES accounts(account_id) ON DELETE RESTRICT,
     life_id                UUID NULL REFERENCES lives(life_id) ON DELETE RESTRICT,
     world_key              VARCHAR(128) NOT NULL,
@@ -304,6 +385,10 @@ CREATE TABLE combat_kill_events (
     CONSTRAINT ck_combat_kill_source_type
         CHECK (source_type = 'mythicmob_death'),
     CONSTRAINT ck_combat_kill_level CHECK (mob_level >= 0),
+    CONSTRAINT ck_combat_kill_attribution CHECK (
+        attribution_kind IN ('direct', 'projectile', 'damage_over_time',
+                             'summon', 'trap', 'formation', 'bukkit_fallback')
+    ),
     CONSTRAINT ck_combat_kill_outcome CHECK (
         outcome IN ('rewarded', 'not_rewardable', 'account_not_found',
                     'current_life_unavailable')
@@ -418,7 +503,8 @@ For a new request:
    compact event with `account_not_found` and return the terminal result.
 6. Resolve and lock the account's current `alive` life. If absent, insert the
    event with `current_life_unavailable`; never bind the kill to a historical
-   or later life.
+   or later life. When `source_life_id` is present, require it to equal this
+   locked current life; a mismatch is `current_life_unavailable`.
 7. For a recognized catalog entry, calculate the positive integer reward with
    the versioned Game Service profile and checked arithmetic.
 8. Insert the immutable combat kill event, including the selected compact or
@@ -440,8 +526,8 @@ SQLAlchemy transaction.
 
 ## 9. HTTP Outcomes
 
-All valid terminal domain outcomes use a stable response body and are safe for
-the Adapter to acknowledge:
+The batch endpoint returns one stable result per event. All valid terminal
+domain outcomes are safe for the Adapter to acknowledge:
 
 * `accepted`: newly processed and rewarded;
 * `duplicate`: exact replay of an already processed event, including its
@@ -474,13 +560,14 @@ only through a reviewed content change; no hidden fallback amount exists.
 
 ## 11. Performance and Operations
 
-The hot Paper path performs a typed event snapshot and a bounded local SQLite
-commit only. Remote work is asynchronous. Ambient/non-player deaths are
-filtered before SQLite.
+The hot Paper path performs damage attribution, a typed death snapshot, and a
+bounded local SQLite commit only. Remote work is asynchronous.
 
 The SQLite outbox deletes acknowledged rows and therefore reflects outage
-backlog rather than lifetime kill volume. Operators monitor pending count,
-oldest pending age, retry rate, dead-letter count, capture failures, and local
+backlog rather than lifetime kill volume. Delivery interval and batch size are
+configurable; high-load cadence reduces HTTP/Game Service pressure without
+delaying durable local capture. Operators monitor pending count, oldest pending
+age, retry rate, dead-letter count, capture failures, and local
 database/checkpoint failures.
 
 PostgreSQL writes one compact event, one counter upsert, one ledger entry, and
@@ -515,15 +602,18 @@ PostgreSQL integration tests cover:
 
 ### Paper Adapter
 
-Java tests cover MythicMobs present, absent, and incompatible; typed event
-mapping; non-player kill filtering; stable event IDs; decimal level validation;
-and release of Bukkit object references before asynchronous work.
+Java tests cover MythicMobs present, absent, and incompatible; direct,
+projectile, damage-over-time, summon, trap, formation, and fallback attribution;
+old-life source rejection; non-player kill filtering; stable event IDs; decimal
+level validation; and release of Bukkit object references before asynchronous
+work.
 
 SQLite tests cover WAL/FULL configuration, duplicate enqueue, bounded writer
-queue, optional micro-batching, successful acknowledgement, lease recovery,
-retry classification/backoff, dead-letter handling, checkpoint behavior, and
-Paper restart replay. Tests assert that no network call executes on the Paper
-thread.
+queue, optional micro-batching, scheduled HTTP batching, partial batch outcomes,
+high-load cadence, maximum pending age, successful acknowledgement, lease
+recovery, retry classification/backoff, dead-letter handling, checkpoint
+behavior, and Paper restart replay. Tests assert that no network call executes
+on the Paper thread.
 
 ### Smoke test
 

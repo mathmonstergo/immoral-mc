@@ -48,6 +48,10 @@ until a later seclusion flow consumes and refines that reserve.
 ## Open Questions
 
 There are no remaining architecture-blocking questions for the first slice.
+The initial policy credits the owner of the lethal attributable damage source.
+The attribution boundary still permits highest-damage and multi-recipient Boss
+policies later without relying only on `MythicMobDeathEvent#getKiller()`.
+
 The outbox reliability decision is fixed in
 [`research/adapter-outbox.md`](research/adapter-outbox.md): one bounded SQLite
 writer with WAL and `synchronous=FULL`; the death listener waits only for the
@@ -58,7 +62,21 @@ short local commit, while all network delivery is asynchronous.
 * Listen to the supported MythicMobs death API/event, not generic entity naming
   or lore heuristics.
 * The first version credits only the final killer reported by the supported
-  server-side MythicMobs death event.
+  server-side attribution policy. `MythicMobDeathEvent#getKiller()` is an
+  integration input/fallback, not the sole source of truth for technique
+  damage.
+* Player techniques, projectiles, damage-over-time effects, summons, traps, and
+  other delayed damage must preserve an explicit owning player UUID and
+  optional technique/cast ID from application through every damage tick. A
+  lethal delayed tick credits its owning player even if no Player entity is the
+  direct damager at death.
+* The Adapter maintains a bounded per-mob combat-attribution projection from
+  final uncancelled damage. Future ImmortalMC technique implementations must use
+  the shared attribution/damage gateway instead of applying anonymous damage.
+* The first attribution policy credits the owner of the lethal attributable
+  damage. A lethal damage-over-time tick, projectile, summon, trap, or formation
+  credits the player/life captured by its combat source. Highest-damage and
+  contribution-threshold policies are deferred.
 * Preserve future party/contribution sharing by making reward deduplication
   unique per `(source event, recipient life)` rather than assuming one source
   event can have only one recipient forever.
@@ -102,6 +120,14 @@ short local commit, while all network delivery is asynchronous.
   `in_flight` rows. Retry only transport/timeout/408/429/5xx failures with
   capped backoff; explicit domain outcomes and malformed/unrecoverable rows
   are terminal and must be acknowledged or dead-lettered visibly.
+* Separate durable capture latency from remote delivery latency. The SQLite
+  append remains immediate, while a configurable asynchronous delivery worker
+  sends due rows in bounded HTTP batches.
+* Delivery cadence is adjustable and load-aware. Under high Paper or Game
+  Service load it may increase the interval and batch more rows, while a maximum
+  pending-age guard prevents indefinite delay. Use an in-process scheduled
+  executor rather than an operating-system cron job so plugin lifecycle,
+  leases, per-event acknowledgements, and sub-minute scheduling remain local.
 * The official free-distribution MythicMobs 5.12.1 API/runtime is the supported
   baseline for this slice and the CI/test-server target.
 * Future Premium-only mechanics are optional follow-up integrations and must not
@@ -167,7 +193,8 @@ so it is rejected for the universal progression pipeline.
 compile-only API artifact.
 
 **Decision**: Use `MythicMobDeathEvent` directly through a dedicated optional
-integration package. Credit the final killer only in the first version. The
+integration package. Credit the owner of the lethal attributable damage source
+in the first version; use `getKiller()` only as a compatible fallback. The
 Adapter submits facts, never a trusted reward amount. Official free-distribution
 MythicMobs 5.12.1 is the supported baseline; Premium-only work is deferred and
 must be separately licensed and scoped if introduced later. Persist a generic
@@ -199,6 +226,13 @@ progression authority.
 * [ ] SQLite outbox recovery handles duplicate enqueue, retryable HTTP failure,
       successful acknowledgement, malformed/corrupt rows, and bounded retry
       scheduling without blocking the Paper main thread for network work.
+* [ ] Batch delivery returns and applies an independent terminal/retry result
+      for each event; an ambiguous batch timeout is safe to replay.
+* [ ] Configured high-load delivery cadence reduces HTTP pressure without
+      weakening immediate SQLite capture or exceeding the maximum pending age.
+* [ ] Lethal direct, projectile, damage-over-time, summon, trap, and formation
+      sources credit their owning player/life; Mythic's killer is a compatible
+      fallback rather than the only attribution source.
 * [ ] Reincarnation isolates later kills to the new life.
 * [ ] Java tests cover MythicMobs present/absent/incompatible and event mapping.
 * [ ] Python unit/integration tests cover reward calculation, transactionality,
