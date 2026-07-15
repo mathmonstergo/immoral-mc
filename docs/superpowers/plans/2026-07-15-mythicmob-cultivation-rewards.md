@@ -212,9 +212,9 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
 - Test: `minecraft-nodes/main-plugin/src/test/java/com/immortalmc/adapter/outbox/OutboxDeliveryWorkerTest.java`
 - Test: `minecraft-nodes/main-plugin/src/test/java/com/immortalmc/adapter/client/GameServiceClientCombatTest.java`
 
-- [ ] **Step 1: Write SQLite tests** for schema pragmas, synchronous durable insert, duplicate enqueue, bounded writer queue, lease claim/recovery, terminal delete, retry backoff, dead-letter transition, malformed row handling, checkpoint failure visibility, and restart replay.
-- [ ] **Step 2: Implement one-writer SQLite initialization** under `plugins/ImmortalMC/outbox.sqlite` with WAL, FULL, foreign keys, busy timeout, schema creation, and a bounded executor. `append()` returns success only after commit; it never performs HTTP.
-- [ ] **Step 3: Implement lease state transitions**:
+- [x] **Step 1: Write SQLite tests** for schema pragmas, synchronous durable insert, duplicate enqueue, bounded writer queue, lease claim/recovery, terminal delete, retry backoff, dead-letter transition, malformed row handling, checkpoint failure visibility, and restart replay.
+- [x] **Step 2: Implement one-writer SQLite initialization** under `plugins/ImmortalMC/outbox.sqlite` with WAL, FULL, foreign keys, busy timeout, schema creation, and a bounded executor. `append()` returns success only after commit; it never performs HTTP.
+- [x] **Step 3: Implement lease state transitions**:
 
   ```text
   pending -> in_flight(lease)
@@ -225,16 +225,16 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
   ```
 
   Use deterministic `event_id` conflict no-op and keep immutable payload fields unchanged on retry.
-- [ ] **Step 4: Extend `GameServiceClient`** with `/api/v1/combat/mythicmob-kills/batch`, configurable timeout, complete result-ID validation, HTTP classification, and JSON parsing. A whole-batch timeout is retryable; a 200 response missing or duplicating IDs is a local protocol failure/dead letter, never guessed.
-- [ ] **Step 5: Implement scheduled worker** with configurable normal/high-load intervals, TPS threshold, bounded batch size, `max-pending-age` override, exponential backoff/jitter, and one in-flight batch. Use `ScheduledExecutorService`, not OS cron or the Paper main scheduler.
-- [ ] **Step 6: Run outbox/client tests**:
+- [x] **Step 4: Extend `GameServiceClient`** with `/api/v1/combat/mythicmob-kills/batch`, configurable timeout, complete result-ID validation, HTTP classification, and JSON parsing. A whole-batch timeout is retryable; a 200 response missing or duplicating IDs is a local protocol failure/dead letter, never guessed.
+- [x] **Step 5: Implement scheduled worker** with configurable normal/high-load intervals, TPS threshold, bounded batch size, `max-pending-age` override, exponential backoff/jitter, and one in-flight batch. Use `ScheduledExecutorService`, not OS cron or the Paper main scheduler.
+- [x] **Step 6: Run outbox/client tests**:
 
   ```bash
   cd minecraft-nodes/main-plugin && ./gradlew test --tests '*SqliteKillOutboxTest' --tests '*OutboxDeliveryWorkerTest' --tests '*GameServiceClientCombatTest'
   ```
 
   Expected: no network operation occurs on the Paper thread; rows survive simulated restart and ambiguous batch timeout.
-- [ ] **Step 7: Commit** `feat: add durable SQLite combat outbox`.
+- [x] **Step 7: Commit** `feat: add durable SQLite combat outbox`.
 
 ## Task 7: Wire plugin lifecycle and end-to-end behavior
 

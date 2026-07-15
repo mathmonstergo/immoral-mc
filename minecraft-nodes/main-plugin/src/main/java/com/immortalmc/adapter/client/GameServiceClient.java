@@ -110,6 +110,26 @@ public final class GameServiceClient {
         return mutateQuest(accountId, questId, providerId, operationId, "turn-in");
     }
 
+    public CompletableFuture<CombatKillBatchResponse> sendCombatKills(
+            List<CombatKillEventRequest> events) {
+        CombatKillBatchRequest batch = new CombatKillBatchRequest(1, events);
+        return sendJson(
+                        newRequestBuilder("/api/v1/combat/mythicmob-kills/batch"),
+                        "POST",
+                        batch,
+                        CombatKillBatchResponse.class,
+                        "combat kill batch")
+                .thenApply(response -> {
+                    try {
+                        return response.validateAgainst(batch.events());
+                    } catch (IllegalArgumentException error) {
+                        throw new CompletionException(new GameServiceException(
+                                "Game Service combat kill batch response was invalid",
+                                error));
+                    }
+                });
+    }
+
     private CompletableFuture<QuestMutationResult> mutateQuest(
             UUID accountId, String questId, String providerId, UUID operationId, String operation) {
         Objects.requireNonNull(accountId, "accountId");

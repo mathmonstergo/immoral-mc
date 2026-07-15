@@ -17,6 +17,7 @@ dependencies {
     compileOnly("io.lumine:Mythic-Dist:5.12.1") {
         isTransitive = false
     }
+    compileOnly("org.xerial:sqlite-jdbc:3.53.2.0")
 
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.2")
 
@@ -24,6 +25,7 @@ dependencies {
     testImplementation("io.lumine:Mythic-Dist:5.12.1") {
         isTransitive = false
     }
+    testImplementation("org.xerial:sqlite-jdbc:3.53.2.0")
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
     testImplementation("org.mockito:mockito-core:5.15.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.4")
