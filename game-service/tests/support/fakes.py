@@ -6,6 +6,8 @@ from datetime import datetime
 from types import TracebackType
 from uuid import UUID, uuid4
 
+from immortal_mmo.combat.models import CombatKillEvent
+from immortal_mmo.cultivation.models import CombatCultivationCredit
 from immortal_mmo.player.models import Account, CurrentLifeQuestFacts, Life, SpiritRoot
 from immortal_mmo.quest.repository import (
     QuestOperationCommand,
@@ -25,6 +27,13 @@ class _FakeState:
     operations: dict[UUID, StoredQuestOperation] = field(default_factory=dict)
     quest_revisions: dict[UUID, int] = field(default_factory=dict)
     progresses: dict[tuple[UUID, str], QuestProgress] = field(default_factory=dict)
+    combat_events: dict[UUID, CombatKillEvent] = field(default_factory=dict)
+    mob_kill_counters: dict[tuple[UUID, str], int] = field(default_factory=dict)
+    cultivation_balances: dict[UUID, int] = field(default_factory=dict)
+    cultivation_revisions: dict[UUID, int] = field(default_factory=dict)
+    cultivation_credits: dict[tuple[UUID, UUID], CombatCultivationCredit] = field(
+        default_factory=dict
+    )
 
 
 class FakeStore:
@@ -313,12 +322,94 @@ class NoOpQuestRepository:
         self._unexpected()
 
 
+class FakeCombatRepository:
+    def __init__(self, state: _FakeState, ensure_active: Callable[[], None]) -> None:
+        self._state = state
+        self._ensure_active = ensure_active
+
+    async def get_event(self, source_event_id: UUID) -> CombatKillEvent | None:
+        self._ensure_active()
+        return self._state.combat_events.get(source_event_id)
+
+    async def insert_event_if_absent(self, event: CombatKillEvent) -> bool:
+        self._ensure_active()
+        if event.source_event_id in self._state.combat_events:
+            return False
+        self._state.combat_events[event.source_event_id] = event
+        return True
+
+    async def increment_mob_counter(
+        self,
+        life_id: UUID,
+        mob_internal_name: str,
+        occurred_at: datetime,
+    ) -> int:
+        self._ensure_active()
+        del occurred_at
+        key = (life_id, mob_internal_name)
+        count = self._state.mob_kill_counters.get(key, 0) + 1
+        self._state.mob_kill_counters[key] = count
+        return count
+
+    async def get_mob_counter(self, life_id: UUID, mob_internal_name: str) -> int:
+        self._ensure_active()
+        return self._state.mob_kill_counters.get((life_id, mob_internal_name), 0)
+
+
+class FakeCultivationRepository:
+    def __init__(self, state: _FakeState, ensure_active: Callable[[], None]) -> None:
+        self._state = state
+        self._ensure_active = ensure_active
+
+    async def get_combat_credit(
+        self,
+        kill_event_id: UUID,
+        life_id: UUID,
+    ) -> CombatCultivationCredit | None:
+        self._ensure_active()
+        return self._state.cultivation_credits.get((kill_event_id, life_id))
+
+    async def credit_combat_reward(
+        self,
+        *,
+        life_id: UUID,
+        kill_event_id: UUID,
+        amount: int,
+        occurred_at: datetime,
+    ) -> CombatCultivationCredit:
+        self._ensure_active()
+        del occurred_at
+        key = (kill_event_id, life_id)
+        if key in self._state.cultivation_credits:
+            raise RuntimeError("Combat cultivation reward already exists")
+        balance = self._state.cultivation_balances.get(life_id, 0) + amount
+        revision = self._state.cultivation_revisions.get(life_id, 1) + 1
+        credit = CombatCultivationCredit(
+            entry_id=uuid4(),
+            life_id=life_id,
+            kill_event_id=kill_event_id,
+            amount=amount,
+            balance_after=balance,
+            revision=revision,
+        )
+        self._state.cultivation_balances[life_id] = balance
+        self._state.cultivation_revisions[life_id] = revision
+        self._state.cultivation_credits[key] = credit
+        return credit
+
+    async def get_unrefined_balance(self, life_id: UUID) -> int:
+        self._ensure_active()
+        return self._state.cultivation_balances.get(life_id, 0)
+
+
 class FakeUnitOfWork:
     def __init__(self, store: FakeStore, isolation: str) -> None:
         self._store = store
         self.isolation = isolation
         self.players: FakePlayerRepository
         self.quests: FakeQuestRepository
+        self.combat: FakeCombatRepository
+        self.cultivation: FakeCultivationRepository
         self._working_state: _FakeState | None = None
         self._entered = False
         self._active = False
@@ -334,6 +425,8 @@ class FakeUnitOfWork:
         self._active = True
         self.players = FakePlayerRepository(self._working_state, self._ensure_active)
         self.quests = FakeQuestRepository(self._working_state, self._ensure_active)
+        self.combat = FakeCombatRepository(self._working_state, self._ensure_active)
+        self.cultivation = FakeCultivationRepository(self._working_state, self._ensure_active)
         return self
 
     async def __aexit__(

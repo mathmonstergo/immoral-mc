@@ -6,6 +6,12 @@ from immortal_mmo.cultivation.models import CombatCultivationCredit
 
 
 class CultivationRepository(Protocol):
+    async def get_combat_credit(
+        self,
+        kill_event_id: UUID,
+        life_id: UUID,
+    ) -> CombatCultivationCredit | None: ...
+
     async def credit_combat_reward(
         self,
         *,

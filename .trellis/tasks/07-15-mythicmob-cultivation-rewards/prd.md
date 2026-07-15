@@ -22,6 +22,9 @@ until a later seclusion flow consumes and refines that reserve.
   `plugin.yml` only soft-depends on Citizens.
 * The current Game Service has empty `combat` and `cultivation` packages, so
   this is a new cross-layer vertical slice rather than a small listener edit.
+* The project is pre-production. Development data and obsolete contracts may
+  be deleted or rebuilt; implementation must not add legacy aliases, dual
+  reads/writes, or silent compatibility fallbacks.
 
 ## Approved product decisions
 
@@ -61,10 +64,9 @@ short local commit, while all network delivery is asynchronous.
 
 * Listen to the supported MythicMobs death API/event, not generic entity naming
   or lore heuristics.
-* The first version credits only the final killer reported by the supported
-  server-side attribution policy. `MythicMobDeathEvent#getKiller()` is an
-  integration input/fallback, not the sole source of truth for technique
-  damage.
+* The first version credits only the owner of the lethal source recorded by the
+  ImmortalMC attribution tracker. `MythicMobDeathEvent#getKiller()` is not used
+  as an attribution fallback.
 * Player techniques, projectiles, damage-over-time effects, summons, traps, and
   other delayed damage must preserve an explicit owning player UUID and
   optional technique/cast ID from application through every damage tick. A
@@ -197,12 +199,13 @@ compile-only API artifact.
 
 **Decision**: Use `MythicMobDeathEvent` directly through a dedicated optional
 integration package. Credit the owner of the lethal attributable damage source
-in the first version; use `getKiller()` only as a compatible fallback. The
-Adapter submits facts, never a trusted reward amount. Official free-distribution
-MythicMobs 5.12.1 is the supported baseline; Premium-only work is deferred and
-must be separately licensed and scoped if introduced later. Persist a generic
-Combat kill fact first; derive the Cultivation reward from the Game Service mob
-reward catalog and link it to that fact.
+in the first version. Missing attribution fails closed and produces no reward
+event; `getKiller()` does not reconstruct ownership. The Adapter submits facts,
+never a trusted reward amount. Official free-distribution MythicMobs 5.12.1 is
+the supported baseline; Premium-only work is deferred and must be separately
+licensed and scoped if introduced later. Persist a generic Combat kill fact
+first; derive the Cultivation reward from the Game Service mob reward catalog
+and link it to that fact.
 
 **Consequences**: MythicMobs remains optional for unrelated ImmortalMC features,
 and the first combat-reward implementation remains portable to the official
@@ -234,8 +237,8 @@ progression authority.
 * [ ] Configured high-load delivery cadence reduces HTTP pressure without
       weakening immediate SQLite capture or exceeding the maximum pending age.
 * [ ] Lethal direct, projectile, damage-over-time, summon, trap, and formation
-      sources credit their owning player/life; Mythic's killer is a compatible
-      fallback rather than the only attribution source.
+      sources credit their owning player/life; missing tracker attribution
+      produces no reward event.
 * [ ] Reincarnation isolates later kills to the new life.
 * [ ] Java tests cover MythicMobs present/absent/incompatible and event mapping.
 * [ ] Python unit/integration tests cover reward calculation, transactionality,

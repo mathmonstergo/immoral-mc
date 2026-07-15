@@ -1,13 +1,21 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from starlette.types import Lifespan
 
 from immortal_mmo.api.errors import domain_error_handler
 from immortal_mmo.api.v1.health import ReadinessCheck, not_configured_readiness
 from immortal_mmo.api.v1.router import api_router
+from immortal_mmo.combat.catalog import CombatRewardCatalog, load_combat_reward_catalog
+from immortal_mmo.combat.service import CombatRewardService
 from immortal_mmo.core.errors import DomainError
 from immortal_mmo.core.uow import UnitOfWorkFactory
 from immortal_mmo.player.service import PlayerService
 from immortal_mmo.quest.service import QuestService
+
+DEFAULT_COMBAT_CATALOG_PATH = (
+    Path(__file__).resolve().parent / "combat" / "mythicmob_rewards.json"
+)
 
 
 def create_app(
@@ -15,6 +23,7 @@ def create_app(
     uow_factory: UnitOfWorkFactory,
     lifespan: Lifespan[FastAPI] | None = None,
     readiness_check: ReadinessCheck | None = None,
+    combat_catalog: CombatRewardCatalog | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Immortal MMO Game Service",
@@ -25,6 +34,10 @@ def create_app(
     )
     app.state.player_service = PlayerService(uow_factory)
     app.state.quest_service = QuestService(uow_factory)
+    app.state.combat_service = CombatRewardService(
+        uow_factory,
+        combat_catalog or load_combat_reward_catalog(DEFAULT_COMBAT_CATALOG_PATH),
+    )
     app.state.readiness_check = (
         readiness_check if readiness_check is not None else not_configured_readiness
     )

@@ -39,7 +39,7 @@ async def test_ready_reports_the_matching_migration_revision() -> None:
         readiness_check=FixedReadinessCheck(
             health_module.ReadinessResult(
                 ready=True,
-                migration_revision="20260714_001",
+                migration_revision="20260715_002",
             )
         ),
     )
@@ -52,7 +52,7 @@ async def test_ready_reports_the_matching_migration_revision() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ready",
-        "migration_revision": "20260714_001",
+        "migration_revision": "20260715_002",
     }
 
 
@@ -90,11 +90,11 @@ class FixedScriptDirectory:
 @pytest.mark.parametrize(
     ("database_revisions", "code_heads"),
     [
-        ((), ("20260714_001",)),
-        (("20260714_001", "other"), ("20260714_001",)),
-        (("20260714_001",), ()),
-        (("20260714_001",), ("20260714_001", "other")),
-        (("20260714_001",), ("other",)),
+        ((), ("20260715_002",)),
+        (("20260715_002", "other"), ("20260715_002",)),
+        (("20260715_002",), ()),
+        (("20260715_002",), ("20260715_002", "other")),
+        (("20260715_002",), ("other",)),
     ],
 )
 async def test_readiness_rejects_invalid_database_or_code_revision_cardinality(
@@ -120,7 +120,7 @@ async def test_readiness_rejects_invalid_database_or_code_revision_cardinality(
         async with postgres_sessions() as session:
             await session.execute(text("DELETE FROM alembic_version"))
             await session.execute(
-                text("INSERT INTO alembic_version (version_num) VALUES ('20260714_001')")
+                text("INSERT INTO alembic_version (version_num) VALUES ('20260715_002')")
             )
             await session.commit()
 
@@ -133,12 +133,12 @@ async def test_readiness_queries_connectivity_and_exact_revision_rows(
 ) -> None:
     result = await health_module.PostgresReadinessChecker(
         postgres_sessions,
-        FixedScriptDirectory(("20260714_001",)),
+        FixedScriptDirectory(("20260715_002",)),
     )()
 
     assert result == health_module.ReadinessResult(
         ready=True,
-        migration_revision="20260714_001",
+        migration_revision="20260715_002",
     )
 
 
@@ -151,7 +151,7 @@ class FailingSessionFactory:
 async def test_readiness_returns_not_ready_for_connectivity_or_query_failure() -> None:
     result = await health_module.PostgresReadinessChecker(
         FailingSessionFactory(),
-        FixedScriptDirectory(("20260714_001",)),
+        FixedScriptDirectory(("20260715_002",)),
     )()
 
     assert result == health_module.ReadinessResult(ready=False)
@@ -166,7 +166,7 @@ class BrokenSessionFactory:
 async def test_readiness_does_not_hide_unexpected_programming_errors() -> None:
     checker = health_module.PostgresReadinessChecker(
         BrokenSessionFactory(),
-        FixedScriptDirectory(("20260714_001",)),
+        FixedScriptDirectory(("20260715_002",)),
     )
 
     with pytest.raises(RuntimeError, match="programming error"):

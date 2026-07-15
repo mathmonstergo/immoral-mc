@@ -56,8 +56,89 @@ account_technique_marks
 * Every schema change requires a migration.
 * Migrations must be deterministic and reversible when practical.
 * Migration filenames should include a short purpose, e.g. `20260708_001_create_accounts_lives.py`.
-* Do not edit an applied migration to change behavior. Add a new migration.
+* Do not edit a production-applied migration to change behavior. Add a new migration.
 * Seed/demo content should be separated from structural migrations unless the schema requires reference rows.
+
+## Scenario: Zero-to-One Schema Replacement
+
+### 1. Scope / Trigger
+
+Trigger: backend, database, API, or configuration design changes before the
+server has entered production operation. Development data is disposable and
+must not force the target architecture to preserve an obsolete shape.
+
+### 2. Signatures
+
+Development reset and verification commands:
+
+```bash
+docker compose down -v
+docker compose up -d postgres
+.venv/bin/alembic upgrade head
+.venv/bin/pytest tests/integration/test_migrations.py -q
+```
+
+### 3. Contracts
+
+* Design the clean target schema first. Existing development rows, columns,
+  payload aliases, and migration history are not compatibility requirements.
+* An unapplied or development-only migration may be rewritten when that yields
+  the correct target schema. Once production data exists, this rule must be
+  replaced by an explicit production migration policy.
+* Do not add dual reads, dual writes, legacy columns, endpoint aliases,
+  fallback defaults, silent coercion, or background backfills unless a task
+  explicitly identifies real data that must survive.
+* A stale local database must fail visibly. Reset or migrate it deliberately;
+  runtime code must not detect old shapes and silently adapt.
+* Reliability mechanisms required by the target design—transactions,
+  idempotency, durable outboxes, and retry classification—remain mandatory.
+  They protect current correctness and are not legacy compatibility layers.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Local database has an obsolete schema | Migration/readiness fails visibly; developer resets or rebuilds it |
+| Old API payload uses removed fields | Typed validation rejects it; service does not translate it silently |
+| Old config key is present | Startup/config validation fails unless the current schema defines it |
+| Target model changes before production | Rewrite the development migration/schema and update tests directly |
+| Durable event is retried | Idempotency returns the stored result; this is correctness, not compatibility |
+
+### 5. Good/Base/Bad Cases
+
+* Good: remove an obsolete column and reset the development database so only
+  the final model remains.
+* Base: update a development-only Alembic revision, ORM metadata, fixtures,
+  and migration assertions in one change.
+* Bad: keep `old_value`, `new_value`, and a read fallback because a local test
+  database might still contain old rows.
+* Bad: accept both old and new request shapes indefinitely during 0-to-1 work.
+
+### 6. Tests Required
+
+* Migration tests assert the exact head revision, table set, columns,
+  constraints, indexes, downgrade, and clean re-upgrade.
+* ORM metadata comparison must report no drift from a freshly migrated
+  database.
+* API/config tests reject removed legacy shapes instead of exercising a
+  compatibility branch.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+value = row.new_value if row.new_value is not None else row.old_value
+```
+
+#### Correct
+
+```python
+value = row.value
+```
+
+Rebuild disposable development data around the final contract instead of
+carrying transitional branches into the server backend.
 
 ## Local PostgreSQL and recovery workflow
 

@@ -11,7 +11,6 @@ AttributionKind = Literal[
     "summon",
     "trap",
     "formation",
-    "bukkit_fallback",
 ]
 TelemetryMode = Literal["compact", "detailed"]
 CombatKillOutcome = Literal[
@@ -41,6 +40,7 @@ class RewardDecision:
 class CombatKillEvent:
     kill_event_id: UUID
     source_event_id: UUID
+    request_fingerprint: str
     server_id: str
     entity_uuid: UUID
     mob_internal_name: str

@@ -41,6 +41,7 @@ def kill_event(
     return CombatKillEvent(
         kill_event_id=uuid4(),
         source_event_id=source_event_id or uuid4(),
+        request_fingerprint="a" * 64,
         server_id="main-1",
         entity_uuid=uuid4(),
         mob_internal_name="AzureWolf",

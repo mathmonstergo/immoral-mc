@@ -29,6 +29,7 @@ class PostgresCombatRepository:
                 kill_event_id=event.kill_event_id,
                 source_type="mythicmob_death",
                 source_event_id=event.source_event_id,
+                request_fingerprint=event.request_fingerprint,
                 server_id=event.server_id,
                 entity_uuid=event.entity_uuid,
                 mob_internal_name=event.mob_internal_name,
@@ -89,6 +90,7 @@ def _event_from_row(row: CombatKillEventRow) -> CombatKillEvent:
     return CombatKillEvent(
         kill_event_id=row.kill_event_id,
         source_event_id=row.source_event_id,
+        request_fingerprint=row.request_fingerprint,
         server_id=row.server_id,
         entity_uuid=row.entity_uuid,
         mob_internal_name=row.mob_internal_name,

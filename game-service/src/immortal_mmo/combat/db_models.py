@@ -37,12 +37,16 @@ class CombatKillEventRow(Base):
             "source_type = 'mythicmob_death'",
             name=conv("ck_combat_kill_source_type"),
         ),
+        CheckConstraint(
+            "request_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_combat_kill_request_fingerprint"),
+        ),
         CheckConstraint("mob_level >= 0", name=conv("ck_combat_kill_level")),
         CheckConstraint(
             """
             attribution_kind IN (
                 'direct', 'projectile', 'damage_over_time', 'summon',
-                'trap', 'formation', 'bukkit_fallback'
+                'trap', 'formation'
             )
             """,
             name=conv("ck_combat_kill_attribution"),
@@ -95,6 +99,7 @@ class CombatKillEventRow(Base):
     kill_event_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True))
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
     source_event_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     server_id: Mapped[str] = mapped_column(String(64), nullable=False)
     entity_uuid: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
     mob_internal_name: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -104,11 +109,6 @@ class CombatKillEventRow(Base):
     )
     source_life_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
-        ForeignKey(
-            "lives.life_id",
-            name=conv("fk_combat_kill_events_source_life_id_lives"),
-            ondelete="RESTRICT",
-        ),
         nullable=True,
     )
     attribution_kind: Mapped[str] = mapped_column(String(32), nullable=False)

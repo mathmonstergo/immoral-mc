@@ -60,6 +60,7 @@ def test_event_request_preserves_decimal_and_attribution_contract() -> None:
         ("mob_level", "12.5001"),
         ("mob_internal_name", "contains spaces"),
         ("attribution_kind", "unknown"),
+        ("attribution_kind", "bukkit_fallback"),
         ("occurred_at", "2026-07-15T12:00:00"),
     ],
 )
@@ -107,3 +108,15 @@ def test_batch_response_carries_terminal_per_event_results() -> None:
     assert response.contract_version == 1
     assert response.results[0].outcome == "accepted"
     assert response.results[0].reward_amount == 120
+
+
+def test_event_request_fingerprint_is_stable_and_covers_immutable_fields() -> None:
+    first = CombatKillEventRequest.model_validate(event_payload())
+    same = CombatKillEventRequest.model_validate(event_payload())
+    changed = CombatKillEventRequest.model_validate(
+        event_payload(technique_id="another_technique")
+    )
+
+    assert first.request_fingerprint() == same.request_fingerprint()
+    assert len(first.request_fingerprint()) == 64
+    assert first.request_fingerprint() != changed.request_fingerprint()

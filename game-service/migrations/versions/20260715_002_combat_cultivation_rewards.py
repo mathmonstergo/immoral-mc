@@ -71,6 +71,7 @@ def upgrade() -> None:
         sa.Column("kill_event_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("source_type", sa.String(length=32), nullable=False),
         sa.Column("source_event_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("request_fingerprint", sa.String(length=64), nullable=False),
         sa.Column("server_id", sa.String(length=64), nullable=False),
         sa.Column("entity_uuid", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("mob_internal_name", sa.String(length=128), nullable=False),
@@ -96,12 +97,6 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("kill_event_id", name="pk_combat_kill_events"),
         sa.ForeignKeyConstraint(
-            ["source_life_id"],
-            ["lives.life_id"],
-            name="fk_combat_kill_events_source_life_id_lives",
-            ondelete="RESTRICT",
-        ),
-        sa.ForeignKeyConstraint(
             ["account_id"],
             ["accounts.account_id"],
             name="fk_combat_kill_events_account_id_accounts",
@@ -122,12 +117,16 @@ def upgrade() -> None:
             "source_type = 'mythicmob_death'",
             name=op.f("ck_combat_kill_source_type"),
         ),
+        sa.CheckConstraint(
+            "request_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=op.f("ck_combat_kill_request_fingerprint"),
+        ),
         sa.CheckConstraint("mob_level >= 0", name=op.f("ck_combat_kill_level")),
         sa.CheckConstraint(
             """
             attribution_kind IN (
                 'direct', 'projectile', 'damage_over_time', 'summon',
-                'trap', 'formation', 'bukkit_fallback'
+                'trap', 'formation'
             )
             """,
             name=op.f("ck_combat_kill_attribution"),

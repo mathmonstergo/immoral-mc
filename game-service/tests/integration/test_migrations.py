@@ -99,11 +99,11 @@ EXPECTED_CONSTRAINTS = {
     },
     "combat_kill_events": {
         "pk_combat_kill_events",
-        "fk_combat_kill_events_source_life_id_lives",
         "fk_combat_kill_events_account_id_accounts",
         "fk_combat_kill_events_life_id_lives",
         "uq_combat_kill_source",
         "ck_combat_kill_source_type",
+        "ck_combat_kill_request_fingerprint",
         "ck_combat_kill_level",
         "ck_combat_kill_attribution",
         "ck_combat_kill_outcome",

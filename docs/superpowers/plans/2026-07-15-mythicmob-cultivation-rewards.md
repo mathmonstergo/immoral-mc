@@ -17,8 +17,9 @@ Game Service files are split by domain responsibility:
 - Create `game-service/src/immortal_mmo/combat/models.py` for immutable kill/source/result domain values.
 - Create `game-service/src/immortal_mmo/combat/catalog.py` for validated versioned Mythic reward/telemetry definitions and checked reward calculation.
 - Create `game-service/src/immortal_mmo/combat/schemas.py` for batch HTTP request/response models.
-- Create `game-service/src/immortal_mmo/combat/db_models.py` for SQLAlchemy rows and constraints.
-- Create `game-service/src/immortal_mmo/combat/repository.py` and `postgres_repository.py` for session-bound combat writes/reads.
+- Create `game-service/src/immortal_mmo/combat/db_models.py` for combat-event and kill-counter SQLAlchemy rows.
+- Create `game-service/src/immortal_mmo/cultivation/db_models.py` for cultivation aggregate and ledger rows.
+- Create `game-service/src/immortal_mmo/combat/repository.py` / `postgres_repository.py` and `cultivation/repository.py` / `postgres_repository.py` for session-bound module-owned writes/reads.
 - Create `game-service/src/immortal_mmo/combat/service.py` for transaction orchestration and idempotent per-event outcomes.
 - Create `game-service/src/immortal_mmo/combat/api.py` and update `game-service/src/immortal_mmo/api/v1/router.py` for the batch endpoint.
 - Create `game-service/migrations/versions/20260715_002_combat_cultivation_rewards.py` for the additive schema.
@@ -30,7 +31,7 @@ Paper files are split into integration, attribution, outbox, and client layers:
 - Update `minecraft-nodes/main-plugin/build.gradle.kts` with compile-only Mythic-Dist 5.12.1, runtime/library Xerial SQLite JDBC, and test dependencies.
 - Update `minecraft-nodes/main-plugin/src/main/resources/plugin.yml` with MythicMobs soft-dependency and any library declarations required by the verified Paper loader.
 - Update `minecraft-nodes/main-plugin/src/main/resources/config.yml` with `server-id`, outbox intervals/batch limits, high-load threshold, pending-age guard, and attribution limits.
-- Create `minecraft-nodes/main-plugin/src/main/java/com/immortalmc/adapter/combat/CombatSource.java`, `CombatAttributionTracker.java`, `CombatAttributionKind.java`, and tests for direct/projectile/DoT/summon/trap/formation/fallback attribution and source-life isolation.
+- Create `minecraft-nodes/main-plugin/src/main/java/com/immortalmc/adapter/combat/CombatSource.java`, `CombatAttributionTracker.java`, `CombatAttributionKind.java`, `BukkitCombatAttributionListener.java`, and tests for direct/projectile/DoT/summon/trap/formation attribution and source-life isolation.
 - Create `minecraft-nodes/main-plugin/src/main/java/com/immortalmc/adapter/mythicmobs/MythicMobsIntegrationLoader.java`, `MythicMobDeathListener.java`, `MythicMobDeathSnapshot.java`, and tests for missing/incompatible/present MythicMobs.
 - Create `minecraft-nodes/main-plugin/src/main/java/com/immortalmc/adapter/outbox/SqliteKillOutbox.java`, `KillOutboxRow.java`, `OutboxDeliveryWorker.java`, `OutboxDeliveryPolicy.java`, and tests for WAL/FULL setup, leases, retries, batching, dead letters, and restart recovery.
 - Extend `minecraft-nodes/main-plugin/src/main/java/com/immortalmc/adapter/client/GameServiceClient.java` with batch kill delivery and create `CombatKillEventRequest.java`, `CombatKillBatchRequest.java`, `CombatKillBatchResponse.java`, and per-event result types.
@@ -54,7 +55,7 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
   ```python
   AttributionKind = Literal[
       "direct", "projectile", "damage_over_time", "summon",
-      "trap", "formation", "bukkit_fallback",
+      "trap", "formation",
   ]
   TerminalOutcome = Literal[
       "accepted", "duplicate", "not_rewardable",
@@ -127,18 +128,18 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
 - Test: `game-service/tests/unit/test_combat_service.py`
 - Test: `game-service/tests/integration/test_combat_api.py`
 
-- [ ] **Step 1: Write service tests** for accepted reward, exact duplicate replay, mismatched identity conflict, unknown catalog ID, missing account, missing current life, stale source-life mismatch, lethal attribution fields, counter increment, reserve increment, and atomic rollback.
-- [ ] **Step 2: Implement `CombatRewardService.process_batch()`** with a bounded event loop. For each event: validate catalog, begin a short UoW transaction, load existing source/result, lock account/current life, validate source-life claim, calculate reward, insert immutable event, increment counter/state, append ledger, commit, and return the frozen result. A valid terminal no-reward outcome is committed and acknowledged.
-- [ ] **Step 3: Add the endpoint** `POST /api/v1/combat/mythicmob-kills/batch`. Accept `{contract_version, events[]}`; return HTTP 200 with one result per input event. Return 429/503/5xx for whole-batch service overload/failure; return stable per-event terminal outcomes for valid domain decisions. Reject missing/duplicate/reassigned result IDs in the adapter.
-- [ ] **Step 4: Wire the service into `create_app()`** and runtime composition. Keep all database work async and keep HTTP/Paper APIs outside PostgreSQL transactions.
-- [ ] **Step 5: Run API/service tests**:
+- [x] **Step 1: Write service tests** for accepted reward, exact duplicate replay, mismatched identity conflict, unknown catalog ID, missing account, missing current life, stale source-life mismatch, lethal attribution fields, counter increment, reserve increment, and atomic rollback.
+- [x] **Step 2: Implement `CombatRewardService.process_batch()`** with a bounded event loop. For each event: begin a short UoW transaction, load an existing frozen result before consulting the current catalog, validate catalog for new events, lock account/current life, validate source-life claim, calculate reward, insert immutable event, increment counter/state, append ledger, commit, and return the frozen result. A valid terminal no-reward outcome is committed and acknowledged.
+- [x] **Step 3: Add the endpoint** `POST /api/v1/combat/mythicmob-kills/batch`. Accept `{contract_version, events[]}`; return HTTP 200 with one result per input event. Return 429/503/5xx for whole-batch service overload/failure; return stable per-event terminal outcomes for valid domain decisions. Reject missing/duplicate/reassigned result IDs in the adapter.
+- [x] **Step 4: Wire the service into `create_app()`** and runtime composition. Keep all database work async and keep HTTP/Paper APIs outside PostgreSQL transactions.
+- [x] **Step 5: Run API/service tests**:
 
   ```bash
   cd game-service && uv run pytest tests/unit/test_combat_service.py tests/integration/test_combat_api.py -q
   ```
 
   Expected: idempotency, life isolation, batch response, and error classification tests pass.
-- [ ] **Step 6: Commit** `feat: expose idempotent combat reward batch API`.
+- [x] **Step 6: Commit** `feat: expose idempotent combat reward batch API`.
 
 ## Task 4: Add Paper combat attribution contracts
 
@@ -148,7 +149,7 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
 - Create: `minecraft-nodes/main-plugin/src/main/java/com/immortalmc/adapter/combat/CombatAttributionTracker.java`
 - Test: `minecraft-nodes/main-plugin/src/test/java/com/immortalmc/adapter/combat/CombatAttributionTrackerTest.java`
 
-- [ ] **Step 1: Write failing Java tests** for direct player damage, projectile shooter, DoT owner propagation, summon/trap/formation owner propagation, lethal-source selection, cancelled-damage exclusion, source-life mismatch metadata, expiry, max-target eviction, despawn cleanup, and ambiguous post-restart fallback returning no attribution.
+- [ ] **Step 1: Write failing Java tests** for direct player damage, projectile shooter, DoT owner propagation, summon/trap/formation owner propagation, lethal-source selection, cancelled-damage exclusion, source-life mismatch metadata, expiry, max-target eviction, despawn cleanup, and ambiguous post-restart damage returning no attribution.
 - [ ] **Step 2: Implement immutable `CombatSource`** with `playerUuid`, optional `sourceLifeId`, optional `techniqueId`, optional `castId`, attribution kind, and expiry. Require non-null player UUID and validate source age at construction.
 - [ ] **Step 3: Implement tracker operations**:
 
@@ -159,7 +160,7 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
   void clearAll();
   ```
 
-  Keep a bounded map keyed by target entity UUID. Record only uncancelled final-priority damage. If no tracked source exists, resolve a Bukkit `DamageSource` only when it directly/indirectly identifies a Player; never trust a generic poison/fire/custom `getKiller()` after restart.
+  Keep a bounded map keyed by target entity UUID. A dedicated final-priority Bukkit listener records ordinary player melee as `direct` and player-owned projectiles as `projectile`. Custom DoT/summon/trap/formation damage must enter through the shared source gateway. If no tracked source exists at death, return no attribution; never reconstruct ownership from `getKiller()`.
 - [ ] **Step 4: Run Java combat tests**:
 
   ```bash
@@ -185,7 +186,7 @@ The existing player/quest transaction patterns, `PostgresPlayerRepository`, `Sql
 - [ ] **Step 2: Add `softdepend: [Citizens, MythicMobs]` and explicit config defaults** for server ID, attribution limits, delivery cadence, batch limits, and max pending age.
 - [ ] **Step 3: Write listener tests** using adapter-owned immutable fixtures for exact internal name, mob level, entity UUID, world, coordinates, killer/source mapping, stable event ID, non-player filtering, and incompatible/missing plugin states.
 - [ ] **Step 4: Implement the optional loader** following the Citizens integration pattern. Class loading of Mythic-linked types occurs only inside the enabled integration path. Missing MythicMobs logs unavailable; incompatible linkage logs severe and disables only this integration unless configured required.
-- [ ] **Step 5: Implement `MythicMobDeathListener`** on the Paper thread: read `MythicMobDeathEvent`, consume lethal attribution, apply direct Bukkit fallback only when valid, build a compact immutable request with source-life/technique/cast metadata, and hand it to the durable outbox. Never calculate a reward or perform network work here.
+- [ ] **Step 5: Implement `MythicMobDeathListener`** on the Paper thread: read `MythicMobDeathEvent`, consume required lethal attribution, skip and diagnose deaths with no tracked source, build a compact immutable request with source-life/technique/cast metadata, and hand it to the durable outbox. Never calculate a reward or perform network work here.
 - [ ] **Step 6: Run integration tests**:
 
   ```bash

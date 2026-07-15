@@ -55,6 +55,11 @@ The dependency is not shaded into ImmortalMC. `plugin.yml` declares
 `MythicMobs` as a soft dependency. A dedicated loader registers a typed
 `MythicMobDeathEvent` listener only when MythicMobs is enabled.
 
+This is a pre-production 0-to-1 implementation. Development data and obsolete
+contracts are disposable: the codebase keeps only the selected schema and
+event contract, with no legacy aliases, dual reads/writes, or silent runtime
+compatibility branches.
+
 If MythicMobs is absent, unrelated ImmortalMC features continue and the missing
 integration is logged. If it is present but binary-incompatible, the MythicMobs
 integration fails visibly and does not fall back to entity names, lore,
@@ -117,10 +122,9 @@ enter the reward outbox in this slice.
 
 ### 5.1 Combat attribution
 
-`MythicMobDeathEvent#getKiller()` is an integration input and compatibility
-fallback, not the sole authority. Its API describes the mob's killer but does
-not guarantee that every future custom delayed mechanic preserves the original
-player through its final tick.
+`MythicMobDeathEvent#getKiller()` is not an attribution authority and is not
+used as a fallback. Every rewardable kill must already have a lethal player-owned
+source in ImmortalMC's attribution tracker.
 
 ImmortalMC owns a bounded in-memory `CombatAttributionTracker` keyed by target
 entity UUID. It records final uncancelled damage and resolves a `CombatSource`
@@ -131,13 +135,14 @@ containing:
 * optional stable technique ID;
 * optional cast/effect UUID;
 * attribution kind: `direct`, `projectile`, `damage_over_time`, `summon`,
-  `trap`, `formation`, or `bukkit_fallback`;
+  `trap`, or `formation`;
 * actual final damage and occurrence time.
 
-Paper's `DamageSource#getCausingEntity()` and direct/projectile owner APIs cover
-ordinary melee and indirect Bukkit damage. Every future ImmortalMC technique
-must apply damage through a shared combat-damage gateway. The gateway copies the
-same `CombatSource` into projectiles, summons, traps, formations, and every
+Paper's direct-damager and projectile-owner APIs are normal attribution inputs
+for ordinary melee and ranged damage; they are recorded as `direct` or
+`projectile`, not as a fallback. Every future ImmortalMC technique must apply
+damage through a shared combat-damage gateway. The gateway copies the same
+`CombatSource` into projectiles, summons, traps, formations, and every
 damage-over-time tick instead of applying anonymous damage.
 
 The first policy credits the owner of the lethal attributable damage. If a
@@ -149,12 +154,11 @@ policies are deferred, but the tracker boundary permits them without changing
 the outbox authority model.
 
 At death, the listener consumes the most recent lethal attribution record. If
-no ImmortalMC record exists, it may use the Mythic/Paper killer only when the
-lethal Bukkit `DamageSource` itself resolves to a direct/indirect Player. A
-generic `getKiller()` value cannot resurrect ownership for an untracked poison,
-fire, custom timer, or post-restart effect. Those ambiguous sources produce no
-player reward and a visible attribution diagnostic. Attribution entries expire
-and are cleared on death, despawn, unload, and plugin shutdown.
+no ImmortalMC record exists, the listener emits no reward event. Untracked
+poison, fire, custom timers, post-restart effects, and any other anonymous
+damage produce no player reward and a visible attribution diagnostic.
+Attribution entries expire and are cleared on death, despawn, unload, and
+plugin shutdown.
 
 The tracker is bounded by both effect expiry and process limits. Each technique
 source declares an expiry (longer effects must renew their source), and the
@@ -211,6 +215,11 @@ For version 1, the request `event_id` is the Game Service
 `source_event_id` after UUID parsing; there is no second client-generated
 idempotency key. `kill_event_id` is the separate PostgreSQL row identity
 created when the source fact is first accepted.
+
+The Game Service computes lowercase SHA-256 over canonical JSON for the full
+immutable request and stores it as `request_fingerprint`. This permits compact
+events to reject reuse of the same `event_id` with changed coordinates,
+technique, cast, attribution, or identity without retaining the full payload.
 
 Mob level crosses the boundary as a bounded decimal string and is parsed into a
 fixed-precision decimal. NaN, infinities, negative values, excessive precision,
@@ -381,12 +390,13 @@ CREATE TABLE combat_kill_events (
     kill_event_id          UUID PRIMARY KEY,
     source_type            VARCHAR(32) NOT NULL,
     source_event_id        UUID NOT NULL,
+    request_fingerprint    VARCHAR(64) NOT NULL,
     server_id              VARCHAR(64) NOT NULL,
     entity_uuid            UUID NOT NULL,
     mob_internal_name      VARCHAR(128) NOT NULL,
     mob_level              NUMERIC(12,3) NOT NULL,
     killer_minecraft_uuid  UUID NOT NULL,
-    source_life_id         UUID NULL REFERENCES lives(life_id) ON DELETE RESTRICT,
+    source_life_id         UUID NULL,
     attribution_kind       VARCHAR(32) NOT NULL,
     technique_id           VARCHAR(128) NULL,
     cast_id                UUID NULL,
@@ -402,10 +412,12 @@ CREATE TABLE combat_kill_events (
     CONSTRAINT uq_combat_kill_source UNIQUE (source_type, source_event_id),
     CONSTRAINT ck_combat_kill_source_type
         CHECK (source_type = 'mythicmob_death'),
+    CONSTRAINT ck_combat_kill_request_fingerprint
+        CHECK (request_fingerprint ~ '^[0-9a-f]{64}$'),
     CONSTRAINT ck_combat_kill_level CHECK (mob_level >= 0),
     CONSTRAINT ck_combat_kill_attribution CHECK (
         attribution_kind IN ('direct', 'projectile', 'damage_over_time',
-                             'summon', 'trap', 'formation', 'bukkit_fallback')
+                             'summon', 'trap', 'formation')
     ),
     CONSTRAINT ck_combat_kill_outcome CHECK (
         outcome IN ('rewarded', 'not_rewardable', 'account_not_found',
@@ -514,8 +526,8 @@ For a new request:
 2. Resolve the reward/telemetry catalog entry. Unknown IDs select the terminal
    `not_rewardable` outcome; no implicit reward is used.
 3. Begin one short PostgreSQL transaction.
-4. Look up `(source_type, source_event_id)`. If it exists, validate immutable
-   request identity and return the stored result. A mismatched replay is an
+4. Look up `(source_type, source_event_id)`. If it exists, compare the canonical
+   request fingerprint and return the stored result. A mismatched replay is an
    idempotency conflict.
 5. Resolve and lock the account by killer Minecraft UUID. If absent, insert the
    compact event with `account_not_found` and return the terminal result.
@@ -655,12 +667,12 @@ PostgreSQL integration tests cover:
 * concurrent duplicate delivery;
 * atomic rollback across event, counter, ledger, and balance;
 * compact versus detailed payload persistence;
-* database restart persistence and dump/restore compatibility.
+* database restart persistence and dump/restore recovery.
 
 ### Paper Adapter
 
 Java tests cover MythicMobs present, absent, and incompatible; direct,
-projectile, damage-over-time, summon, trap, formation, and fallback attribution;
+projectile, damage-over-time, summon, trap, and formation attribution;
 old-life source rejection; non-player kill filtering; stable event IDs; decimal
 level validation; and release of Bukkit object references before asynchronous
 work.

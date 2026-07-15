@@ -17,6 +17,32 @@ class PostgresCultivationRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def get_combat_credit(
+        self,
+        kill_event_id: UUID,
+        life_id: UUID,
+    ) -> CombatCultivationCredit | None:
+        entry = await self._session.scalar(
+            select(CultivationResourceEntryRow).where(
+                CultivationResourceEntryRow.kill_event_id == kill_event_id,
+                CultivationResourceEntryRow.life_id == life_id,
+                CultivationResourceEntryRow.entry_type == "combat_reward",
+            )
+        )
+        if entry is None:
+            return None
+        state = await self._session.get(LifeCultivationStateRow, life_id)
+        if state is None:
+            raise RuntimeError("Combat reward entry has no cultivation state")
+        return CombatCultivationCredit(
+            entry_id=entry.entry_id,
+            life_id=life_id,
+            kill_event_id=kill_event_id,
+            amount=entry.delta_amount,
+            balance_after=entry.balance_after,
+            revision=state.revision,
+        )
+
     async def credit_combat_reward(
         self,
         *,

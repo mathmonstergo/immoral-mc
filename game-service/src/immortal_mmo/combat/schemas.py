@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Literal
@@ -53,6 +55,15 @@ class CombatKillEventRequest(BaseModel):
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("occurred_at must include a timezone")
         return value
+
+    def request_fingerprint(self) -> str:
+        canonical = json.dumps(
+            self.model_dump(mode="json"),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+        return hashlib.sha256(canonical).hexdigest()
 
 
 class CombatKillBatchRequest(BaseModel):
