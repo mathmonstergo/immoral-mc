@@ -50,6 +50,74 @@ Logic encapsulation rules:
 * Tests written with readable examples, e.g. "100 attack vs 50 defense produces expected damage".
 * Data-driven content where practical: items, mobs, quests, skills, and techniques should be schemas plus interpreters, not scattered `if id == ...` branches.
 
+## Scenario: MythicMobs Combat Fact Ingestion
+
+### 1. Scope / Trigger
+
+Trigger: a Paper Adapter reports a MythicMobs death and Game Service credits
+the current life's unrefined cultivation reserve.
+
+### 2. Signatures
+
+The Adapter sends `POST /api/v1/combat/mythicmob-kills/batch` with a versioned
+batch of immutable facts. Each event includes `event_id`, `server_id`,
+`entity_uuid`, exact `mob_internal_name`, decimal-string `mob_level`,
+`killer_uuid`, optional `source_life_id`, `attribution_kind`, world/coordinates,
+and timezone-aware `occurred_at`.
+
+### 3. Contracts
+
+Game Service owns the reward catalog and returns one result per event:
+`accepted`, `duplicate`, `not_rewardable`, `account_not_found`, or
+`current_life_unavailable`. Only `accepted` results contain reward and balance
+fields. SQLite on the Adapter is a durable delivery outbox only; PostgreSQL is
+the source of truth for kill facts, counters, ledger entries, and balances.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Unknown Mythic internal name | `not_rewardable`; no default amount |
+| Missing/mismatched current life | `current_life_unavailable`; no historical credit |
+| Same event and same request body | `duplicate` with the stored result |
+| Same event with changed request body | conflict (`combat.kill_idempotency_conflict`) |
+| Missing lethal ownership in Paper | Do not capture a reward event |
+
+### 5. Good/Base/Bad Cases
+
+* Good: native MythicMobs YAML uses `AzureWolf`; the versioned catalog maps the
+  exact ID to a profile; a tracked lethal source produces one durable credit.
+* Base: compact telemetry stores the immutable fact and materialized mob
+  counter; boss entries opt into detailed policy.
+* Bad: reading reward amounts from MythicMobs YAML, using `getKiller()` as an
+  attribution fallback, or granting a local reward while Game Service is down.
+
+### 6. Tests Required
+
+* Catalog validation and level-boundary reward calculations.
+* API acceptance, idempotent replay, changed-body conflict, unknown mob, and
+  current-life mismatch.
+* PostgreSQL transaction asserts exactly one kill fact, counter, ledger entry,
+  and balance mutation.
+* Paper startup with free MythicMobs 5.12.1 and artifact dependency isolation.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+MythicMobs YAML -> local cultivation amount -> player balance
+```
+
+#### Correct
+
+```text
+MythicMobDeathEvent + tracked lethal owner
+  -> SQLite durable fact outbox
+  -> Game Service catalog/current-life validation
+  -> PostgreSQL combat fact + cultivation ledger/balance
+```
+
 ## Scenario: Mature Minecraft Plugin Ownership Boundaries
 
 ### 1. Scope / Trigger

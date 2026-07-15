@@ -1,6 +1,35 @@
 {
   "schema_version": 1,
-  "level_curves": [],
-  "reward_profiles": [],
-  "mobs": []
+  "level_curves": [
+    {
+      "curve_id": "linear-low",
+      "min_level": "1.000",
+      "max_level": "100.000",
+      "reward_per_level": 2
+    }
+  ],
+  "reward_profiles": [
+    {
+      "profile_id": "ordinary-wolf",
+      "base_reward": 10,
+      "level_curve_id": "linear-low"
+    },
+    {
+      "profile_id": "boss-flat",
+      "base_reward": 500,
+      "level_curve_id": null
+    }
+  ],
+  "mobs": [
+    {
+      "internal_name": "AzureWolf",
+      "reward_profile_id": "ordinary-wolf",
+      "telemetry": "compact"
+    },
+    {
+      "internal_name": "AzureDragon",
+      "reward_profile_id": "boss-flat",
+      "telemetry": "detailed"
+    }
+  ]
 }
