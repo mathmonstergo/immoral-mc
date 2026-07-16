@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {"profile_id": "one_to_three_root", "root_counts": [1, 2, 3], "pill_counts": [1], "basis_points": [10000]},
+    {"profile_id": "four_root", "root_counts": [4], "pill_counts": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "basis_points": [500, 1000, 1600, 2400, 3200, 4200, 5300, 6700, 8200, 10000]},
+    {"profile_id": "five_root", "root_counts": [5], "pill_counts": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "basis_points": [200, 400, 700, 1100, 1600, 2200, 2900, 3600, 4300, 5000]}
+  ],
+  "rules": [
+    {
+      "rule_id": "qi_to_foundation",
+      "source_levels": [10, 11, 12, 13],
+      "target_level": 14,
+      "duration_seconds": 600,
+      "duration_min_seconds": 600,
+      "duration_max_seconds": 900,
+      "required_item_id": "foundation_pill",
+      "profiles": {
+        "one_to_three_root": "one_to_three_root",
+        "four_root": "four_root",
+        "five_root": "five_root"
+      },
+      "failure_policies": {
+        "10": {"mode": "secondary_50_50", "advance_target_level": 11, "secondary_basis_points": 5000},
+        "11": {"mode": "secondary_50_50", "advance_target_level": 12, "secondary_basis_points": 5000},
+        "12": {"mode": "secondary_50_50", "advance_target_level": 13, "secondary_basis_points": 5000},
+        "13": {"mode": "forced_loss", "advance_target_level": null}
+      }
+    }
+  ]
+}

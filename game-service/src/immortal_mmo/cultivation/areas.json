@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "areas": [
+    {"area_id": "neutral_training_ground", "name": "中立修炼场", "version": 1, "speed_basis_points": 10000, "yield_basis_points": 10000},
+    {"area_id": "accelerated_cave", "name": "加速洞府", "version": 1, "speed_basis_points": 20000, "yield_basis_points": 10000},
+    {"area_id": "rich_spirit_vein", "name": "丰灵脉", "version": 1, "speed_basis_points": 10000, "yield_basis_points": 15000}
+  ]
+}

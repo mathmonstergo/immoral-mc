@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "techniques": [
+    {
+      "technique_id": "GF_YinqiShu_01",
+      "name": "引气术",
+      "description": "引导灵气入体的最基础功法，几乎所有修士都需掌握，是修炼一切功法的前提。",
+      "group": "qi",
+      "major_realm": "练气",
+      "time_weight": 1,
+      "max_layer": 13,
+      "required_elements": [],
+      "minimum_player_level": 1,
+      "prerequisites": [],
+      "equipped_item_requirements": [],
+      "category": "辅助",
+      "effects": [
+        {"attr": "mp", "effect_type": "cost", "mode": "percent", "value": 0.05, "growth": 0.0, "duration_rounds": null},
+        {"attr": "mp", "effect_type": "triggered", "mode": "percent", "value": 0.25, "growth": 0.05, "duration_rounds": null},
+        {"attr": "heal", "effect_type": "triggered", "mode": "percent", "value": 0.05, "growth": 0.1, "duration_rounds": null}
+      ]
+    },
+    {
+      "technique_id": "Gongfa_68726c",
+      "name": "冰冻术",
+      "description": "水属性基础攻击法术，能够凝聚周围水汽形成冰锥或冰刃攻击敌人。",
+      "group": "qi",
+      "major_realm": "练气",
+      "time_weight": 1,
+      "max_layer": 13,
+      "required_elements": ["water", "ice"],
+      "minimum_player_level": 7,
+      "prerequisites": [],
+      "equipped_item_requirements": [],
+      "category": "攻击",
+      "effects": [
+        {"attr": "mp", "effect_type": "cost", "mode": "percent", "value": 0.12, "growth": -0.02, "duration_rounds": null},
+        {"attr": "attack", "effect_type": "triggered", "mode": "percent", "value": 1.1, "growth": 0.04, "duration_rounds": null},
+        {"kind": "status", "status": "freeze", "effect_type": "status", "mode": "chance", "value": 0.1, "growth": 0.08, "stacks": 1, "duration_rounds": null}
+      ]
+    },
+    {
+      "technique_id": "Gongfa_b8d7e3",
+      "name": "缠绕术",
+      "description": "木属性限制法术，催动周围草木藤蔓缠绕敌人，常用于控场和逃脱。",
+      "group": "qi",
+      "major_realm": "练气",
+      "time_weight": 1,
+      "max_layer": 13,
+      "required_elements": ["wood"],
+      "minimum_player_level": 7,
+      "prerequisites": [],
+      "equipped_item_requirements": [],
+      "category": "控制",
+      "effects": [
+        {"attr": "mp", "effect_type": "cost", "mode": "percent", "value": 0.2, "growth": -0.02, "duration_rounds": null},
+        {"attr": "attack", "effect_type": "triggered", "mode": "percent", "value": 1.0, "growth": 0.04, "duration_rounds": null},
+        {"kind": "status", "status": "root", "effect_type": "status", "mode": "chance", "value": 0.08, "growth": 0.05, "stacks": 1, "duration_rounds": null},
+        {"kind": "status", "status": "poison", "effect_type": "status", "mode": "chance", "value": 0.08, "growth": 0.05, "stacks": 1, "duration_rounds": null}
+      ]
+    },
+    {
+      "technique_id": "Gongfa_6fcf01",
+      "name": "地刺术",
+      "description": "土属性攻击法术，操控大地之力从地面突刺出土锥攻击敌人。",
+      "group": "qi",
+      "major_realm": "练气",
+      "time_weight": 1,
+      "max_layer": 13,
+      "required_elements": ["earth"],
+      "minimum_player_level": 9,
+      "prerequisites": [],
+      "equipped_item_requirements": [],
+      "category": "攻击",
+      "effects": [
+        {"attr": "mp", "effect_type": "cost", "mode": "percent", "value": 0.15, "growth": -0.02, "duration_rounds": null},
+        {"attr": "attack", "effect_type": "triggered", "mode": "percent", "value": 1.15, "growth": 0.05, "duration_rounds": null},
+        {"kind": "status", "status": "petrify", "effect_type": "status", "mode": "chance", "value": 0.1, "growth": 0.05, "stacks": 1, "duration_rounds": null}
+      ]
+    },
+    {
+      "technique_id": "Gongfa_eff4d0",
+      "name": "火弹术",
+      "description": "火球攻击术法，将灵力凝聚成火球投射攻击，爆炸时还能溅射伤敌。",
+      "group": "qi",
+      "major_realm": "练气",
+      "time_weight": 1,
+      "max_layer": 13,
+      "required_elements": ["fire"],
+      "minimum_player_level": 3,
+      "prerequisites": [],
+      "equipped_item_requirements": [],
+      "category": "攻击",
+      "effects": [
+        {"attr": "mp", "effect_type": "cost", "mode": "percent", "value": 0.15, "growth": -0.02, "duration_rounds": null},
+        {"attr": "attack", "effect_type": "triggered", "mode": "percent", "value": 1.2, "growth": 0.05, "duration_rounds": null},
+        {"kind": "status", "status": "burn", "effect_type": "status", "mode": "chance", "value": 0.1, "growth": 0.05, "stacks": 1, "duration_rounds": null}
+      ]
+    },
+    {
+      "technique_id": "GF_RanxueZhan_01",
+      "name": "燃血斩",
+      "description": "燃血斩传承残卷，习得后可燃血换取爆发。",
+      "group": "level:14",
+      "major_realm": "筑基",
+      "time_weight": 2,
+      "max_layer": 13,
+      "required_elements": [],
+      "minimum_player_level": 14,
+      "prerequisites": [],
+      "equipped_item_requirements": [],
+      "category": "攻击",
+      "effects": [
+        {"attr": "hp", "effect_type": "cost", "mode": "percent", "value": 0.2, "growth": -0.02, "duration_rounds": null},
+        {"attr": "mp", "effect_type": "triggered", "mode": "percent", "value": 0.15, "growth": 0.0, "duration_rounds": null},
+        {"attr": "attack", "effect_type": "triggered", "mode": "percent", "value": 1.25, "growth": 0.125, "duration_rounds": null},
+        {"kind": "status", "status": "burn", "effect_type": "status", "mode": "chance", "value": 0.1, "growth": 0.05, "stacks": 1, "duration_rounds": null}
+      ]
+    },
+    {
+      "technique_id": "Gongfa_8c1470",
+      "name": "灵力针刺",
+      "description": "将灵力极致压缩成细针，以点破面，专破护体罡气。",
+      "group": "level:14",
+      "major_realm": "筑基",
+      "time_weight": 2,
+      "max_layer": 13,
+      "required_elements": [],
+      "minimum_player_level": 14,
+      "prerequisites": [],
+      "equipped_item_requirements": [],
+      "category": "攻击",
+      "effects": [
+        {"attr": "mp", "effect_type": "cost", "mode": "percent", "value": 0.25, "growth": -0.05, "duration_rounds": null},
+        {"attr": "attack", "effect_type": "triggered", "mode": "percent", "value": 1.25, "growth": 0.125, "duration_rounds": null}
+      ]
+    },
+    {
+      "technique_id": "Gongfa_Fenglie_01",
+      "name": "风裂遁刃诀",
+      "description": "灵兽山外围流传的风系攻伐术，借遁风凝成无形刃流，专长于高机动突袭与连段压制。",
+      "group": "level:14",
+      "major_realm": "筑基",
+      "time_weight": 2,
+      "max_layer": 13,
+      "required_elements": ["wind"],
+      "minimum_player_level": 14,
+      "prerequisites": [],
+      "equipped_item_requirements": [],
+      "category": "攻击",
+      "effects": [
+        {"attr": "mp", "effect_type": "cost", "mode": "percent", "value": 0.2, "growth": -0.02, "duration_rounds": null},
+        {"attr": "attack", "effect_type": "triggered", "mode": "percent", "value": 1.28, "growth": 0.1, "duration_rounds": null},
+        {"attr": "speed", "effect_type": "persistent", "mode": "value", "value": 6.0, "growth": 0.3, "duration_rounds": 2}
+      ]
+    }
+  ]
+}
