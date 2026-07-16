@@ -111,6 +111,9 @@ An upward transition preserves all technique investment, lifetime realized
 cultivation, and unrefined reserve. The target realm records a new baseline, so
 the main bar changes from full to empty. Training an earlier retained group
 afterward increases lifetime cultivation but cannot advance the current bar.
+If regression occurs and the player later re-enters a realm whose techniques
+still retain investment, that retained target-group progress is restored. This
+re-entry exception avoids hiding already-full techniques behind a new baseline.
 
 ## 5. Realm-Entry Records and Regression
 
@@ -119,6 +122,7 @@ Every successful numeric transition appends an ordered realm-entry record with:
 - source and target level IDs;
 - source backing-group ID and the frozen investment floor that justified entry;
 - target backing-group ID and its investment baseline at entry;
+- generation ID, parent active-entry ID, and active/invalidated status;
 - transition kind and breakthrough-session ID when applicable;
 - content/rule versions and timestamps.
 
@@ -127,12 +131,12 @@ For ordinary exact-level groups, the target baseline is normally zero. Optional
 is the unchanged qi investment at the moment of advancement.
 
 After any technique debit, abandonment, replacement, or partial transfer, Game
-Service validates realm-entry records oldest to newest. It keeps the longest
-prefix whose source-group floors are still satisfied, invalidates every higher
-record, and rebuilds local progress from the last valid target baseline. This
-permits minor- and major-realm regression without negative progress. A later
-return to an invalidated major realm requires a new breakthrough and a new
-entry record.
+Service validates only the current parent-linked active chain oldest to newest.
+It keeps the longest prefix whose source-group floors are still satisfied and
+invalidates that branch's higher records. Re-entry appends a new generation
+from the last valid parent; invalidated historical branches are never scanned
+as active again. Local progress is rebuilt from retained target-group
+investment and clamped to `0..max_exp`.
 
 ## 6. Unrefined Reserve Rules
 
@@ -216,10 +220,41 @@ non-full selections. When one fills, unused share is repeatedly redistributed
 among remaining techniques. Stable technique ID breaks integer remainders, so
 GUI click order cannot affect settlement.
 
+For `n` selected techniques with frozen mastered capacities `C_i`, cumulative
+time-limited effective cultivation is:
+
+```text
+floor(elapsed_seconds * speed_basis_points * sum(C_i)
+      / (full_mastery_seconds * n * 10000))
+```
+
+The session stores cumulative generated cultivation. Repeated settlements use
+the difference from the prior cumulative floor, so splitting one settlement
+into several calls cannot create or lose time progress.
+
+Let `effective_cap` be the smaller of unused time budget and remaining selected
+capacity. The largest reserve total that can be converted without exceeding
+the cap is:
+
+```text
+floor((((effective_cap + 1) * 10000) - 1) / yield_basis_points)
+```
+
+Clamp it to available reserve, then retain
+`floor(reserve_consumed * yield_basis_points / 10000)`. Cumulative reserve and
+retained totals preserve conversion remainders across repeated settlements.
+
 Reserve consumption is capacity-aware. Yield may exceed 1×, but reserve that
 cannot fit is not consumed. Reserve debit, technique-ledger credits, realized
 aggregate update, and realm recalculation commit atomically. When all selected
 techniques fill, the session ends automatically and unused reserve remains.
+
+If a deterministic adjacent level fills, settlement creates its realm-entry
+record. Remaining effective cultivation continues only when the target level
+uses the same selected backing group and no explicit major breakthrough is
+required. Shared qi may cross ordinary levels up to full 练气十层. It stops at
+the 筑基 barrier and at full optional qi levels 11–13. Exact-level selections
+stop when their current level fills.
 
 ## 10. Time and Areas
 
@@ -255,6 +290,12 @@ The first complete rule is 练气 levels 10–13 to 筑基初期:
 The catalog stores explicit basis-point lookup tables. Generic orchestration
 selects a typed profile; it does not branch on localized root qualities.
 
+Breakthrough seclusion lasts the frozen configured 10–15 minutes. A life may
+have only one active cultivation mutation session. While breakthrough is
+pending, Game Service rejects ordinary seclusion, technique
+abandonment/replacement/transfer, and another breakthrough. Combat rewards may
+still add reserve because breakthrough settlement never consumes it.
+
 On a failed four/five-root attempt from qi levels 10–12, a frozen secondary
 50/50 roll either:
 
@@ -268,9 +309,13 @@ also always apply it.
 The penalty is `floor(source_level.max_exp / 3)`. Qi uses all nonzero
 techniques in the shared qi group; later realms use all nonzero techniques in
 the exact source-level group. The fixed total is independent of technique
-count and is randomly partitioned with a versioned symmetric strategy. Frozen
-entropy, participating IDs, final debits, rolls, catalog versions, consumed
-items, and timing make settlement replay-safe and auditable.
+count. Settlement freezes 256-bit entropy. In round `r`, each eligible
+technique receives a positive 64-bit weight from the first eight bytes of
+`HMAC-SHA256(entropy, r || technique_id)`, plus one. Exact proportional
+largest-remainder allocation applies capacity caps; saturated techniques leave
+the pool and overflow repeats in the next round. Equal fractional remainders
+use the same full HMAC digest. Entropy, participants, final debits, rolls,
+catalog versions, consumed items, and timing make replay deterministic.
 
 ## 12. Presentation
 
@@ -280,7 +325,8 @@ BetterHud/resource-pack presentation shows:
 - current-realm-local main progress;
 - thin gray unrefined reserve progress.
 
-Entering every new level, including 元婴后期, shows an empty main bar. Filling
+First entry to every new level, including 元婴后期, shows an empty main bar.
+Re-entry after regression restores retained target-group progress. Filling
 元婴后期 shows full but never advances beyond level 22. Reconnect always
 resynchronizes from Game Service.
 
@@ -314,4 +360,3 @@ Automated tests cover:
 Paper smoke verifies the authoritative reward-to-orb/HUD path and seclusion GUI
 projection. Full technique combat execution is not part of the smoke or this
 release.
-

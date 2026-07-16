@@ -228,6 +228,13 @@ complete rule set covering the special 练气十至十三层 -> 筑基初期 pat
   using its share, repeatedly redistribute the unused amount equally across the
   remaining selected techniques. Assign indivisible integer remainders by
   stable technique ID so GUI click order never changes the result.
+* If settlement fills a realm and that transition is deterministic, create the
+  realm-entry record atomically. Continue with remaining effective cultivation
+  only while the target level uses the same selected backing group and does not
+  require an explicit major breakthrough. Shared-qi settlement may cross
+  ordinary levels up to full 练气十层, but stops at the 筑基 barrier and at full
+  optional 练气十一至十三层. Exact-level groups stop when their current level
+  fills, leaving unused reserve intact for a later selection.
 * When every selected technique is mastered or becomes mastered, automatically
   settle and end the seclusion. Consume only the unrefined cultivation that was
   successfully retained as technique investment; leave all unused reserve in
@@ -249,20 +256,25 @@ complete rule set covering the special 练气十至十三层 -> 筑基初期 pat
 * Persist an ordered realm-entry record for every successful upward numeric
   transition. It freezes source/target levels, the source backing group and
   required investment floor that justified the transition, the target backing
-  group, and that target group's investment baseline at entry. Retain all
-  existing technique investment and the realized-total aggregate; current
-  progress is the target group's investment gained above its entry baseline.
+  group, that target group's investment baseline at entry, a generation ID,
+  parent active-entry ID, and active/invalidated status. Retain all existing
+  technique investment and the realized-total aggregate. On first entry to a
+  target group, current progress is investment gained above the entry baseline.
+  On re-entry after regression, previously retained target-group investment is
+  restored as current local progress instead of being hidden behind a new
+  baseline; this is the deliberate exception to the empty-bar-on-entry rule.
 * For the shared `qi` group, source and target group are both `qi` for optional
   练气十一至十三层 transitions. The 50% failed-breakthrough advance outcome
   records the unchanged qi investment as the target entry baseline, making the
   new main bar empty without deleting any technique investment.
-* After any technique debit/removal, validate realm-entry records from oldest
-  to newest. Keep only the longest prefix whose frozen source-group investment
-  floors are still satisfied; invalidate all higher transitions and return the
-  player to the target of the last valid record (or the base realm). Rebuild
-  current local progress from that realm's target-group baseline, clamp it to
-  `0..max_exp`, and never reuse an invalidated transition for a later
-  re-advancement.
+* After any technique debit/removal, validate only the current parent-linked
+  active realm-entry chain from oldest to newest. Keep the longest prefix whose
+  frozen source-group investment floors remain satisfied; invalidate that
+  branch's higher transitions and return the player to the target of the last
+  valid entry (or the base realm). Rebuild local progress from retained
+  target-group investment, clamp it to `0..max_exp`, and never reactivate an
+  invalidated entry. Re-advancement appends a new generation/branch from the
+  last valid active entry.
 * Store technique definitions in committed, versioned, strictly validated
   content. Each definition has a stable ID, attribute codes, a technique group,
   maximum layer 13, and typed layer-aware gameplay effects. The group is either
@@ -276,6 +288,20 @@ complete rule set covering the special 练气十至十三层 -> 筑基初期 pat
   clock, neutral full-mastery durations are qi=10h, foundation=20h, core=50h,
   nascent_soul=100h. Partial progress and multi-selection derive duration
   proportionally from remaining capacity and equal allocation.
+* Freeze the selected techniques' mastered capacities and full-mastery
+  duration. For `n` selections with capacities `C_i`, cumulative time-limited
+  effective cultivation after `elapsed_seconds` is
+  `floor(elapsed_seconds * speed_basis_points * sum(C_i) /
+  (full_mastery_seconds * n * 10000))`. Store the cumulative generated total so
+  repeated settlement uses the difference from the prior cumulative floor.
+* Let `effective_cap` be the smaller of unused cumulative time budget and
+  selected-technique remaining capacity. The largest reserve amount convertible
+  without exceeding it is
+  `floor((((effective_cap + 1) * 10000) - 1) / yield_basis_points)`.
+  Clamp this to available reserve, then retain
+  `floor(reserve_consumed * yield_basis_points / 10000)`. Persist cumulative
+  reserve-consumed and retained totals so repeated settlements preserve fixed
+  point remainders and never over-consume.
 * Allow at most nine retained ordinary techniques in the shared `qi` group and
   at most five retained ordinary techniques in every later exact-realm group.
   Do not use a global technique-slot limit; advancing to another exact realm
@@ -421,9 +447,13 @@ complete rule set covering the special 练气十至十三层 -> 筑基初期 pat
   minor realm's exact-level group. Randomly partition that exact aggregate
   across every nonzero-investment technique in that group.
 * Use a versioned, statistically symmetric random-partition strategy driven by
-  breakthrough-session entropy. Stable technique IDs must not change a
-  technique's probability distribution; they are used only for deterministic
-  tie-breaking after the random weights/order are frozen.
+  frozen 256-bit breakthrough-session entropy. In allocation round `r`, derive
+  each eligible technique's positive 64-bit weight from the first eight bytes
+  of `HMAC-SHA256(entropy, r || technique_id)`, interpreted unsigned, plus one.
+  Allocate proportionally with exact integer largest-remainder quotas, cap each
+  debit by available investment, remove saturated techniques, and repeat with
+  the next round for overflow. Break equal fractional remainders by the same
+  round's full HMAC digest.
   No technique may be debited below zero; redistribute any unavailable share
   among the remaining techniques. Persist the resolved per-technique debits so
   retries reproduce the same result rather than rolling again.
@@ -464,6 +494,12 @@ complete rule set covering the special 练气十至十三层 -> 筑基初期 pat
   random-partition strategy/version and entropy, resolved per-technique debits,
   timing, status, and idempotency identity.
   Catalog changes must not alter an in-progress session.
+* Allow at most one active cultivation mutation session per life. While a
+  breakthrough is pending, reject ordinary seclusion, technique
+  abandonment/replacement/transfer, and another breakthrough. Combat rewards
+  may still add unrefined reserve because breakthrough settlement never consumes
+  it. Release exclusivity only when the session settles or is cancelled under
+  its frozen rule.
 * Item validation, pill consumption, seclusion creation, and the eventual
   deterministic/random breakthrough settlement are authoritative atomic or
   idempotent Game Service operations. Paper only requests and presents them.
@@ -517,6 +553,14 @@ complete rule set covering the special 练气十至十三层 -> 筑基初期 pat
 * [ ] Multi-selection divides cultivation equally, dynamically redistributes
       capacity overflow, and produces identical results regardless of GUI click
       order.
+* [ ] Cumulative elapsed-time settlement uses the frozen capacity/time formula,
+      repeated partial settlements equal one combined settlement, and the
+      inverse yield bound never consumes reserve whose effective result cannot
+      fit.
+* [ ] Shared-qi settlement may create multiple deterministic ordinary-level
+      entries in one transaction but stops at full 练气十层, full optional
+      练气十一至十三层, or any explicit major barrier. Exact-level selection
+      stops when its current level fills and leaves unused reserve intact.
 * [ ] Seclusion ends automatically when all selected techniques are mastered,
       consumes only retained cultivation, and preserves unused unrefined
       reserve.
@@ -572,6 +616,9 @@ complete rule set covering the special 练气十至十三层 -> 筑基初期 pat
       every later record, rebuilds non-negative local progress from the last
       valid target-group baseline, and never lets a later re-advancement reuse
       an invalidated transition.
+* [ ] Realm re-entry appends a new active generation/branch and restores
+      retained target-group investment as local progress; inactive historical
+      branches cannot block or satisfy the new active chain.
 * [ ] Progress cannot advance past 元婴后期.
 * [ ] Entering 元婴后期 retains historical investment/reserve and shows an empty
       main bar with `max_exp = 116,145,360`; accepted rewards can fill its
@@ -615,6 +662,9 @@ complete rule set covering the special 练气十至十三层 -> 筑基初期 pat
       partitioned across all invested techniques in the relevant backing group,
       never makes an investment negative, and is settled atomically with the
       matching realized-cultivation reduction and realm recalculation.
+* [ ] A fixed entropy fixture produces an exact golden per-technique debit
+      vector through the HMAC-weighted, capacity-aware multi-round allocator;
+      permuting input technique order does not change that vector.
 * [ ] When a failure penalty leaves all realm-entry floors valid, the existing
       entry baseline is unchanged and local progress drops by exactly the fixed
       penalty. If a floor becomes invalid, the transition stack unwinds and
@@ -630,6 +680,9 @@ complete rule set covering the special 练气十至十三层 -> 筑基初期 pat
       that session's frozen success probability, timing, or failure behavior.
 * [ ] A persisted 10–15 minute breakthrough survives retries and cannot double
       consume pills or settle twice.
+* [ ] While a breakthrough is pending, another breakthrough, ordinary
+      seclusion, and technique abandonment/replacement/transfer are rejected;
+      combat rewards may still increase reserve.
 * [ ] Tests cover accepted, duplicate, offline, reconnect, competing-player
       pickup, level-up, early 筑基 from levels 10–13, pill-count validation,
       breakthrough success/failure, retry, restart, and cap behavior.
