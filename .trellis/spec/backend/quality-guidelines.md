@@ -1339,3 +1339,117 @@ refresher.refresh(...).whenComplete((state, error) -> {
 
 Commit scan state first, then validate every asynchronous completion before
 touching player-visible presentation.
+
+## Scenario: Cultivation Projection Across Game Service and Paper
+
+### 1. Scope / Trigger
+
+Trigger: a cultivation field, combat reward result, seclusion/breakthrough DTO,
+HUD placeholder, XP-orb presentation, or cultivation GUI flow changes.
+
+### 2. Signatures
+
+```http
+GET  /api/v1/players/{account_id}/current-life/cultivation
+GET  /api/v1/players/{account_id}/current-life/cultivation/techniques
+POST /api/v1/players/{account_id}/current-life/cultivation/seclusions
+POST /api/v1/players/{account_id}/current-life/cultivation/breakthroughs
+POST /api/v1/players/{account_id}/current-life/items/adjustments
+```
+
+Paper consumes snake-case JSON through typed Jackson records and sends UUID
+`Idempotency-Key` headers for mutations.
+
+The learned-technique response includes `attribute_codes: string[]`; Paper
+renders it as presentation metadata and never interprets it as combat logic.
+Player commands are `/immortal seclusion` and
+`/immortal breakthrough <pill-count>` under `immortalmc.cultivation`.
+Administrative commands remain under `immortalmc.command`.
+
+### 3. Contracts
+
+* Game Service owns reward amounts, reserve caps, cultivation math, area
+  modifiers, technique eligibility, breakthrough rolls, penalties, and storage.
+* Paper reports facts/IDs and presents results. It never sends trusted reward,
+  speed, yield, success, penalty, or cultivation amounts.
+* Only `accepted` combat results create visual XP orbs. `duplicate` and terminal
+  no-reward results are acknowledged without presentation.
+* Visual orbs have zero vanilla XP, are owner-tagged, cannot merge, and only the
+  owner pickup triggers a HUD refresh. Orb count depends only on mob level.
+* HUD state is keyed by player plus current life. Old-life asynchronous
+  responses cannot overwrite a new life even with a higher revision.
+* BetterHud/resource-pack absence disables presentation with a visible warning
+  and never changes gameplay or outbox acknowledgement.
+* Paper cultivation-area cuboids resolve only a stable semantic `area-id`.
+  The submitted ID must exist in the Game Service area catalog; Paper never
+  submits speed/yield values.
+* A seclusion settlement response with `status=active` is a partial
+  authoritative settlement. Paper refreshes the HUD and schedules another
+  settlement; only `completed` is presented as closed.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Accepted reward credited amount is zero because reserve is full | Present accepted visual feedback; authoritative amount remains zero |
+| Duplicate delivery | No second orb/HUD animation |
+| Owner is offline | No orb; reconnect fetches authoritative snapshot |
+| Old-life response arrives late | Drop it |
+| BetterHud is absent or reload fails | Warn and keep gameplay active |
+| Reserve cap is zero | Render ratio without divide-by-zero or NaN |
+| GUI submits mixed major realms | Paper blocks preflight; Game Service still rejects manipulated requests |
+| Duplicate/unknown/ineligible technique or unknown area | Structured `cultivation.seclusion_rule_violation` conflict; no session |
+| Existing session or reused key with different request | Structured `cultivation.seclusion_conflict`; no second mutation |
+| Unknown, wrong-life, or wrong-kind seclusion session | Structured `cultivation.seclusion_not_found` |
+| Settlement has no new elapsed/generated cultivation | Structured `cultivation.seclusion_conflict` |
+| Breakthrough item quantity is insufficient | Structured `item.insufficient_quantity`; item/session/debits roll back |
+| Paper settlement returns `active` | Do not announce completion; refresh and schedule another settlement |
+
+### 5. Good/Base/Bad Cases
+
+* Good: outbox response -> accepted-only main-thread presentation -> independent
+  acknowledgement -> authoritative snapshot refresh.
+* Base: BetterHud placeholders read a last-confirmed immutable projection.
+* Bad: derive cultivation reward from orb count or Minecraft XP state.
+* Bad: trust GUI eligibility/rates without Game Service validation.
+
+### 6. Tests Required
+
+* Jackson and Pydantic field names round-trip for every cultivation DTO.
+* Outbox tests cover accepted, duplicate, presenter failure, and dispatcher
+  failure while terminal acknowledgement still occurs.
+* Orb tests cover zero XP, ownership, wrong-player pickup, and merge prevention.
+* Projection tests cover revision monotonicity and life replacement races.
+* Resource tests assert BetterHud YAML, text font, alpha PNG dimensions, and
+  soft dependency.
+* Technique DTO tests assert `attribute_codes`, display name, layer, status,
+  and snake-case/camel-case mapping.
+* Command/resource tests assert public cultivation permission, retained admin
+  permission, and a default area ID present in the Game Service catalog.
+* Settlement tests assert tick rounding never fires before `completes_at` and
+  `active` causes another scheduled attempt.
+* API tests assert all expected seclusion/breakthrough rule, conflict,
+  not-found, and item-shortage paths return stable error envelopes rather than
+  HTTP 500.
+* Full Gradle `test build` passes with BetterHud absent from the test runtime.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```java
+long reward = mobLevel * 10;
+player.giveExp((int) reward);
+```
+
+#### Correct
+
+```java
+if (result.outcome().equals("accepted")) {
+    presenter.present(killFact, result); // zero-XP visual only
+}
+client.fetchCultivation(accountId).thenAccept(this::publishOnMainThread);
+```
+
+The Adapter visualizes authoritative results and refreshes projections; it does
+not become a second progression engine.

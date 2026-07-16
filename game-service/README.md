@@ -53,6 +53,49 @@ The exact MythicMobs top-level/internal name is resolved through
 are startup content changes, so restart Game Service after editing and keep the
 Mythic YAML key and catalog `internal_name` identical.
 
+## Cultivation progression
+
+Game Service owns the 22-level realm catalog, common technique definitions,
+unrefined reserve, technique-backed realized cultivation, seclusion sessions,
+realm-entry history, regression, and the initial 练气 -> 筑基 breakthrough.
+
+Key endpoints:
+
+```http
+GET  /api/v1/players/{account_id}/current-life/cultivation
+GET  /api/v1/players/{account_id}/current-life/cultivation/techniques
+POST /api/v1/players/{account_id}/current-life/cultivation/seclusions
+GET  /api/v1/players/{account_id}/current-life/cultivation/seclusions/{session_id}
+POST /api/v1/players/{account_id}/current-life/cultivation/seclusions/{session_id}/settle
+POST /api/v1/players/{account_id}/current-life/cultivation/breakthroughs
+GET  /api/v1/players/{account_id}/current-life/cultivation/breakthroughs/{session_id}
+POST /api/v1/players/{account_id}/current-life/cultivation/breakthroughs/{session_id}/settle
+```
+
+Mutation starts require `Idempotency-Key: <UUID>`. Monster rewards add only
+unrefined reserve. Ordinary seclusion consumes reserve and retains cultivation
+only where selected techniques have capacity. Abandoning a technique removes
+the same realized cultivation and may invalidate realm entries across major
+realms; it never changes the unrefined reserve.
+
+The current common-technique model supports nine retained `qi` techniques and
+five per later exact-level group. Authored cross-realm techniques such as the
+future 青元剑诀 progression model and live combat effects are intentionally not
+implemented here. Learned-technique snapshots include catalog-derived display
+names, attribute codes, and the layer projected from retained investment for
+Paper's seclusion GUI.
+
+Invalid seclusion selections, conflicting active sessions/idempotency keys,
+unknown or wrong-kind session IDs, too-early settlements, and insufficient
+breakthrough items return stable structured 4xx domain errors. They never leak
+raw repository or Python exceptions as HTTP 500 responses.
+
+The initial breakthrough catalog is
+`src/immortal_mmo/cultivation/breakthrough_rules.json`. One-to-three roots use
+the guaranteed one-pill profile; four- and five-root curves are independent
+explicit basis-point tables. Failed loss outcomes use a frozen HMAC-SHA256
+partition of `floor(source max_exp / 3)` and persist every per-technique debit.
+
 ## Disposable development reset
 
 This permanently deletes the local PostgreSQL volume and all development data:

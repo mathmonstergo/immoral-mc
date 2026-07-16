@@ -246,3 +246,100 @@ docker compose up -d postgres
 * Storing plugin YAML as the only copy of data that Game Service gameplay rules need.
 * Accepting client/plugin-provided result numbers and writing them directly to the database.
 * Updating multiple modules' tables from one repository because it looks faster.
+
+## Scenario: Technique-Backed Cultivation and Mutation Sessions
+
+### 1. Scope / Trigger
+
+Trigger: cultivation, common-technique investment, seclusion, breakthrough,
+technique abandonment/transfer, or realm regression changes authoritative life
+progress.
+
+### 2. Signatures
+
+```text
+life_cultivation_states
+life_techniques
+technique_investment_entries
+life_realm_entries
+cultivation_sessions
+cultivation_session_techniques
+breakthrough_technique_debits
+life_item_stacks
+item_resource_entries
+```
+
+Mutation APIs require `Idempotency-Key: <UUID>`. Session kinds are
+`ordinary`, `breakthrough`, and `technique_mutation`.
+
+### 3. Contracts
+
+* Active technique investment is the auditable backing for realized
+  cultivation; the state aggregate must equal its sum after every transaction.
+* Unrefined cultivation is a separate reserve. Accepted combat rewards add it;
+  ordinary seclusion consumes it. Breakthrough and technique loss never do.
+* Ordinary seclusion freezes area content, selected technique versions,
+  capacity, speed/yield basis points, and full-mastery time.
+* At most one pending/active cultivation session exists per life. Lock order is
+  account/current life, cultivation state, sorted techniques, then item stack.
+* Realm entries are an immutable history. Regression invalidates an active
+  suffix; re-entry appends a generation greater than all prior history and
+  never revives an invalidated row.
+* `technique_mutation` is an explicit completed session shape used to freeze a
+  request fingerprint and response for restart-safe replay. It is not disguised
+  as ordinary seclusion.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Mixed-major-realm seclusion selection | Reject before session creation |
+| More than five or duplicate selections | Reject |
+| Mutation while ordinary/breakthrough session is open | Conflict |
+| Concurrent session creation wins after the service precheck | Translate the repository race to the same stable conflict; never leak a raw constraint/runtime error |
+| Same idempotency key, same request | Return frozen response |
+| Same idempotency key, different request | Conflict; no second ledger write |
+| Breakthrough item debit is insufficient | Roll back session, debits, item entries, and active-session projection |
+| Technique debit invalidates a realm floor | Invalidate suffix and allow cross-major regression |
+| Reserve exceeds a lower post-regression cap | Preserve it; block new reward credit until consumed |
+
+### 5. Good/Base/Bad Cases
+
+* Good: item consumption, session creation, technique ledger changes, realized
+  aggregate, realm entry changes, and frozen response share one UoW transaction.
+* Base: HMAC breakthrough debits are persisted before settlement and replayed,
+  never rerolled.
+* Bad: store player cultivation independently from technique investment.
+* Bad: reactivate an invalidated realm entry or reset unrefined reserve on loss.
+
+### 6. Tests Required
+
+* Fresh migration metadata matches ORM with all named constraints/indexes.
+* Partial seclusion settlements equal one combined settlement.
+* Ledger sum equals active technique balances and realized aggregate.
+* Regression crosses major realms and re-entry uses a new parent/generation.
+* Breakthrough start/settle replays across a new app/service instance.
+* Fixed entropy yields an exact per-technique debit vector.
+* Service tests force both ordinary and breakthrough session-creation races
+  and assert stable 409 domain errors with no partial state.
+* Item-shortage tests assert the UoW exits without a session, debit, item entry,
+  or active-session pointer.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+state.realized_cultivation += reward
+state.unrefined_cultivation = 0  # on advancement
+```
+
+#### Correct
+
+```python
+await cultivation.apply_technique_investments(...)
+await cultivation.consume_unrefined(...)  # ordinary seclusion only
+```
+
+Realized progress changes only with retained technique investment, while the
+unrefined reserve keeps its independent mutation boundary.

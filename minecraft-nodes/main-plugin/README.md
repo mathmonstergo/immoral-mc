@@ -81,6 +81,48 @@ sqlite3 plugins/ImmortalMC/combat-outbox.sqlite3 \
   "select delivery_status, count(*) from kill_outbox group by delivery_status;"
 ```
 
+Accepted Game Service rewards spawn owner-tagged zero-XP orbs at the recorded
+death position. Their count is a bounded mob-level visual only; it does not
+encode or calculate the credited cultivation amount. Duplicate and terminal
+no-reward results never present again.
+
+## Cultivation HUD and controls
+
+The plugin packages BetterHud resources for a two-bar bottom display:
+
+- main colored bar and Chinese realm name: realized current-realm progress
+- thin gray bar: unrefined reserve
+
+Install BetterHud on the Paper server and require its generated resource pack
+for the intended layout. BetterHud is a soft dependency: if it is missing or
+reload fails, ImmortalMC logs a warning and keeps authoritative gameplay
+running. HUD snapshots are scoped to the current life so a late response from
+an old life cannot overwrite a reincarnated player.
+
+Cultivation requests remain asynchronous and carry only account/life IDs,
+selected technique IDs, semantic area IDs, pill counts, and idempotency keys.
+Paper never calculates area speed/yield, retained cultivation, breakthrough
+chance, or failure loss.
+
+Player commands:
+
+```text
+/immortal seclusion
+/immortal breakthrough <pill-count>
+```
+
+These commands use the public `immortalmc.cultivation` permission. Existing
+operator commands retain `immortalmc.command`; administrators can grant test
+pills with `/immortal cultivation grant-item <player> foundation_pill <count>`.
+Configured `cultivation.areas[].area-id` values must match Game Service area
+catalog IDs. The default local cuboid uses `neutral_training_ground`.
+
+The seclusion GUI loads authoritative learned techniques asynchronously and
+shows their group, major realm, attribute codes, layer, investment progress,
+and active/full state. If a timed settlement remains `active` because capacity
+or reserve is still available, Paper keeps the session open and schedules the
+next authoritative settlement instead of reporting false completion.
+
 ## Development Flow
 
 1. Write or update automated tests for the adapter behavior.

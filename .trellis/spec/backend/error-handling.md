@@ -100,3 +100,22 @@ Current implemented player not-found response:
 ```
 
 Do not raise `HTTPException` from `player/service.py`. Raise a domain error and let the app-level handler serialize it.
+
+## Cultivation mutation error codes
+
+Cultivation services must translate catalog lookups, rule validation,
+repository uniqueness races, wrong session kinds, and item shortages before
+they cross the API boundary:
+
+| Code | HTTP | Meaning |
+|---|---:|---|
+| `cultivation.seclusion_rule_violation` | 409 | Submitted area/technique selection cannot start seclusion |
+| `cultivation.seclusion_conflict` | 409 | Active session, idempotency, or settlement timing conflicts with current state |
+| `cultivation.seclusion_not_found` | 404 | Session is absent, belongs to another life, or is not an ordinary seclusion |
+| `cultivation.breakthrough_conflict` | 409 | Breakthrough state/session conflicts, including repository creation races |
+| `item.insufficient_quantity` | 409 | Required breakthrough item debit cannot be satisfied |
+
+The database uniqueness exception remains a race-defense implementation detail.
+Both the ordinary-seclusion and breakthrough service paths catch it and return
+their stable conflict error. UoW rollback must leave item entries, sessions,
+debit rows, and `active_session_id` unchanged.
