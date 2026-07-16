@@ -80,15 +80,10 @@ def test_batch_rejects_duplicate_event_ids() -> None:
 
 
 def test_batch_rejects_more_than_two_hundred_events() -> None:
-    events = [
-        event_payload(event_id=str(UUID(int=index + 1)))
-        for index in range(201)
-    ]
+    events = [event_payload(event_id=str(UUID(int=index + 1))) for index in range(201)]
 
     with pytest.raises(ValidationError):
-        CombatKillBatchRequest.model_validate(
-            {"contract_version": 1, "events": events}
-        )
+        CombatKillBatchRequest.model_validate({"contract_version": 1, "events": events})
 
 
 def test_batch_response_carries_terminal_per_event_results() -> None:
@@ -99,7 +94,8 @@ def test_batch_response_carries_terminal_per_event_results() -> None:
                 outcome="accepted",
                 kill_event_id=ENTITY_ID,
                 life_id=LIFE_ID,
-                reward_amount=120,
+                configured_reward_amount=120,
+                credited_cultivation_amount=120,
                 unrefined_balance=4800,
             )
         ]
@@ -107,15 +103,14 @@ def test_batch_response_carries_terminal_per_event_results() -> None:
 
     assert response.contract_version == 1
     assert response.results[0].outcome == "accepted"
-    assert response.results[0].reward_amount == 120
+    assert response.results[0].configured_reward_amount == 120
+    assert response.results[0].credited_cultivation_amount == 120
 
 
 def test_event_request_fingerprint_is_stable_and_covers_immutable_fields() -> None:
     first = CombatKillEventRequest.model_validate(event_payload())
     same = CombatKillEventRequest.model_validate(event_payload())
-    changed = CombatKillEventRequest.model_validate(
-        event_payload(technique_id="another_technique")
-    )
+    changed = CombatKillEventRequest.model_validate(event_payload(technique_id="another_technique"))
 
     assert first.request_fingerprint() == same.request_fingerprint()
     assert len(first.request_fingerprint()) == 64

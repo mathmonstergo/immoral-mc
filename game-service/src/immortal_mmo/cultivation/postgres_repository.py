@@ -87,6 +87,19 @@ class PostgresCultivationRepository:
         rows = (await self._session.scalars(statement)).all()
         return tuple(_realm_entry(row) for row in rows)
 
+    async def get_group_investments(self, life_id: UUID) -> dict[str, int]:
+        rows = (
+            await self._session.execute(
+                select(
+                    LifeTechniqueRow.group_code,
+                    func.coalesce(func.sum(LifeTechniqueRow.invested_amount), 0),
+                )
+                .where(LifeTechniqueRow.life_id == life_id)
+                .group_by(LifeTechniqueRow.group_code)
+            )
+        ).all()
+        return {group_code: int(total) for group_code, total in rows}
+
     async def insert_session(self, session: CultivationSession) -> None:
         row = CultivationSessionRow(
             session_id=session.session_id,
@@ -236,6 +249,7 @@ class PostgresCultivationRepository:
         life_id: UUID,
         kill_event_id: UUID,
         amount: int,
+        cap: int,
         occurred_at: datetime,
     ) -> CombatCultivationCredit:
         if amount <= 0 or amount > MAX_REWARD_AMOUNT:
@@ -252,10 +266,11 @@ class PostgresCultivationRepository:
         )
         if state is None:
             raise RuntimeError("Cultivation state disappeared before reward credit")
-        if state.unrefined_cultivation > MAX_REWARD_AMOUNT - amount:
-            raise ValueError("Unrefined cultivation balance overflow")
-
-        balance_after = state.unrefined_cultivation + amount
+        if cap <= 0:
+            raise ValueError("Combat cultivation reserve cap must be positive")
+        available = max(cap - state.unrefined_cultivation, 0)
+        credited_amount = min(amount, available)
+        balance_after = state.unrefined_cultivation + credited_amount
         updated = (
             await self._session.execute(
                 update(LifeCultivationStateRow)
@@ -271,25 +286,27 @@ class PostgresCultivationRepository:
                 )
             )
         ).one()
-        entry_id = uuid4()
-        self._session.add(
-            CultivationResourceEntryRow(
-                entry_id=entry_id,
-                life_id=life_id,
-                resource_code="unrefined_cultivation",
-                entry_type="combat_reward",
-                delta_amount=amount,
-                balance_after=updated.unrefined_cultivation,
-                kill_event_id=kill_event_id,
-                created_at=occurred_at,
+        entry_id = None
+        if credited_amount > 0:
+            entry_id = uuid4()
+            self._session.add(
+                CultivationResourceEntryRow(
+                    entry_id=entry_id,
+                    life_id=life_id,
+                    resource_code="unrefined_cultivation",
+                    entry_type="combat_reward",
+                    delta_amount=credited_amount,
+                    balance_after=updated.unrefined_cultivation,
+                    kill_event_id=kill_event_id,
+                    created_at=occurred_at,
+                )
             )
-        )
         await self._session.flush()
         return CombatCultivationCredit(
             entry_id=entry_id,
             life_id=life_id,
             kill_event_id=kill_event_id,
-            amount=amount,
+            amount=credited_amount,
             balance_after=updated.unrefined_cultivation,
             revision=updated.revision,
         )

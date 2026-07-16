@@ -76,10 +76,17 @@ class CombatKillEventRow(Base):
             (outcome = 'rewarded'
                 AND account_id IS NOT NULL
                 AND life_id IS NOT NULL
-                AND reward_amount IS NOT NULL
-                AND reward_amount > 0)
+                AND configured_reward_amount IS NOT NULL
+                AND configured_reward_amount > 0
+                AND credited_cultivation_amount IS NOT NULL
+                AND credited_cultivation_amount >= 0
+                AND unrefined_balance_after IS NOT NULL
+                AND unrefined_balance_after >= 0)
             OR
-            (outcome <> 'rewarded' AND reward_amount IS NULL)
+            (outcome <> 'rewarded'
+                AND configured_reward_amount IS NULL
+                AND credited_cultivation_amount IS NULL
+                AND unrefined_balance_after IS NULL)
             """,
             name=conv("ck_combat_kill_reward_shape"),
         ),
@@ -140,7 +147,9 @@ class CombatKillEventRow(Base):
         JSONB(none_as_null=True),
         nullable=True,
     )
-    reward_amount: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    configured_reward_amount: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    credited_cultivation_amount: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    unrefined_balance_after: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

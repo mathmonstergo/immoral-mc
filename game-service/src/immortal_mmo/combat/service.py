@@ -1,3 +1,4 @@
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from immortal_mmo.combat.catalog import CombatRewardCatalog
@@ -10,6 +11,7 @@ from immortal_mmo.combat.schemas import (
 )
 from immortal_mmo.core.errors import ConflictError
 from immortal_mmo.core.uow import UnitOfWork, UnitOfWorkFactory
+from immortal_mmo.cultivation.realm_catalog import RealmCatalog, load_realm_catalog
 from immortal_mmo.player.models import Account, Life
 
 
@@ -23,9 +25,13 @@ class CombatRewardService:
         self,
         uow_factory: UnitOfWorkFactory,
         catalog: CombatRewardCatalog,
+        realm_catalog: RealmCatalog | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._catalog = catalog
+        self._realm_catalog = realm_catalog or load_realm_catalog(
+            Path(__file__).resolve().parents[1] / "cultivation" / "realm_catalog.json"
+        )
 
     async def process_batch(
         self,
@@ -62,8 +68,7 @@ class CombatRewardService:
 
             life = await uow.players.get_current_life(account.account_id, for_update=True)
             if life is None or (
-                request.source_life_id is not None
-                and request.source_life_id != life.life_id
+                request.source_life_id is not None and request.source_life_id != life.life_id
             ):
                 event = self._build_event(
                     request,
@@ -79,7 +84,7 @@ class CombatRewardService:
                 telemetry=reward.telemetry,
                 account=account,
                 life=life,
-                reward_amount=reward.amount,
+                configured_reward_amount=reward.amount,
             )
             inserted = await uow.combat.insert_event_if_absent(event)
             if not inserted:
@@ -94,7 +99,17 @@ class CombatRewardService:
                 life_id=life.life_id,
                 kill_event_id=event.kill_event_id,
                 amount=reward.amount,
+                cap=self._realm_catalog.level(
+                    (
+                        await uow.cultivation.get_or_create_state(life.life_id, for_update=False)
+                    ).current_level
+                ).max_exp,
                 occurred_at=request.occurred_at,
+            )
+            await uow.combat.finalize_reward_result(
+                event.kill_event_id,
+                credited_cultivation_amount=credit.amount,
+                unrefined_balance_after=credit.balance_after,
             )
             await uow.commit()
             return CombatKillResult(
@@ -102,7 +117,8 @@ class CombatRewardService:
                 outcome="accepted",
                 kill_event_id=event.kill_event_id,
                 life_id=life.life_id,
-                reward_amount=reward.amount,
+                configured_reward_amount=reward.amount,
+                credited_cultivation_amount=credit.amount,
                 unrefined_balance=credit.balance_after,
             )
 
@@ -132,25 +148,25 @@ class CombatRewardService:
     ) -> CombatKillResult:
         if existing.request_fingerprint != request.request_fingerprint():
             raise CombatIdempotencyConflictError
-        reward_amount = existing.reward_amount
-        balance = None
+        configured_reward_amount = existing.configured_reward_amount
+        credited_amount = existing.credited_cultivation_amount
+        balance = existing.unrefined_balance_after
         if existing.outcome == "rewarded":
-            if existing.life_id is None or reward_amount is None:
+            if (
+                existing.life_id is None
+                or configured_reward_amount is None
+                or credited_amount is None
+                or balance is None
+            ):
                 raise RuntimeError("Rewarded combat event is missing recipient facts")
-            credit = await uow.cultivation.get_combat_credit(
-                existing.kill_event_id,
-                existing.life_id,
-            )
-            if credit is None:
-                raise RuntimeError("Rewarded combat event is missing cultivation credit")
-            balance = credit.balance_after
         await uow.rollback()
         return CombatKillResult(
             event_id=request.event_id,
             outcome="duplicate",
             kill_event_id=existing.kill_event_id,
             life_id=existing.life_id,
-            reward_amount=reward_amount,
+            configured_reward_amount=configured_reward_amount,
+            credited_cultivation_amount=credited_amount,
             unrefined_balance=balance,
         )
 
@@ -172,7 +188,7 @@ class CombatRewardService:
         telemetry: str,
         account: Account | None = None,
         life: Life | None = None,
-        reward_amount: int | None = None,
+        configured_reward_amount: int | None = None,
     ) -> CombatKillEvent:
         detail_payload = None
         if telemetry == "detailed":
@@ -197,7 +213,9 @@ class CombatRewardService:
             outcome=outcome,
             telemetry=telemetry,
             detail_payload=detail_payload,
-            reward_amount=reward_amount,
+            configured_reward_amount=configured_reward_amount,
+            credited_cultivation_amount=(0 if configured_reward_amount is not None else None),
+            unrefined_balance_after=(0 if configured_reward_amount is not None else None),
         )
 
 

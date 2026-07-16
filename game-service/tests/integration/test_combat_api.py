@@ -105,21 +105,16 @@ async def test_combat_batch_api_credits_and_replays_exactly_once(
 
     assert accepted.status_code == 200
     assert accepted.json()["results"][0]["outcome"] == "accepted"
-    assert accepted.json()["results"][0]["reward_amount"] == 12
+    assert accepted.json()["results"][0]["configured_reward_amount"] == 12
+    assert accepted.json()["results"][0]["credited_cultivation_amount"] == 12
     assert duplicate.status_code == 200
     assert duplicate.json()["results"][0]["outcome"] == "duplicate"
 
     async with postgres_sessions() as session:
         assert await session.scalar(select(func.count()).select_from(CombatKillEventRow)) == 1
+        assert await session.scalar(select(func.count()).select_from(LifeMobKillCounterRow)) == 1
         assert (
-            await session.scalar(select(func.count()).select_from(LifeMobKillCounterRow))
-            == 1
-        )
-        assert (
-            await session.scalar(
-                select(func.count()).select_from(CultivationResourceEntryRow)
-            )
-            == 1
+            await session.scalar(select(func.count()).select_from(CultivationResourceEntryRow)) == 1
         )
         state = await session.scalar(select(LifeCultivationStateRow))
     assert state is not None
@@ -147,3 +142,42 @@ async def test_combat_batch_api_rejects_changed_replay_identity(
     assert first.status_code == 200
     assert conflict.status_code == 409
     assert conflict.json()["error"]["code"] == "combat.kill_idempotency_conflict"
+
+
+@pytest.mark.asyncio
+async def test_full_reserve_reward_persists_accepted_zero_result_without_ledger_row(
+    postgres_sessions: async_sessionmaker[AsyncSession],
+    clean_postgres_data: None,
+) -> None:
+    del clean_postgres_data
+    async with client(postgres_sessions) as test_client:
+        player = await login(test_client)
+        life_id = player["current_life"]["life_id"]
+        async with postgres_sessions() as session:
+            session.add(
+                LifeCultivationStateRow(
+                    life_id=UUID(life_id),
+                    current_level=1,
+                    unrefined_cultivation=100,
+                    realized_cultivation=0,
+                    revision=1,
+                )
+            )
+            await session.commit()
+        payload = kill_payload(life_id)
+        accepted = await test_client.post("/api/v1/combat/mythicmob-kills/batch", json=payload)
+        duplicate = await test_client.post("/api/v1/combat/mythicmob-kills/batch", json=payload)
+
+    result = accepted.json()["results"][0]
+    replay = duplicate.json()["results"][0]
+    assert result["outcome"] == "accepted"
+    assert result["configured_reward_amount"] == 12
+    assert result["credited_cultivation_amount"] == 0
+    assert result["unrefined_balance"] == 100
+    assert replay["outcome"] == "duplicate"
+    assert replay["credited_cultivation_amount"] == 0
+    async with postgres_sessions() as session:
+        ledger_count = await session.scalar(
+            select(func.count()).select_from(CultivationResourceEntryRow)
+        )
+    assert ledger_count == 0

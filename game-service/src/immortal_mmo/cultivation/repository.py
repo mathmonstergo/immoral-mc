@@ -28,6 +28,8 @@ class CultivationRepository(Protocol):
         self, life_id: UUID, *, for_update: bool
     ) -> tuple[RealmEntry, ...]: ...
 
+    async def get_group_investments(self, life_id: UUID) -> dict[str, int]: ...
+
     async def insert_session(self, session: CultivationSession) -> None: ...
 
     async def apply_technique_investments(
@@ -52,5 +54,6 @@ class CultivationRepository(Protocol):
         life_id: UUID,
         kill_event_id: UUID,
         amount: int,
+        cap: int,
         occurred_at: datetime,
     ) -> CombatCultivationCredit: ...

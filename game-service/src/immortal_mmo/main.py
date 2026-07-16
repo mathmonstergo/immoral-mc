@@ -10,12 +10,13 @@ from immortal_mmo.combat.catalog import CombatRewardCatalog, load_combat_reward_
 from immortal_mmo.combat.service import CombatRewardService
 from immortal_mmo.core.errors import DomainError
 from immortal_mmo.core.uow import UnitOfWorkFactory
+from immortal_mmo.cultivation.realm_catalog import RealmCatalog, load_realm_catalog
+from immortal_mmo.cultivation.service import CultivationService
 from immortal_mmo.player.service import PlayerService
 from immortal_mmo.quest.service import QuestService
 
-DEFAULT_COMBAT_CATALOG_PATH = (
-    Path(__file__).resolve().parent / "combat" / "mythicmob_rewards.json"
-)
+DEFAULT_COMBAT_CATALOG_PATH = Path(__file__).resolve().parent / "combat" / "mythicmob_rewards.json"
+DEFAULT_REALM_CATALOG_PATH = Path(__file__).resolve().parent / "cultivation" / "realm_catalog.json"
 
 
 def create_app(
@@ -24,6 +25,7 @@ def create_app(
     lifespan: Lifespan[FastAPI] | None = None,
     readiness_check: ReadinessCheck | None = None,
     combat_catalog: CombatRewardCatalog | None = None,
+    realm_catalog: RealmCatalog | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Immortal MMO Game Service",
@@ -37,6 +39,10 @@ def create_app(
     app.state.combat_service = CombatRewardService(
         uow_factory,
         combat_catalog or load_combat_reward_catalog(DEFAULT_COMBAT_CATALOG_PATH),
+    )
+    app.state.cultivation_service = CultivationService(
+        uow_factory,
+        realm_catalog or load_realm_catalog(DEFAULT_REALM_CATALOG_PATH),
     )
     app.state.readiness_check = (
         readiness_check if readiness_check is not None else not_configured_readiness

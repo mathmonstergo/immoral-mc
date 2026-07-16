@@ -8,6 +8,7 @@ from immortal_mmo.api.v1.health import (
     get_health,
 )
 from immortal_mmo.combat.api import router as combat_router
+from immortal_mmo.cultivation.api import router as cultivation_router
 from immortal_mmo.player.api import router as player_router
 from immortal_mmo.quest.api import catalog_router as quest_catalog_router
 from immortal_mmo.quest.api import router as quest_router
@@ -17,6 +18,7 @@ api_router.include_router(player_router)
 api_router.include_router(quest_catalog_router)
 api_router.include_router(quest_router)
 api_router.include_router(combat_router)
+api_router.include_router(cultivation_router)
 
 
 @api_router.get("/health", response_model=HealthResponse)

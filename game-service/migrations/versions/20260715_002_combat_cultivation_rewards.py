@@ -374,7 +374,9 @@ def upgrade() -> None:
         sa.Column("outcome", sa.String(length=32), nullable=False),
         sa.Column("telemetry", sa.String(length=16), nullable=False),
         sa.Column("detail_payload", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        sa.Column("reward_amount", sa.BigInteger(), nullable=True),
+        sa.Column("configured_reward_amount", sa.BigInteger(), nullable=True),
+        sa.Column("credited_cultivation_amount", sa.BigInteger(), nullable=True),
+        sa.Column("unrefined_balance_after", sa.BigInteger(), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -442,10 +444,17 @@ def upgrade() -> None:
             (outcome = 'rewarded'
                 AND account_id IS NOT NULL
                 AND life_id IS NOT NULL
-                AND reward_amount IS NOT NULL
-                AND reward_amount > 0)
+                AND configured_reward_amount IS NOT NULL
+                AND configured_reward_amount > 0
+                AND credited_cultivation_amount IS NOT NULL
+                AND credited_cultivation_amount >= 0
+                AND unrefined_balance_after IS NOT NULL
+                AND unrefined_balance_after >= 0)
             OR
-            (outcome <> 'rewarded' AND reward_amount IS NULL)
+            (outcome <> 'rewarded'
+                AND configured_reward_amount IS NULL
+                AND credited_cultivation_amount IS NULL
+                AND unrefined_balance_after IS NULL)
             """,
             name=op.f("ck_combat_kill_reward_shape"),
         ),

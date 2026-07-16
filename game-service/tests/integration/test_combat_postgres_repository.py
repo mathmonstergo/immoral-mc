@@ -58,7 +58,9 @@ def kill_event(
         outcome="rewarded",
         telemetry="compact",
         detail_payload=None,
-        reward_amount=120,
+        configured_reward_amount=120,
+        credited_cultivation_amount=120,
+        unrefined_balance_after=120,
     )
 
 
@@ -97,16 +99,22 @@ async def test_combat_repository_deduplicates_source_and_increments_counter(
         repository = PostgresCombatRepository(session)
         assert await repository.insert_event_if_absent(event) is True
         assert await repository.insert_event_if_absent(event) is False
-        assert await repository.increment_mob_counter(
-            life_id,
-            "AzureWolf",
-            OCCURRED_AT,
-        ) == 1
-        assert await repository.increment_mob_counter(
-            life_id,
-            "AzureWolf",
-            OCCURRED_AT,
-        ) == 2
+        assert (
+            await repository.increment_mob_counter(
+                life_id,
+                "AzureWolf",
+                OCCURRED_AT,
+            )
+            == 1
+        )
+        assert (
+            await repository.increment_mob_counter(
+                life_id,
+                "AzureWolf",
+                OCCURRED_AT,
+            )
+            == 2
+        )
         await session.commit()
 
     async with postgres_sessions() as session:
@@ -144,6 +152,7 @@ async def test_cultivation_repository_credits_ledger_and_balance_atomically(
             life_id=life_id,
             kill_event_id=event.kill_event_id,
             amount=120,
+            cap=1_000,
             occurred_at=OCCURRED_AT,
         )
         await session.commit()
@@ -189,6 +198,7 @@ async def test_repository_changes_roll_back_together(
             life_id=life_id,
             kill_event_id=event.kill_event_id,
             amount=120,
+            cap=1_000,
             occurred_at=OCCURRED_AT,
         )
         await session.rollback()

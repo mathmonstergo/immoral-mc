@@ -10,6 +10,14 @@ class CombatRepository(Protocol):
 
     async def insert_event_if_absent(self, event: CombatKillEvent) -> bool: ...
 
+    async def finalize_reward_result(
+        self,
+        kill_event_id: UUID,
+        *,
+        credited_cultivation_amount: int,
+        unrefined_balance_after: int,
+    ) -> None: ...
+
     async def increment_mob_counter(
         self,
         life_id: UUID,

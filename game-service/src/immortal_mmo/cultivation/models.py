@@ -5,7 +5,7 @@ from uuid import UUID
 
 @dataclass(frozen=True, slots=True)
 class CombatCultivationCredit:
-    entry_id: UUID
+    entry_id: UUID | None
     life_id: UUID
     kill_event_id: UUID
     amount: int

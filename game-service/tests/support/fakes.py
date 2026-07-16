@@ -356,6 +356,24 @@ class FakeCombatRepository:
         self._state.combat_events[event.source_event_id] = event
         return True
 
+    async def finalize_reward_result(
+        self,
+        kill_event_id: UUID,
+        *,
+        credited_cultivation_amount: int,
+        unrefined_balance_after: int,
+    ) -> None:
+        self._ensure_active()
+        for source_event_id, event in self._state.combat_events.items():
+            if event.kill_event_id == kill_event_id:
+                self._state.combat_events[source_event_id] = replace(
+                    event,
+                    credited_cultivation_amount=credited_cultivation_amount,
+                    unrefined_balance_after=unrefined_balance_after,
+                )
+                return
+        raise RuntimeError("Combat reward event disappeared before finalization")
+
     async def increment_mob_counter(
         self,
         life_id: UUID,
@@ -425,6 +443,16 @@ class FakeCultivationRepository:
             )
         )
 
+    async def get_group_investments(self, life_id: UUID) -> dict[str, int]:
+        self._ensure_active()
+        totals: dict[str, int] = {}
+        for technique in self._state.life_techniques.values():
+            if technique.life_id == life_id:
+                totals[technique.group_code] = (
+                    totals.get(technique.group_code, 0) + technique.invested_amount
+                )
+        return totals
+
     async def insert_session(self, session: CultivationSession) -> None:
         self._ensure_active()
         if any(
@@ -478,6 +506,7 @@ class FakeCultivationRepository:
         life_id: UUID,
         kill_event_id: UUID,
         amount: int,
+        cap: int,
         occurred_at: datetime,
     ) -> CombatCultivationCredit:
         self._ensure_active()
@@ -485,13 +514,15 @@ class FakeCultivationRepository:
         key = (kill_event_id, life_id)
         if key in self._state.cultivation_credits:
             raise RuntimeError("Combat cultivation reward already exists")
-        balance = self._state.cultivation_balances.get(life_id, 0) + amount
+        current = self._state.cultivation_balances.get(life_id, 0)
+        credited = min(amount, max(cap - current, 0))
+        balance = current + credited
         revision = self._state.cultivation_revisions.get(life_id, 1) + 1
         credit = CombatCultivationCredit(
-            entry_id=uuid4(),
+            entry_id=uuid4() if credited > 0 else None,
             life_id=life_id,
             kill_event_id=kill_event_id,
-            amount=amount,
+            amount=credited,
             balance_after=balance,
             revision=revision,
         )

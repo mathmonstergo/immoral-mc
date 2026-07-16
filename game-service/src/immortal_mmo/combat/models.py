@@ -57,4 +57,6 @@ class CombatKillEvent:
     outcome: StoredCombatKillOutcome
     telemetry: TelemetryMode
     detail_payload: dict[str, object] | None
-    reward_amount: int | None
+    configured_reward_amount: int | None
+    credited_cultivation_amount: int | None
+    unrefined_balance_after: int | None

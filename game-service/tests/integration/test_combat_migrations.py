@@ -92,7 +92,9 @@ async def test_combat_schema_rejects_duplicate_source_event(
         "occurred_at": datetime(2026, 7, 15, 12, tzinfo=UTC),
         "outcome": "rewarded",
         "telemetry": "compact",
-        "reward_amount": 120,
+        "configured_reward_amount": 120,
+        "credited_cultivation_amount": 120,
+        "unrefined_balance_after": 120,
     }
     await postgres_session.execute(
         text(
@@ -101,12 +103,16 @@ async def test_combat_schema_rejects_duplicate_source_event(
                 kill_event_id, source_type, source_event_id, request_fingerprint, server_id,
                 entity_uuid, mob_internal_name, mob_level,
                 killer_minecraft_uuid, attribution_kind, account_id, life_id,
-                world_key, occurred_at, outcome, telemetry, reward_amount
+                world_key, occurred_at, outcome, telemetry,
+                configured_reward_amount, credited_cultivation_amount,
+                unrefined_balance_after
             ) VALUES (
                 :kill_event_id, :source_type, :source_event_id, :request_fingerprint, :server_id,
                 :entity_uuid, :mob_internal_name, :mob_level,
                 :killer_minecraft_uuid, :attribution_kind, :account_id, :life_id,
-                :world_key, :occurred_at, :outcome, :telemetry, :reward_amount
+                :world_key, :occurred_at, :outcome, :telemetry,
+                :configured_reward_amount, :credited_cultivation_amount,
+                :unrefined_balance_after
             )
             """
         ),
@@ -123,13 +129,17 @@ async def test_combat_schema_rejects_duplicate_source_event(
                     kill_event_id, source_type, source_event_id, request_fingerprint, server_id,
                     entity_uuid, mob_internal_name, mob_level,
                     killer_minecraft_uuid, attribution_kind, account_id, life_id,
-                    world_key, occurred_at, outcome, telemetry, reward_amount
+                    world_key, occurred_at, outcome, telemetry,
+                    configured_reward_amount, credited_cultivation_amount,
+                    unrefined_balance_after
                 ) VALUES (
                     :kill_event_id, :source_type, :source_event_id,
                     :request_fingerprint, :server_id,
                     :entity_uuid, :mob_internal_name, :mob_level,
                     :killer_minecraft_uuid, :attribution_kind, :account_id, :life_id,
-                    :world_key, :occurred_at, :outcome, :telemetry, :reward_amount
+                    :world_key, :occurred_at, :outcome, :telemetry,
+                    :configured_reward_amount, :credited_cultivation_amount,
+                    :unrefined_balance_after
                 )
                 """
             ),

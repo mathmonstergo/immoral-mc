@@ -87,14 +87,16 @@ class CombatKillResult(BaseModel):
     outcome: CombatKillOutcome
     kill_event_id: UUID
     life_id: UUID | None = None
-    reward_amount: Annotated[int | None, Field(gt=0)] = None
+    configured_reward_amount: Annotated[int | None, Field(gt=0)] = None
+    credited_cultivation_amount: Annotated[int | None, Field(ge=0)] = None
     unrefined_balance: Annotated[int | None, Field(ge=0)] = None
 
     @model_validator(mode="after")
     def validate_reward_shape(self) -> "CombatKillResult":
         if self.outcome == "accepted" and (
             self.life_id is None
-            or self.reward_amount is None
+            or self.configured_reward_amount is None
+            or self.credited_cultivation_amount is None
             or self.unrefined_balance is None
         ):
             raise ValueError("accepted combat kill result requires reward fields")
@@ -102,8 +104,20 @@ class CombatKillResult(BaseModel):
             "not_rewardable",
             "account_not_found",
             "current_life_unavailable",
-        } and (self.reward_amount is not None or self.unrefined_balance is not None):
+        } and (
+            self.configured_reward_amount is not None
+            or self.credited_cultivation_amount is not None
+            or self.unrefined_balance is not None
+        ):
             raise ValueError("no-reward combat kill result cannot include reward fields")
+        if self.outcome == "duplicate":
+            present = (
+                self.configured_reward_amount is not None,
+                self.credited_cultivation_amount is not None,
+                self.unrefined_balance is not None,
+            )
+            if any(present) and not all(present):
+                raise ValueError("duplicate reward fields must be all present or all absent")
         return self
 
 

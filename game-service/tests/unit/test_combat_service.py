@@ -16,6 +16,7 @@ from immortal_mmo.combat.catalog import (
 )
 from immortal_mmo.combat.schemas import CombatKillBatchRequest, CombatKillEventRequest
 from immortal_mmo.combat.service import CombatIdempotencyConflictError, CombatRewardService
+from immortal_mmo.cultivation.models import CultivationState
 from immortal_mmo.player.service import PlayerService
 
 KILLER_ID = UUID("33333333-3333-4333-8333-333333333333")
@@ -99,10 +100,12 @@ async def test_reward_service_credits_current_life_once_and_replays_duplicate() 
     replay = await service.process_batch(batch)
 
     assert first.results[0].outcome == "accepted"
-    assert first.results[0].reward_amount == 12
+    assert first.results[0].configured_reward_amount == 12
+    assert first.results[0].credited_cultivation_amount == 12
     assert first.results[0].unrefined_balance == 12
     assert replay.results[0].outcome == "duplicate"
-    assert replay.results[0].reward_amount == 12
+    assert replay.results[0].configured_reward_amount == 12
+    assert replay.results[0].credited_cultivation_amount == 12
     async with factory() as uow:
         assert await uow.combat.get_mob_counter(life_id, "AzureWolf") == 1
         assert await uow.cultivation.get_unrefined_balance(life_id) == 12
@@ -129,7 +132,8 @@ async def test_reward_service_replays_stored_result_before_current_catalog_valid
 
     assert accepted.results[0].outcome == "accepted"
     assert replay.results[0].outcome == "duplicate"
-    assert replay.results[0].reward_amount == 12
+    assert replay.results[0].configured_reward_amount == 12
+    assert replay.results[0].credited_cultivation_amount == 12
     assert replay.results[0].unrefined_balance == 12
 
 
@@ -159,7 +163,8 @@ async def test_unknown_mob_is_terminal_without_account_or_reward_lookup() -> Non
     result = await service.process_batch(CombatKillBatchRequest(events=[request_event]))
 
     assert result.results[0].outcome == "not_rewardable"
-    assert result.results[0].reward_amount is None
+    assert result.results[0].configured_reward_amount is None
+    assert result.results[0].credited_cultivation_amount is None
     async with factory() as uow:
         stored = await uow.combat.get_event(request_event.event_id)
         assert stored is not None
@@ -204,6 +209,28 @@ async def test_stale_source_life_cannot_credit_current_life() -> None:
 
 
 @pytest.mark.asyncio
+async def test_full_reserve_kill_is_accepted_with_zero_credit() -> None:
+    factory, life_id = await logged_in_factory()
+    factory.store._state.cultivation_balances[life_id] = 100
+    factory.store._state.cultivation_states[life_id] = CultivationState(
+        life_id=life_id,
+        current_level=1,
+        unrefined_cultivation=100,
+        realized_cultivation=0,
+        active_session_id=None,
+        revision=2,
+    )
+    result = await CombatRewardService(factory, catalog()).process_batch(
+        CombatKillBatchRequest(events=[event(source_life_id=life_id)])
+    )
+
+    assert result.results[0].outcome == "accepted"
+    assert result.results[0].configured_reward_amount == 12
+    assert result.results[0].credited_cultivation_amount == 0
+    assert result.results[0].unrefined_balance == 100
+
+
+@pytest.mark.asyncio
 async def test_reward_service_rolls_back_all_combat_writes_when_credit_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -216,9 +243,10 @@ async def test_reward_service_rolls_back_all_combat_writes_when_credit_fails(
         life_id: UUID,
         kill_event_id: UUID,
         amount: int,
+        cap: int,
         occurred_at: object,
     ) -> None:
-        del self, life_id, kill_event_id, amount, occurred_at
+        del self, life_id, kill_event_id, amount, cap, occurred_at
         raise RuntimeError("simulated cultivation write failure")
 
     monkeypatch.setattr(

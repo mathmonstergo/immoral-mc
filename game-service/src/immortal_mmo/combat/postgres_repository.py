@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,12 +46,32 @@ class PostgresCombatRepository:
                 outcome=event.outcome,
                 telemetry=event.telemetry,
                 detail_payload=event.detail_payload,
-                reward_amount=event.reward_amount,
+                configured_reward_amount=event.configured_reward_amount,
+                credited_cultivation_amount=event.credited_cultivation_amount,
+                unrefined_balance_after=event.unrefined_balance_after,
             )
             .on_conflict_do_nothing(constraint="uq_combat_kill_source")
             .returning(CombatKillEventRow.kill_event_id)
         )
         return inserted is not None
+
+    async def finalize_reward_result(
+        self,
+        kill_event_id: UUID,
+        *,
+        credited_cultivation_amount: int,
+        unrefined_balance_after: int,
+    ) -> None:
+        result = await self._session.execute(
+            update(CombatKillEventRow)
+            .where(CombatKillEventRow.kill_event_id == kill_event_id)
+            .values(
+                credited_cultivation_amount=credited_cultivation_amount,
+                unrefined_balance_after=unrefined_balance_after,
+            )
+        )
+        if result.rowcount != 1:
+            raise RuntimeError("Combat reward event disappeared before finalization")
 
     async def increment_mob_counter(
         self,
@@ -107,5 +127,7 @@ def _event_from_row(row: CombatKillEventRow) -> CombatKillEvent:
         outcome=row.outcome,
         telemetry=row.telemetry,
         detail_payload=row.detail_payload,
-        reward_amount=row.reward_amount,
+        configured_reward_amount=row.configured_reward_amount,
+        credited_cultivation_amount=row.credited_cultivation_amount,
+        unrefined_balance_after=row.unrefined_balance_after,
     )
