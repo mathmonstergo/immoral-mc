@@ -1,1 +1,9 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/backend/index.md","reason":"Review authoritative service ownership and backend checklist compliance."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Review migrations, constraints, repositories, locking, and transactional invariants."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Review domain and API validation/error behavior."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review tests, authority boundaries, and quality gates."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Review reuse, constant/config consistency, and duplicated utilities."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review database-to-service-to-API-to-Paper data flow consistency."}
+{"file":".trellis/tasks/07-15-cultivation-level-xp-feedback/research/mortals-technique-system.md","reason":"Check common technique behavior against the requested legacy reference."}
+{"file":".trellis/tasks/07-15-cultivation-level-xp-feedback/research/versioned-breakthrough-rules.md","reason":"Check breakthrough content semantics and versioning."}
+{"file":".trellis/tasks/07-15-cultivation-level-xp-feedback/research/minecraft-dual-cultivation-hud.md","reason":"Check HUD and Paper presentation constraints."}

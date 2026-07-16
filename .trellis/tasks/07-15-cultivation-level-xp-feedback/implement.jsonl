@@ -1,1 +1,11 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/backend/index.md","reason":"Authoritative Game Service architecture and backend pre-development checklist."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Module and Adapter/Game Service ownership boundaries."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"PostgreSQL, migration, repository, transaction, and persistence conventions."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Domain validation and adapter-facing API error contracts."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Operational logging conventions for cultivation flows."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Required authority, testing, and implementation quality rules."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Required search-first and reuse checks for new catalogs and utilities."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Cultivation data crosses database, service, API, and Paper presentation layers."}
+{"file":".trellis/tasks/07-15-cultivation-level-xp-feedback/research/mortals-technique-system.md","reason":"Legacy technique names, fields, and shared progression behavior requested by the user."}
+{"file":".trellis/tasks/07-15-cultivation-level-xp-feedback/research/versioned-breakthrough-rules.md","reason":"Frozen breakthrough content and versioning research."}
+{"file":".trellis/tasks/07-15-cultivation-level-xp-feedback/research/minecraft-dual-cultivation-hud.md","reason":"Paper and BetterHud presentation constraints for the two cultivation bars."}
