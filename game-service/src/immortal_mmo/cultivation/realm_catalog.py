@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -14,9 +15,17 @@ class RealmLevel:
     next_level_id: int | None
 
 
+@dataclass(frozen=True, slots=True, init=False)
 class RealmCatalog:
+    _schema_version: int
+    _levels: Mapping[int, RealmLevel]
+
     def __init__(self, *, schema_version: int, levels: tuple[RealmLevel, ...]) -> None:
-        if schema_version != 1:
+        if (
+            isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+            or schema_version != 1
+        ):
             raise ValueError("Unsupported realm catalog schema_version")
 
         by_id: dict[int, RealmLevel] = {}
@@ -54,8 +63,16 @@ class RealmCatalog:
         if level_ids != list(range(1, 23)):
             raise ValueError("Realm catalog must contain levels 1 through 22 exactly")
 
-        self.schema_version = schema_version
-        self.levels = MappingProxyType(by_id)
+        object.__setattr__(self, "_schema_version", schema_version)
+        object.__setattr__(self, "_levels", MappingProxyType(by_id))
+
+    @property
+    def schema_version(self) -> int:
+        return self._schema_version
+
+    @property
+    def levels(self) -> Mapping[int, RealmLevel]:
+        return self._levels
 
     def level(self, level_id: int) -> RealmLevel:
         try:
@@ -130,6 +147,8 @@ def _required_int(document: dict[str, Any], key: str) -> int:
 
 
 def _optional_int(document: dict[str, Any], key: str) -> int | None:
+    if key not in document:
+        raise ValueError(f"Realm catalog field {key} is required")
     value = document.get(key)
     if value is None:
         return None

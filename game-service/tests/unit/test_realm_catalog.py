@@ -2,6 +2,7 @@ import json
 import operator
 from math import ceil
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -64,6 +65,16 @@ def test_realm_levels_and_catalog_view_are_frozen(catalog: RealmCatalog) -> None
         operator.setitem(catalog.levels, 1, catalog.level(2))
 
 
+@pytest.mark.parametrize(("attribute", "value"), [("schema_version", 2), ("levels", {})])
+def test_realm_catalog_attributes_cannot_be_reassigned(
+    catalog: RealmCatalog,
+    attribute: str,
+    value: object,
+) -> None:
+    with pytest.raises((AttributeError, TypeError)):
+        setattr(catalog, attribute, value)
+
+
 def test_qi_cumulative_capacity_uses_three_five_seven_nine_techniques(
     catalog: RealmCatalog,
 ) -> None:
@@ -123,12 +134,43 @@ def test_realm_catalog_rejects_unknown_level(catalog: RealmCatalog) -> None:
         catalog.level(23)
 
 
-def test_realm_catalog_loader_rejects_wrong_types_and_unknown_fields(tmp_path: Path) -> None:
+@pytest.mark.parametrize("schema_version", [True, 1.0])
+def test_realm_catalog_constructor_rejects_non_integer_schema_version(
+    catalog: RealmCatalog,
+    schema_version: object,
+) -> None:
+    with pytest.raises(ValueError, match="schema_version"):
+        RealmCatalog(
+            schema_version=cast(Any, schema_version),
+            levels=tuple(catalog.levels.values()),
+        )
+
+
+def test_realm_catalog_loader_rejects_unknown_fields(tmp_path: Path) -> None:
     document = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
-    document["levels"][0]["max_exp"] = True
     document["levels"][0]["unexpected"] = "value"
     path = tmp_path / "realm_catalog.json"
     path.write_text(json.dumps(document), encoding="utf-8")
 
     with pytest.raises(ValueError, match="unexpected"):
+        load_realm_catalog(path)
+
+
+def test_realm_catalog_loader_rejects_boolean_max_exp(tmp_path: Path) -> None:
+    document = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    document["levels"][0]["max_exp"] = True
+    path = tmp_path / "realm_catalog.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="max_exp.*integer"):
+        load_realm_catalog(path)
+
+
+def test_realm_catalog_loader_requires_successor_key_even_when_null(tmp_path: Path) -> None:
+    document = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    del document["levels"][-1]["next_level_id"]
+    path = tmp_path / "realm_catalog.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="next_level_id.*required"):
         load_realm_catalog(path)
