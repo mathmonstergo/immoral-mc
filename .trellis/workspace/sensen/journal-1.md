@@ -584,3 +584,57 @@ Added the authoritative quest-provider catalog API and Citizens selection-based 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: Complete cultivation progression vertical slice
+
+**Date**: 2026-07-16
+**Task**: Complete cultivation progression vertical slice
+**Branch**: `feat/cultivation-progression`
+
+### Summary
+
+Implemented 22-level cultivation, common techniques, seclusion, realm regression, breakthrough/item settlement, reward/HUD projection, Paper GUI/commands, stable cross-layer errors, tests, specs, and local Paper startup smoke.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1807d9f` | (see git log) |
+| `9849d1d` | (see git log) |
+| `15bf9b3` | (see git log) |
+| `6e7e734` | (see git log) |
+| `085cddb` | (see git log) |
+| `6d211bf` | (see git log) |
+| `eab25e4` | (see git log) |
+| `6f3f371` | (see git log) |
+| `d22d848` | (see git log) |
+| `290a79b` | (see git log) |
+| `a5d543d` | (see git log) |
+| `7c7a840` | (see git log) |
+| `83c5d39` | (see git log) |
+| `fc6fd19` | (see git log) |
+| `5c5d966` | (see git log) |
+| `a5106cd` | (see git log) |
+| `9c3c264` | (see git log) |
+| `1cf6aa8` | (see git log) |
+| `38cb936` | (see git log) |
+| `cc2f79b` | (see git log) |
+| `6413128` | (see git log) |
+| `efe4e93` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
