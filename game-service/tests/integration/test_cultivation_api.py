@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from immortal_mmo.combat.postgres_repository import PostgresCombatRepository
 from immortal_mmo.cultivation.db_models import (
+    BreakthroughTechniqueDebitRow,
     CultivationResourceEntryRow,
     CultivationSessionRow,
     CultivationSessionTechniqueRow,
@@ -18,8 +19,10 @@ from immortal_mmo.cultivation.db_models import (
 )
 from immortal_mmo.cultivation.postgres_repository import PostgresCultivationRepository
 from immortal_mmo.db.uow import SqlAlchemyUnitOfWorkFactory
+from immortal_mmo.item.db_models import LifeItemStackRow
 from immortal_mmo.item.postgres_repository import PostgresItemRepository
 from immortal_mmo.main import create_app
+from immortal_mmo.player.db_models import LifeSpiritRootRow
 from immortal_mmo.player.postgres_repository import PostgresPlayerRepository
 from immortal_mmo.quest.postgres_repository import PostgresQuestRepository
 
@@ -439,3 +442,123 @@ async def test_regression_reentry_appends_a_new_postgres_branch(
     assert entries[2].status == "active"
     assert entries[2].parent_entry_id == first_entry_id
     assert entries[2].transition_kind == "reentry"
+
+
+@pytest.mark.asyncio
+async def test_foundation_breakthrough_replays_and_settles_after_app_restart(
+    postgres_sessions: async_sessionmaker[AsyncSession],
+    clean_postgres_data: None,
+) -> None:
+    del clean_postgres_data
+    technique_id = UUID(int=9_411)
+    entry_id = UUID(int=9_412)
+    start_key = UUID(int=9_413)
+    async with client(postgres_sessions) as first_client:
+        login = await first_client.post(
+            "/api/v1/players/login",
+            json={"minecraft_uuid": str(UUID(int=9_400)), "player_name": "Breaker"},
+        )
+        account_id = login.json()["account"]["account_id"]
+        life_id = UUID(login.json()["current_life"]["life_id"])
+        async with postgres_sessions() as session:
+            session.add_all(
+                [
+                    LifeSpiritRootRow(
+                        life_id=life_id,
+                        quality_code="triple",
+                        base_element_codes=["metal", "wood", "water"],
+                        variant_element_code=None,
+                        generator_version=1,
+                    ),
+                    LifeCultivationStateRow(
+                        life_id=life_id,
+                        current_level=10,
+                        unrefined_cultivation=777,
+                        realized_cultivation=11_293,
+                        revision=1,
+                    ),
+                    LifeTechniqueRow(
+                        life_technique_id=technique_id,
+                        life_id=life_id,
+                        technique_id="GF_Breakthrough_Qi",
+                        definition_version=1,
+                        group_code="qi",
+                        major_realm="练气",
+                        invested_amount=11_293,
+                        max_investment=20_000,
+                        current_layer=13,
+                        status="active",
+                    ),
+                    LifeRealmEntryRow(
+                        realm_entry_id=entry_id,
+                        life_id=life_id,
+                        generation=1,
+                        parent_entry_id=None,
+                        source_level=9,
+                        target_level=10,
+                        source_group="qi",
+                        target_group="qi",
+                        source_floor=7_464,
+                        target_baseline=7_464,
+                        transition_kind="adjacent",
+                        transition_session_id=None,
+                        status="active",
+                        invalidated_at=None,
+                    ),
+                ]
+            )
+            await session.commit()
+        granted = await first_client.post(
+            f"/api/v1/players/{account_id}/current-life/items/adjustments",
+            headers={"Idempotency-Key": str(UUID(int=9_414))},
+            json={"item_code": "foundation_pill", "delta_quantity": 1},
+        )
+        started = await first_client.post(
+            f"/api/v1/players/{account_id}/current-life/cultivation/breakthroughs",
+            headers={"Idempotency-Key": str(start_key)},
+            json={"pill_count": 1},
+        )
+
+    assert granted.status_code == 200
+    assert started.status_code == 200
+    assert started.json()["status"] == "pending"
+    assert started.json()["outcome"] == "success"
+    breakthrough_id = UUID(started.json()["session_id"])
+    async with client(postgres_sessions) as restarted_client:
+        replay = await restarted_client.post(
+            f"/api/v1/players/{account_id}/current-life/cultivation/breakthroughs",
+            headers={"Idempotency-Key": str(start_key)},
+            json={"pill_count": 1},
+        )
+        async with postgres_sessions() as session:
+            breakthrough = await session.get(CultivationSessionRow, breakthrough_id)
+            assert breakthrough is not None
+            breakthrough.started_at -= timedelta(minutes=11)
+            breakthrough.completes_at -= timedelta(minutes=11)
+            await session.commit()
+        settled = await restarted_client.post(
+            f"/api/v1/players/{account_id}/current-life/cultivation/breakthroughs/"
+            f"{breakthrough_id}/settle"
+        )
+        snapshot = await restarted_client.get(
+            f"/api/v1/players/{account_id}/current-life/cultivation"
+        )
+
+    assert replay.json() == started.json()
+    assert settled.status_code == 200
+    assert settled.json()["status"] == "completed"
+    assert snapshot.json()["current_level"] == 14
+    assert snapshot.json()["current_progress"] == 0
+    assert snapshot.json()["unrefined_reserve"] == 777
+    async with postgres_sessions() as session:
+        stack = await session.get(
+            LifeItemStackRow,
+            {"life_id": life_id, "item_code": "foundation_pill"},
+        )
+        debit_count = await session.scalar(
+            select(func.count())
+            .select_from(BreakthroughTechniqueDebitRow)
+            .where(BreakthroughTechniqueDebitRow.session_id == breakthrough_id)
+        )
+    assert stack is not None and stack.quantity == 0
+    assert debit_count == 1

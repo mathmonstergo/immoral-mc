@@ -96,3 +96,13 @@ class SessionTechnique:
     frozen_capacity: int
     frozen_invested: int
     frozen_full_mastery_seconds: int
+
+
+@dataclass(frozen=True, slots=True)
+class BreakthroughTechniqueDebit:
+    session_id: UUID
+    life_id: UUID
+    life_technique_id: UUID
+    allocated_amount: int
+    balance_before: int
+    balance_after: int

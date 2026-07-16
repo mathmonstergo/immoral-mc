@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 from immortal_mmo.combat.models import CombatKillEvent
 from immortal_mmo.cultivation.models import (
+    BreakthroughTechniqueDebit,
     CombatCultivationCredit,
     CultivationSession,
     CultivationState,
@@ -52,6 +53,9 @@ class _FakeState:
     realm_entries: dict[UUID, RealmEntry] = field(default_factory=dict)
     cultivation_sessions: dict[UUID, CultivationSession] = field(default_factory=dict)
     session_techniques: dict[UUID, tuple[SessionTechnique, ...]] = field(default_factory=dict)
+    breakthrough_debits: dict[UUID, tuple[BreakthroughTechniqueDebit, ...]] = field(
+        default_factory=dict
+    )
     item_stacks: dict[tuple[UUID, str], ItemStack] = field(default_factory=dict)
     item_entries: dict[tuple[UUID, str], ItemResourceEntry] = field(default_factory=dict)
 
@@ -583,6 +587,20 @@ class FakeCultivationRepository:
     async def get_session_techniques(self, session_id: UUID) -> tuple[SessionTechnique, ...]:
         self._ensure_active()
         return self._state.session_techniques.get(session_id, ())
+
+    async def store_breakthrough_debits(
+        self,
+        debits: tuple[BreakthroughTechniqueDebit, ...],
+    ) -> None:
+        self._ensure_active()
+        if debits:
+            self._state.breakthrough_debits[debits[0].session_id] = debits
+
+    async def get_breakthrough_debits(
+        self, session_id: UUID
+    ) -> tuple[BreakthroughTechniqueDebit, ...]:
+        self._ensure_active()
+        return self._state.breakthrough_debits.get(session_id, ())
 
     async def update_session_frozen_snapshot(
         self,

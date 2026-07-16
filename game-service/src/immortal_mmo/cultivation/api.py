@@ -3,8 +3,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Request
 
 from immortal_mmo.cultivation.schemas import (
+    BreakthroughSnapshotResponse,
     CultivationSnapshotResponse,
+    ItemAdjustmentRequest,
+    ItemAdjustmentResponse,
     SeclusionSnapshotResponse,
+    StartBreakthroughRequest,
     StartSeclusionRequest,
     TechniqueMutationResponse,
     TransferTechniqueRequest,
@@ -67,6 +71,71 @@ async def transfer_technique(
         target_technique_id=body.target_technique_id,
         transfer_profile_id=body.transfer_profile_id,
         idempotency_key=idempotency_key,
+    )
+
+
+@router.post(
+    "/{account_id}/current-life/items/adjustments",
+    response_model=ItemAdjustmentResponse,
+)
+async def adjust_item(
+    account_id: UUID,
+    body: ItemAdjustmentRequest,
+    idempotency_key: UUID = idempotency_key_header,
+    service: CultivationService = cultivation_service_dependency,
+) -> ItemAdjustmentResponse:
+    return await service.adjust_item(
+        account_id=account_id,
+        item_code=body.item_code,
+        delta_quantity=body.delta_quantity,
+        idempotency_key=idempotency_key,
+    )
+
+
+@router.post(
+    "/{account_id}/current-life/cultivation/breakthroughs",
+    response_model=BreakthroughSnapshotResponse,
+)
+async def start_breakthrough(
+    account_id: UUID,
+    body: StartBreakthroughRequest,
+    idempotency_key: UUID = idempotency_key_header,
+    service: CultivationService = cultivation_service_dependency,
+) -> BreakthroughSnapshotResponse:
+    return await service.start_breakthrough(
+        account_id=account_id,
+        pill_count=body.pill_count,
+        idempotency_key=idempotency_key,
+    )
+
+
+@router.get(
+    "/{account_id}/current-life/cultivation/breakthroughs/{session_id}",
+    response_model=BreakthroughSnapshotResponse,
+)
+async def breakthrough_status(
+    account_id: UUID,
+    session_id: UUID,
+    service: CultivationService = cultivation_service_dependency,
+) -> BreakthroughSnapshotResponse:
+    return await service.breakthrough_status(
+        account_id=account_id,
+        session_id=session_id,
+    )
+
+
+@router.post(
+    "/{account_id}/current-life/cultivation/breakthroughs/{session_id}/settle",
+    response_model=BreakthroughSnapshotResponse,
+)
+async def settle_breakthrough(
+    account_id: UUID,
+    session_id: UUID,
+    service: CultivationService = cultivation_service_dependency,
+) -> BreakthroughSnapshotResponse:
+    return await service.settle_breakthrough(
+        account_id=account_id,
+        session_id=session_id,
     )
 
 

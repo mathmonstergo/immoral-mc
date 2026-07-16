@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from immortal_mmo.combat.catalog import MAX_REWARD_AMOUNT
 from immortal_mmo.cultivation.db_models import (
+    BreakthroughTechniqueDebitRow,
     CultivationResourceEntryRow,
     CultivationSessionRow,
     CultivationSessionTechniqueRow,
@@ -18,6 +19,7 @@ from immortal_mmo.cultivation.db_models import (
     TechniqueInvestmentEntryRow,
 )
 from immortal_mmo.cultivation.models import (
+    BreakthroughTechniqueDebit,
     CombatCultivationCredit,
     CultivationSession,
     CultivationState,
@@ -324,6 +326,37 @@ class PostgresCultivationRepository:
             )
         ).all()
         return tuple(_session_technique(row) for row in rows)
+
+    async def store_breakthrough_debits(
+        self,
+        debits: tuple[BreakthroughTechniqueDebit, ...],
+    ) -> None:
+        self._session.add_all(
+            [
+                BreakthroughTechniqueDebitRow(
+                    session_id=debit.session_id,
+                    life_id=debit.life_id,
+                    life_technique_id=debit.life_technique_id,
+                    allocated_amount=debit.allocated_amount,
+                    balance_before=debit.balance_before,
+                    balance_after=debit.balance_after,
+                )
+                for debit in debits
+            ]
+        )
+        await self._session.flush()
+
+    async def get_breakthrough_debits(
+        self, session_id: UUID
+    ) -> tuple[BreakthroughTechniqueDebit, ...]:
+        rows = (
+            await self._session.scalars(
+                select(BreakthroughTechniqueDebitRow)
+                .where(BreakthroughTechniqueDebitRow.session_id == session_id)
+                .order_by(BreakthroughTechniqueDebitRow.life_technique_id)
+            )
+        ).all()
+        return tuple(_breakthrough_debit(row) for row in rows)
 
     async def update_session_frozen_snapshot(
         self,
@@ -689,6 +722,17 @@ def _session_technique(row: CultivationSessionTechniqueRow) -> SessionTechnique:
         frozen_capacity=row.frozen_capacity,
         frozen_invested=row.frozen_invested,
         frozen_full_mastery_seconds=row.frozen_full_mastery_seconds,
+    )
+
+
+def _breakthrough_debit(row: BreakthroughTechniqueDebitRow) -> BreakthroughTechniqueDebit:
+    return BreakthroughTechniqueDebit(
+        session_id=row.session_id,
+        life_id=row.life_id,
+        life_technique_id=row.life_technique_id,
+        allocated_amount=row.allocated_amount,
+        balance_before=row.balance_before,
+        balance_after=row.balance_after,
     )
 
 

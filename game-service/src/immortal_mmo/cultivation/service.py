@@ -1,5 +1,6 @@
 import hashlib
 import json
+import secrets
 from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
@@ -10,11 +11,21 @@ from immortal_mmo.core.errors import ConflictError, NotFoundError, RuleViolation
 from immortal_mmo.core.uow import UnitOfWorkFactory
 from immortal_mmo.cultivation.allocation import allocate_equal
 from immortal_mmo.cultivation.area_catalog import AreaCatalog, load_area_catalog
+from immortal_mmo.cultivation.breakthrough import resolve_breakthrough_decision
+from immortal_mmo.cultivation.breakthrough_catalog import (
+    BreakthroughCatalog,
+    load_breakthrough_catalog,
+)
 from immortal_mmo.cultivation.models import (
+    BreakthroughTechniqueDebit,
     CultivationSession,
     RealmEntry,
     SessionTechnique,
     TechniqueInvestmentChange,
+)
+from immortal_mmo.cultivation.penalties import (
+    allocate_breakthrough_penalty,
+    breakthrough_penalty,
 )
 from immortal_mmo.cultivation.progression import (
     group_for_level,
@@ -23,7 +34,9 @@ from immortal_mmo.cultivation.progression import (
 )
 from immortal_mmo.cultivation.realm_catalog import RealmCatalog
 from immortal_mmo.cultivation.schemas import (
+    BreakthroughSnapshotResponse,
     CultivationSnapshotResponse,
+    ItemAdjustmentResponse,
     SeclusionSnapshotResponse,
     TechniqueMutationResponse,
 )
@@ -39,6 +52,7 @@ DEFAULT_TRANSFER_PROFILES = {
     "Trans_Gongfa_02": 8_000,
 }
 TECHNIQUE_MUTATION_CONTENT_VERSION = "technique-mutation:v1"
+BREAKTHROUGH_CONTENT_VERSION = "breakthrough:v1"
 
 
 class CultivationMutationConflictError(ConflictError):
@@ -56,6 +70,16 @@ class CultivationTechniqueRuleError(RuleViolationError):
     message = "Technique mutation is not allowed."
 
 
+class CultivationBreakthroughConflictError(ConflictError):
+    code = "cultivation.breakthrough_conflict"
+    message = "Breakthrough conflicts with current cultivation state."
+
+
+class CultivationBreakthroughRuleError(RuleViolationError):
+    code = "cultivation.breakthrough_rule_violation"
+    message = "Breakthrough requirements are not satisfied."
+
+
 class CultivationService:
     def __init__(
         self,
@@ -63,8 +87,11 @@ class CultivationService:
         realm_catalog: RealmCatalog,
         *,
         area_catalog: AreaCatalog | None = None,
+        breakthrough_catalog: BreakthroughCatalog | None = None,
         clock: Callable[[], datetime] | None = None,
         transfer_profiles: Mapping[str, int] | None = None,
+        basis_point_roll: Callable[[], int] | None = None,
+        entropy_source: Callable[[], bytes] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._realm_catalog = realm_catalog
@@ -72,6 +99,13 @@ class CultivationService:
             Path(__file__).resolve().parent / "areas.json"
         )
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._breakthrough_catalog = breakthrough_catalog or load_breakthrough_catalog(
+            Path(__file__).resolve().parent / "breakthrough_rules.json"
+        )
+        self._basis_point_roll = basis_point_roll or (
+            lambda: secrets.randbelow(10_000) + 1
+        )
+        self._entropy_source = entropy_source or (lambda: secrets.token_bytes(32))
         configured_profiles = transfer_profiles or DEFAULT_TRANSFER_PROFILES
         if not configured_profiles or any(
             not profile_id
@@ -335,6 +369,361 @@ class CultivationService:
             await uow.commit()
         return response
 
+    async def adjust_item(
+        self,
+        *,
+        account_id: UUID,
+        item_code: str,
+        delta_quantity: int,
+        idempotency_key: UUID,
+    ) -> ItemAdjustmentResponse:
+        if item_code != "foundation_pill":
+            raise CultivationTechniqueRuleError("Unsupported administrative item")
+        if delta_quantity <= 0:
+            raise CultivationTechniqueRuleError("Item adjustment must be positive")
+        async with self._uow_factory() as uow:
+            account = await uow.players.lock_account(account_id)
+            if account is None:
+                raise PlayerAccountNotFoundError()
+            life = await uow.players.get_current_life(account_id, for_update=True)
+            if life is None:
+                raise PlayerLifecycleError()
+            entry = await uow.items.adjust(
+                life_id=life.life_id,
+                item_code=item_code,
+                delta_quantity=delta_quantity,
+                operation_id=idempotency_key,
+                occurred_at=self._clock(),
+            )
+            if entry.delta_quantity != delta_quantity:
+                raise CultivationMutationConflictError(
+                    "Item adjustment idempotency key was reused"
+                )
+            await uow.commit()
+        return ItemAdjustmentResponse(
+            item_code=item_code,
+            delta_quantity=delta_quantity,
+            balance_after=entry.balance_after,
+        )
+
+    async def start_breakthrough(
+        self,
+        *,
+        account_id: UUID,
+        pill_count: int,
+        idempotency_key: UUID,
+    ) -> BreakthroughSnapshotResponse:
+        request_fingerprint = _request_fingerprint(
+            {"rule_id": "qi_to_foundation", "pill_count": pill_count}
+        )
+        now = self._clock()
+        async with self._uow_factory() as uow:
+            account = await uow.players.lock_account(account_id)
+            if account is None:
+                raise PlayerAccountNotFoundError()
+            facts = await uow.players.get_current_life_facts(account_id, for_update=True)
+            if facts is None:
+                raise PlayerLifecycleError()
+            replay = await uow.cultivation.get_session_by_idempotency(
+                facts.life_id, idempotency_key
+            )
+            if replay is not None:
+                if (
+                    replay.session_kind != "breakthrough"
+                    or replay.request_fingerprint != request_fingerprint
+                ):
+                    raise CultivationBreakthroughConflictError(
+                        "Breakthrough idempotency key was reused"
+                    )
+                await uow.rollback()
+                return _breakthrough_snapshot(replay)
+
+            state = await uow.cultivation.get_or_create_state(
+                facts.life_id, for_update=True
+            )
+            if state.active_session_id is not None:
+                raise CultivationBreakthroughConflictError(
+                    "Another cultivation session is already active"
+                )
+            rule = self._breakthrough_catalog.rule("qi_to_foundation")
+            if state.current_level not in rule.source_levels:
+                raise CultivationBreakthroughRuleError(
+                    "Current realm is not eligible for foundation breakthrough"
+                )
+            if facts.spirit_root is None:
+                raise CultivationBreakthroughRuleError(
+                    "Spirit root must be detected before breakthrough"
+                )
+            group_investments = await uow.cultivation.get_group_investments(
+                facts.life_id
+            )
+            chain = await uow.cultivation.get_active_realm_chain(
+                facts.life_id, for_update=True
+            )
+            valid_chain = valid_active_chain(chain, group_investments)
+            progress = project_progress(
+                catalog=self._realm_catalog,
+                current_level=state.current_level,
+                group_investments=group_investments,
+                active_entry=valid_chain[-1] if valid_chain else None,
+                unrefined_reserve=state.unrefined_cultivation,
+                revision=state.revision,
+            )
+            if not progress.progress_full:
+                raise CultivationBreakthroughRuleError(
+                    "Current realm cultivation must be full"
+                )
+            primary_roll = self._basis_point_roll()
+            secondary_roll = self._basis_point_roll()
+            try:
+                decision = resolve_breakthrough_decision(
+                    catalog=self._breakthrough_catalog,
+                    rule=rule,
+                    source_level=state.current_level,
+                    root_count=len(facts.spirit_root.base_element_codes),
+                    pill_count=pill_count,
+                    primary_roll=primary_roll,
+                    secondary_roll=secondary_roll,
+                )
+            except (KeyError, ValueError) as error:
+                raise CultivationBreakthroughRuleError(str(error)) from error
+
+            techniques = tuple(
+                technique
+                for technique in await uow.cultivation.get_techniques(
+                    facts.life_id, for_update=True
+                )
+                if technique.status == "active"
+                and technique.group_code == group_for_level(state.current_level)
+                and technique.invested_amount > 0
+            )
+            if not techniques:
+                raise CultivationBreakthroughRuleError(
+                    "Breakthrough requires invested backing techniques"
+                )
+            source_max_exp = self._realm_catalog.level(state.current_level).max_exp
+            penalty_total = breakthrough_penalty(source_max_exp)
+            entropy = self._entropy_source()
+            allocations = allocate_breakthrough_penalty(
+                total=penalty_total,
+                investments={
+                    technique.life_technique_id: technique.invested_amount
+                    for technique in techniques
+                },
+                entropy=entropy,
+            )
+            session_id = uuid4()
+            source_floor = (
+                self._realm_catalog.qi_cumulative_totals()[state.current_level]
+                if state.current_level <= 13
+                else progress.current_progress
+            )
+            frozen_snapshot: dict[str, object] = {
+                "rule_id": decision.rule_id,
+                "profile_id": decision.profile_id,
+                "pill_count": decision.pill_count,
+                "success_basis_points": decision.success_basis_points,
+                "primary_roll": decision.primary_roll,
+                "secondary_roll": decision.secondary_roll,
+                "outcome": decision.outcome,
+                "failure_target_level": decision.failure_target_level,
+                "root_quality": facts.spirit_root.quality_code,
+                "root_count": len(facts.spirit_root.base_element_codes),
+                "source_max_exp": source_max_exp,
+                "source_floor": source_floor,
+                "source_group": group_for_level(state.current_level),
+                "penalty_total": penalty_total,
+                "penalty_strategy": "hmac_sha256_v1",
+                "penalty_entropy": entropy.hex(),
+                "technique_debits": {
+                    str(technique_id): amount
+                    for technique_id, amount in allocations.items()
+                },
+            }
+            session = CultivationSession(
+                session_id=session_id,
+                life_id=facts.life_id,
+                session_kind="breakthrough",
+                status="pending",
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                area_id=None,
+                content_version=BREAKTHROUGH_CONTENT_VERSION,
+                source_level=state.current_level,
+                target_level=rule.target_level,
+                frozen_snapshot=frozen_snapshot,
+                cumulative_elapsed_seconds=0,
+                cumulative_generated=0,
+                cumulative_reserve_consumed=0,
+                cumulative_retained=0,
+                started_at=now,
+                completes_at=now + timedelta(seconds=rule.duration_seconds),
+                settled_at=None,
+                revision=1,
+            )
+            await uow.cultivation.start_session(session, ())
+            await uow.cultivation.store_breakthrough_debits(
+                tuple(
+                    BreakthroughTechniqueDebit(
+                        session_id=session_id,
+                        life_id=facts.life_id,
+                        life_technique_id=technique.life_technique_id,
+                        allocated_amount=allocations[technique.life_technique_id],
+                        balance_before=technique.invested_amount,
+                        balance_after=(
+                            technique.invested_amount
+                            - allocations[technique.life_technique_id]
+                        ),
+                    )
+                    for technique in techniques
+                )
+            )
+            await uow.items.consume(
+                life_id=facts.life_id,
+                item_code=rule.required_item_id,
+                quantity=pill_count,
+                operation_id=session_id,
+                session_id=session_id,
+                occurred_at=now,
+            )
+            await uow.commit()
+        return _breakthrough_snapshot(session)
+
+    async def breakthrough_status(
+        self, *, account_id: UUID, session_id: UUID
+    ) -> BreakthroughSnapshotResponse:
+        async with self._uow_factory() as uow:
+            life = await uow.players.get_current_life(account_id, for_update=False)
+            if life is None:
+                raise PlayerLifecycleError()
+            session = await uow.cultivation.get_session(session_id, for_update=False)
+            if (
+                session is None
+                or session.life_id != life.life_id
+                or session.session_kind != "breakthrough"
+            ):
+                raise CultivationTechniqueNotFoundError(
+                    "Breakthrough session was not found"
+                )
+            await uow.rollback()
+        return _breakthrough_snapshot(session)
+
+    async def settle_breakthrough(
+        self, *, account_id: UUID, session_id: UUID
+    ) -> BreakthroughSnapshotResponse:
+        now = self._clock()
+        async with self._uow_factory() as uow:
+            life = await uow.players.get_current_life(account_id, for_update=True)
+            if life is None:
+                raise PlayerLifecycleError()
+            session = await uow.cultivation.get_session(session_id, for_update=True)
+            if (
+                session is None
+                or session.life_id != life.life_id
+                or session.session_kind != "breakthrough"
+            ):
+                raise CultivationTechniqueNotFoundError(
+                    "Breakthrough session was not found"
+                )
+            if session.status not in {"pending", "active"}:
+                await uow.rollback()
+                return _breakthrough_snapshot(session)
+            if now < session.completes_at:
+                raise CultivationBreakthroughRuleError(
+                    "Breakthrough session has not completed"
+                )
+            outcome = str(session.frozen_snapshot["outcome"])
+            group_investments = await uow.cultivation.get_group_investments(life.life_id)
+            active_chain = await uow.cultivation.get_active_realm_chain(
+                life.life_id, for_update=True
+            )
+            parent = active_chain[-1] if active_chain else None
+            if outcome in {"success", "failure_advance"}:
+                target_level = (
+                    int(session.target_level)
+                    if outcome == "success"
+                    else int(session.frozen_snapshot["failure_target_level"])
+                )
+                target_group = group_for_level(target_level)
+                reentry = await uow.cultivation.has_realm_transition_history(
+                    life.life_id,
+                    source_level=session.source_level,
+                    target_level=target_level,
+                )
+                entry = RealmEntry(
+                    realm_entry_id=uuid4(),
+                    life_id=life.life_id,
+                    generation=(
+                        await uow.cultivation.get_latest_realm_generation(life.life_id)
+                    )
+                    + 1,
+                    parent_entry_id=None if parent is None else parent.realm_entry_id,
+                    source_level=session.source_level,
+                    target_level=target_level,
+                    source_group=str(session.frozen_snapshot["source_group"]),
+                    target_group=target_group,
+                    source_floor=int(session.frozen_snapshot["source_floor"]),
+                    target_baseline=group_investments.get(target_group, 0),
+                    transition_kind=(
+                        "reentry"
+                        if outcome == "success" and reentry
+                        else "breakthrough"
+                        if outcome == "success"
+                        else "failure_advance"
+                    ),
+                    transition_session_id=session_id,
+                    status="active",
+                    invalidated_at=None,
+                )
+                await uow.cultivation.append_realm_entry(entry)
+            else:
+                debits = await uow.cultivation.get_breakthrough_debits(session_id)
+                changes = tuple(
+                    TechniqueInvestmentChange(
+                        debit.life_technique_id,
+                        -debit.allocated_amount,
+                        "breakthrough_penalty",
+                    )
+                    for debit in debits
+                    if debit.allocated_amount > 0
+                )
+                if changes:
+                    await uow.cultivation.apply_technique_investments(
+                        life_id=life.life_id,
+                        operation_id=session_id,
+                        session_id=session_id,
+                        changes=changes,
+                        occurred_at=now,
+                    )
+                group_investments = await uow.cultivation.get_group_investments(
+                    life.life_id
+                )
+                valid_chain = valid_active_chain(active_chain, group_investments)
+                if len(valid_chain) != len(active_chain):
+                    await uow.cultivation.invalidate_realm_suffix(
+                        life_id=life.life_id,
+                        retained_entry_ids=tuple(
+                            entry.realm_entry_id for entry in valid_chain
+                        ),
+                        current_level=(
+                            valid_chain[-1].target_level if valid_chain else 1
+                        ),
+                        invalidated_at=now,
+                    )
+            updated = await uow.cultivation.update_session_settlement(
+                session_id=session_id,
+                cumulative_elapsed_seconds=int(
+                    max((now - session.started_at).total_seconds(), 0)
+                ),
+                cumulative_generated=session.cumulative_generated,
+                cumulative_reserve_consumed=session.cumulative_reserve_consumed,
+                cumulative_retained=session.cumulative_retained,
+                status="completed" if outcome == "success" else "failed",
+                settled_at=now,
+            )
+            await uow.commit()
+        return _breakthrough_snapshot(updated)
+
     async def start_seclusion(
         self,
         *,
@@ -584,6 +973,28 @@ def _seclusion_snapshot(session: CultivationSession) -> SeclusionSnapshotRespons
         cumulative_generated=session.cumulative_generated,
         cumulative_reserve_consumed=session.cumulative_reserve_consumed,
         cumulative_retained=session.cumulative_retained,
+    )
+
+
+def _breakthrough_snapshot(session: CultivationSession) -> BreakthroughSnapshotResponse:
+    if session.target_level is None:
+        raise RuntimeError("Breakthrough session has no target level")
+    frozen = session.frozen_snapshot
+    return BreakthroughSnapshotResponse(
+        session_id=session.session_id,
+        status=session.status,
+        source_level=session.source_level,
+        target_level=session.target_level,
+        pill_count=int(frozen["pill_count"]),
+        success_basis_points=int(frozen["success_basis_points"]),
+        primary_roll=int(frozen["primary_roll"]),
+        secondary_roll=(
+            None if frozen.get("secondary_roll") is None else int(frozen["secondary_roll"])
+        ),
+        outcome=str(frozen["outcome"]),
+        started_at=session.started_at,
+        completes_at=session.completes_at,
+        settled_at=session.settled_at,
     )
 
 

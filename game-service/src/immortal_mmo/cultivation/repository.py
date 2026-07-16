@@ -4,6 +4,7 @@ from typing import Protocol
 from uuid import UUID
 
 from immortal_mmo.cultivation.models import (
+    BreakthroughTechniqueDebit,
     CombatCultivationCredit,
     CultivationSession,
     CultivationState,
@@ -76,6 +77,15 @@ class CultivationRepository(Protocol):
     ) -> CultivationSession | None: ...
 
     async def get_session_techniques(self, session_id: UUID) -> tuple[SessionTechnique, ...]: ...
+
+    async def store_breakthrough_debits(
+        self,
+        debits: tuple[BreakthroughTechniqueDebit, ...],
+    ) -> None: ...
+
+    async def get_breakthrough_debits(
+        self, session_id: UUID
+    ) -> tuple[BreakthroughTechniqueDebit, ...]: ...
 
     async def update_session_frozen_snapshot(
         self,

@@ -51,3 +51,35 @@ class TechniqueMutationResponse(BaseModel):
     transferred_amount: int
     destroyed_amount: int
     cultivation: CultivationSnapshotResponse
+
+
+class StartBreakthroughRequest(BaseModel):
+    pill_count: int = Field(ge=1, le=10)
+
+
+class BreakthroughSnapshotResponse(BaseModel):
+    contract_version: Literal[1] = 1
+    session_id: UUID
+    status: str
+    source_level: int
+    target_level: int
+    pill_count: int
+    success_basis_points: int
+    primary_roll: int
+    secondary_roll: int | None
+    outcome: Literal["success", "failure_advance", "failure_loss"]
+    started_at: datetime
+    completes_at: datetime
+    settled_at: datetime | None
+
+
+class ItemAdjustmentRequest(BaseModel):
+    item_code: Literal["foundation_pill"]
+    delta_quantity: int = Field(gt=0, le=1_000_000)
+
+
+class ItemAdjustmentResponse(BaseModel):
+    contract_version: Literal[1] = 1
+    item_code: str
+    delta_quantity: int
+    balance_after: int
