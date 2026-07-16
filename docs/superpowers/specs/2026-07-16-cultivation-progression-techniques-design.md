@@ -90,9 +90,10 @@ threshold.
 | 21 | 元婴中期 | 19,357,560 |
 | 22 | 元婴后期 | 116,145,360 |
 
-Levels 10 through 13 use iterative `floor(previous * 1.35)`, replacing the old
-level-13 spike. Their cumulative qi investment floors are
-`11,293 / 16,462 / 23,440 / 32,860`.
+Level 10 continues the prior curve as `floor(2,553 * 1.5) = 3,829`. Levels 11
+through 13 then use iterative `floor(previous * 1.35)`, replacing the old
+level-13 spike. The cumulative qi investment floors from level 1 through
+levels 10/11/12/13 are `11,293 / 16,462 / 23,440 / 32,860`.
 
 Level 14 remains the approved independent 筑基初期 anchor. Levels 16, 19, and
 22 preserve the cross-major floor pattern ×4, ×5, and ×6. Level 22's value is
