@@ -26,21 +26,28 @@ def allocate_equal(
     ordered_ids = sorted(capacities)
     allocations = {technique_uuid: 0 for technique_uuid in ordered_ids}
     active = [technique_uuid for technique_uuid in ordered_ids if capacities[technique_uuid] > 0]
-    amount_left = min(amount, sum(capacities.values()))
+    total_to_allocate = min(amount, sum(capacities.values()))
+    if not total_to_allocate or not active:
+        return allocations
 
-    while amount_left and active:
-        share, remainder = divmod(amount_left, len(active))
-        distributed = 0
-        next_active: list[UUID] = []
-        for index, technique_uuid in enumerate(active):
-            requested = share + (1 if index < remainder else 0)
-            available = capacities[technique_uuid] - allocations[technique_uuid]
-            granted = min(requested, available)
-            allocations[technique_uuid] += granted
-            distributed += granted
-            if allocations[technique_uuid] < capacities[technique_uuid]:
-                next_active.append(technique_uuid)
-        amount_left -= distributed
-        active = next_active
+    low, high = 0, max(capacities.values())
+    while low < high:
+        candidate = (low + high + 1) // 2
+        used = sum(min(capacities[technique_uuid], candidate) for technique_uuid in active)
+        if used <= total_to_allocate:
+            low = candidate
+        else:
+            high = candidate - 1
+
+    for technique_uuid in active:
+        allocations[technique_uuid] = min(capacities[technique_uuid], low)
+
+    remainder = total_to_allocate - sum(allocations.values())
+    for technique_uuid in active:
+        if not remainder:
+            break
+        if allocations[technique_uuid] < capacities[technique_uuid]:
+            allocations[technique_uuid] += 1
+            remainder -= 1
 
     return allocations

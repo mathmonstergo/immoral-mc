@@ -51,6 +51,15 @@ def test_equal_allocation_redistributes_full_technique_overflow() -> None:
     assert result == {uid(1): 2, uid(2): 5, uid(3): 4}
 
 
+def test_equal_allocation_does_not_reset_remainder_priority_after_saturation() -> None:
+    result = allocate_equal(
+        amount=5,
+        remaining_by_uuid={uid(1): 1, uid(2): 100, uid(3): 100},
+    )
+
+    assert result == {uid(1): 1, uid(2): 2, uid(3): 2}
+
+
 def test_equal_allocation_handles_mid_settlement_mastery_repeatedly() -> None:
     result = allocate_equal(
         amount=20,
