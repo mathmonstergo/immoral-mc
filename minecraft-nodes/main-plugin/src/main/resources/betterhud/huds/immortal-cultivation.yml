@@ -1,0 +1,10 @@
+immortal_cultivation:
+  layouts:
+    1:
+      name: immortal_cultivation_layout
+      gui:
+        x: 50
+        y: 100
+      pixel:
+        x: 0
+        y: -49

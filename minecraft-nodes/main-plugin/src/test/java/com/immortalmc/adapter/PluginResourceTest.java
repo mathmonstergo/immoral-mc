@@ -7,6 +7,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 
 class PluginResourceTest {
@@ -22,6 +23,7 @@ class PluginResourceTest {
                 "usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue|quest>"));
         assertTrue(pluginYml.contains("com.fasterxml.jackson.core:jackson-databind:2.18.2"));
         assertTrue(pluginYml.contains("org.xerial:sqlite-jdbc:3.53.2.0"));
+        assertTrue(pluginYml.contains("- BetterHud"));
         assertTrue(pluginYml.contains("- MythicMobs"));
     }
 
@@ -65,6 +67,50 @@ class PluginResourceTest {
         assertTrue(build.contains("io.lumine:Mythic-Dist:5.12.1"));
         assertTrue(!build.contains("Premium"));
         assertTrue(!build.contains("plugins-new-add"));
+    }
+
+    @Test
+    void packagedBetterHudResourcesDeclareTwoAuthoritativeBars() throws Exception {
+        String images = readResource("betterhud/images/immortal-cultivation.yml");
+        String layouts = readResource("betterhud/layouts/immortal-cultivation.yml");
+        String huds = readResource("betterhud/huds/immortal-cultivation.yml");
+        String texts = readResource("betterhud/texts/immortal-cultivation.yml");
+
+        assertTrue(images.contains("immortal_main_fill:"));
+        assertTrue(images.contains("value: immortal_current"));
+        assertTrue(images.contains("max: immortal_max"));
+        assertTrue(images.contains("immortal_reserve_fill:"));
+        assertTrue(images.contains("value: immortal_reserve"));
+        assertTrue(images.contains("max: immortal_reserve_cap"));
+        assertTrue(layouts.contains("pattern: \"[immortal_realm_name]\""));
+        assertTrue(layouts.contains("name: immortal_cultivation_font"));
+        assertTrue(layouts.contains("name: immortal_main_empty"));
+        assertTrue(layouts.contains("name: immortal_reserve_empty"));
+        assertTrue(huds.contains("immortal_cultivation:"));
+        assertTrue(huds.contains("name: immortal_cultivation_layout"));
+        assertTrue(texts.contains("immortal_cultivation_font:"));
+        assertTrue(texts.contains("use-unifont: true"));
+    }
+
+    @Test
+    void packagedBetterHudTexturesHaveMinimalExpectedDimensionsAndAlpha() throws Exception {
+        assertPng("betterhud/assets/immortal/main-empty.png", 180, 8);
+        assertPng("betterhud/assets/immortal/main-fill.png", 180, 8);
+        assertPng("betterhud/assets/immortal/reserve-empty.png", 180, 3);
+        assertPng("betterhud/assets/immortal/reserve-fill.png", 180, 3);
+    }
+
+    private static void assertPng(String path, int width, int height) throws IOException {
+        try (InputStream input = PluginResourceTest.class.getClassLoader().getResourceAsStream(path)) {
+            if (input == null) {
+                throw new IOException("Missing resource: " + path);
+            }
+            var image = ImageIO.read(input);
+            assertTrue(image != null);
+            assertTrue(image.getColorModel().hasAlpha());
+            assertTrue(image.getWidth() == width);
+            assertTrue(image.getHeight() == height);
+        }
     }
 
     private static String readResource(String path) throws IOException {

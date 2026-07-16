@@ -1,0 +1,26 @@
+immortal_cultivation_layout:
+  images:
+    1:
+      name: immortal_main_empty
+      x: -90
+      y: 0
+    2:
+      name: immortal_main_fill
+      x: -90
+      y: 0
+    3:
+      name: immortal_reserve_empty
+      x: -90
+      y: 10
+    4:
+      name: immortal_reserve_fill
+      x: -90
+      y: 10
+  texts:
+    1:
+      name: immortal_cultivation_font
+      pattern: "[immortal_realm_name]"
+      align: center
+      x: 0
+      y: -11
+      scale: 0.75

@@ -1,0 +1,33 @@
+immortal_main_empty:
+  type: single
+  file: immortal/main-empty.png
+
+immortal_main_fill:
+  type: listener
+  file: immortal/main-fill.png
+  split: 100
+  split-type: left
+  setting:
+    listener:
+      class: placeholder
+      value: immortal_current
+      max: immortal_max
+
+immortal_reserve_empty:
+  type: single
+  file: immortal/reserve-empty.png
+
+immortal_reserve_fill:
+  type: listener
+  file: immortal/reserve-fill.png
+  split: 100
+  split-type: left
+  setting:
+    listener:
+      class: placeholder
+      value: immortal_reserve
+      max: immortal_reserve_cap
+      lazy: true
+      delay: 1
+      multiplier: 0.25
+      initial-value: immortal_reserve_ratio

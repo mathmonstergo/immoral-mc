@@ -2,6 +2,7 @@ package com.immortalmc.adapter.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -9,6 +10,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
+import java.util.Arrays;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -22,7 +24,12 @@ public final class GameServiceClient {
     private final ObjectMapper objectMapper;
 
     public GameServiceClient(URI baseUri, HttpClient httpClient) {
-        this(baseUri, httpClient, new ObjectMapper().setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE));
+        this(
+                baseUri,
+                httpClient,
+                new ObjectMapper()
+                        .registerModule(new JavaTimeModule())
+                        .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE));
     }
 
     GameServiceClient(URI baseUri, HttpClient httpClient, ObjectMapper objectMapper) {
@@ -128,6 +135,141 @@ public final class GameServiceClient {
                                 error));
                     }
                 });
+    }
+
+    public CompletableFuture<CultivationSnapshot> fetchCultivation(UUID accountId) {
+        Objects.requireNonNull(accountId, "accountId");
+        return sendGet(
+                "/api/v1/players/" + accountId + "/current-life/cultivation",
+                CultivationSnapshot.class,
+                "cultivation snapshot");
+    }
+
+    public CompletableFuture<List<TechniqueSnapshot>> fetchTechniques(UUID accountId) {
+        Objects.requireNonNull(accountId, "accountId");
+        return sendGet(
+                        "/api/v1/players/" + accountId + "/current-life/cultivation/techniques",
+                        TechniqueSnapshot[].class,
+                        "cultivation techniques")
+                .thenApply(snapshots -> List.copyOf(Arrays.asList(snapshots)));
+    }
+
+    public CompletableFuture<SeclusionSnapshot> startSeclusion(
+            UUID accountId, SeclusionRequest request, UUID operationId) {
+        Objects.requireNonNull(accountId, "accountId");
+        return sendMutation(
+                "/api/v1/players/" + accountId + "/current-life/cultivation/seclusions",
+                "POST",
+                request,
+                operationId,
+                SeclusionSnapshot.class,
+                "seclusion start");
+    }
+
+    public CompletableFuture<SeclusionSnapshot> fetchSeclusion(UUID accountId, UUID sessionId) {
+        Objects.requireNonNull(accountId, "accountId");
+        Objects.requireNonNull(sessionId, "sessionId");
+        return sendGet(
+                "/api/v1/players/" + accountId + "/current-life/cultivation/seclusions/" + sessionId,
+                SeclusionSnapshot.class,
+                "seclusion status");
+    }
+
+    public CompletableFuture<SeclusionSnapshot> settleSeclusion(
+            UUID accountId, UUID sessionId, UUID operationId) {
+        Objects.requireNonNull(accountId, "accountId");
+        Objects.requireNonNull(sessionId, "sessionId");
+        return sendNoBodyMutation(
+                "/api/v1/players/" + accountId + "/current-life/cultivation/seclusions/" + sessionId + "/settle",
+                "POST",
+                operationId,
+                SeclusionSnapshot.class,
+                "seclusion settlement");
+    }
+
+    public CompletableFuture<BreakthroughSnapshot> startBreakthrough(
+            UUID accountId, BreakthroughRequest request, UUID operationId) {
+        Objects.requireNonNull(accountId, "accountId");
+        return sendMutation(
+                "/api/v1/players/" + accountId + "/current-life/cultivation/breakthroughs",
+                "POST",
+                request,
+                operationId,
+                BreakthroughSnapshot.class,
+                "breakthrough start");
+    }
+
+    public CompletableFuture<BreakthroughSnapshot> fetchBreakthrough(UUID accountId, UUID sessionId) {
+        Objects.requireNonNull(accountId, "accountId");
+        Objects.requireNonNull(sessionId, "sessionId");
+        return sendGet(
+                "/api/v1/players/" + accountId + "/current-life/cultivation/breakthroughs/" + sessionId,
+                BreakthroughSnapshot.class,
+                "breakthrough status");
+    }
+
+    public CompletableFuture<BreakthroughSnapshot> settleBreakthrough(
+            UUID accountId, UUID sessionId, UUID operationId) {
+        Objects.requireNonNull(accountId, "accountId");
+        Objects.requireNonNull(sessionId, "sessionId");
+        return sendNoBodyMutation(
+                "/api/v1/players/" + accountId + "/current-life/cultivation/breakthroughs/" + sessionId + "/settle",
+                "POST",
+                operationId,
+                BreakthroughSnapshot.class,
+                "breakthrough settlement");
+    }
+
+    public CompletableFuture<ItemAdjustmentSnapshot> adjustItem(
+            UUID accountId, ItemAdjustmentRequest request, UUID operationId) {
+        Objects.requireNonNull(accountId, "accountId");
+        return sendMutation(
+                "/api/v1/players/" + accountId + "/current-life/items/adjustments",
+                "POST",
+                request,
+                operationId,
+                ItemAdjustmentSnapshot.class,
+                "item adjustment");
+    }
+
+    private <T> CompletableFuture<T> sendGet(String path, Class<T> responseType, String operationName) {
+        HttpRequest request = newRequestBuilder(path).GET().build();
+        return httpClient
+                .sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenApply(response -> parseJsonResponse(response, responseType, operationName));
+    }
+
+    private <T> CompletableFuture<T> sendMutation(
+            String path,
+            String method,
+            Object body,
+            UUID operationId,
+            Class<T> responseType,
+            String operationName) {
+        Objects.requireNonNull(body, "body");
+        Objects.requireNonNull(operationId, "operationId");
+        return sendJson(
+                newRequestBuilder(path).header("Idempotency-Key", operationId.toString()),
+                method,
+                body,
+                responseType,
+                operationName);
+    }
+
+    private <T> CompletableFuture<T> sendNoBodyMutation(
+            String path,
+            String method,
+            UUID operationId,
+            Class<T> responseType,
+            String operationName) {
+        Objects.requireNonNull(operationId, "operationId");
+        HttpRequest request = newRequestBuilder(path)
+                .header("Idempotency-Key", operationId.toString())
+                .method(method, HttpRequest.BodyPublishers.noBody())
+                .build();
+        return httpClient
+                .sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenApply(response -> parseJsonResponse(response, responseType, operationName));
     }
 
     private CompletableFuture<QuestMutationResult> mutateQuest(

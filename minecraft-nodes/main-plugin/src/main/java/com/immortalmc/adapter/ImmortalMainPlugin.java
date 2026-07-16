@@ -50,8 +50,11 @@ import com.immortalmc.adapter.outbox.OutboxDeliveryWorker;
 import com.immortalmc.adapter.outbox.SqliteKillOutbox;
 import com.immortalmc.adapter.presentation.BukkitQuestOfferLabelPresenter;
 import com.immortalmc.adapter.presentation.BukkitQuestScoreboardView;
+import com.immortalmc.adapter.presentation.BukkitCultivationRewardPresenter;
 import com.immortalmc.adapter.presentation.BukkitSpiritRootParticlePresenter;
 import com.immortalmc.adapter.presentation.BukkitSpiritRootTitlePresenter;
+import com.immortalmc.adapter.presentation.BetterHudCultivationIntegration;
+import com.immortalmc.adapter.presentation.CultivationProjectionStore;
 import com.immortalmc.adapter.presentation.QuestScoreboardRenderer;
 import com.immortalmc.adapter.presentation.SpiritRootParticlePlanner;
 import com.immortalmc.adapter.quest.QuestInteractionCache;
@@ -94,6 +97,9 @@ public final class ImmortalMainPlugin extends JavaPlugin {
     private SqliteKillOutbox combatOutbox;
     private OutboxDeliveryWorker combatDeliveryWorker;
     private MythicMobsIntegrationHandle mythicMobsIntegration;
+    private CultivationProjectionStore cultivationProjections;
+    private BetterHudCultivationIntegration cultivationHud;
+    private BukkitCultivationRewardPresenter cultivationRewardPresenter;
 
     @Override
     public void onEnable() {
@@ -112,6 +118,13 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 new GameServiceClient(settings.gameServiceBaseUri(), HttpClient.newHttpClient());
         QuestProviderCatalogCache questProviderCatalog = new QuestProviderCatalogCache();
         sessionCache = new PlayerSessionCache();
+        cultivationProjections = new CultivationProjectionStore();
+        cultivationHud = BetterHudCultivationIntegration.create(this, cultivationProjections, adapterLogger);
+        cultivationHud.start();
+        cultivationRewardPresenter = new BukkitCultivationRewardPresenter(
+                this,
+                playerId -> refreshCultivation(playerId, gameServiceClient, adapterLogger),
+                adapterLogger);
         CombatAttributionTracker combatTracker = new CombatAttributionTracker(
                 combatSettings.maxSourceAge(),
                 combatSettings.maxActiveTargets());
@@ -136,7 +149,9 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                         Duration.ofSeconds(1),
                         Duration.ofSeconds(60)),
                 Clock.systemUTC(),
-                adapterLogger);
+                adapterLogger,
+                cultivationRewardPresenter,
+                task -> getServer().getScheduler().runTask(this, task));
         combatAttributionListener = new BukkitCombatAttributionListener(
                 combatTracker,
                 sessionCache,
@@ -198,7 +213,16 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 sessionCache,
                 adapterLogger,
                 task -> getServer().getScheduler().runTask(this, task),
-                result -> refreshLoginQuest(result, adapterLogger));
+                result -> {
+                    cultivationProjections.beginLife(
+                            result.account().minecraftUuid(),
+                            result.currentLife().lifeId());
+                    refreshLoginQuest(result, adapterLogger);
+                    refreshCultivation(
+                            result.account().minecraftUuid(),
+                            gameServiceClient,
+                            adapterLogger);
+                });
         BukkitSpiritRootParticlePresenter spiritRootParticlePresenter =
                 new BukkitSpiritRootParticlePresenter(new SpiritRootParticlePlanner());
         BukkitSpiritRootTitlePresenter spiritRootTitlePresenter = new BukkitSpiritRootTitlePresenter();
@@ -295,6 +319,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         refreshQuestProviderCatalog(gameServiceClient, questProviderCatalog, adapterLogger);
 
         getServer().getPluginManager().registerEvents(new ImmortalPlayerJoinListener(playerJoinLoginService), this);
+        getServer().getPluginManager().registerEvents(cultivationRewardPresenter, this);
         getServer().getPluginManager().registerEvents(
                 new ImmortalPlayerLifecycleListener(
                         this::cleanupPlayer,
@@ -366,6 +391,9 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         if (sessionCache != null) {
             sessionCache.clear();
         }
+        if (cultivationProjections != null) {
+            cultivationProjections.clear();
+        }
     }
 
     private void refreshLoginQuest(PlayerLoginResult result, AdapterLogger logger) {
@@ -387,6 +415,38 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 });
     }
 
+    private void refreshCultivation(
+            UUID playerId,
+            GameServiceClient gameServiceClient,
+            AdapterLogger logger) {
+        PlayerLoginResult session = sessionCache.findByMinecraftUuid(playerId).orElse(null);
+        if (session == null) {
+            return;
+        }
+        UUID accountId = session.account().accountId();
+        UUID lifeId = session.currentLife().lifeId();
+        gameServiceClient.fetchCultivation(accountId).whenComplete((snapshot, error) ->
+                getServer().getScheduler().runTask(this, () -> {
+                    if (error != null) {
+                        logger.warn("cultivation_projection_refresh_failed player_uuid="
+                                + playerId
+                                + " account_id="
+                                + accountId
+                                + " reason="
+                                + error.getMessage());
+                        return;
+                    }
+                    PlayerLoginResult current = sessionCache.findByMinecraftUuid(playerId).orElse(null);
+                    if (current == null
+                            || !current.account().accountId().equals(accountId)
+                            || !current.currentLife().lifeId().equals(lifeId)) {
+                        return;
+                    }
+                    cultivationProjections.confirm(playerId, lifeId, snapshot);
+                    cultivationHud.refresh(playerId);
+                }));
+    }
+
     private void refreshQuestProviderCatalog(
             GameServiceClient gameServiceClient,
             QuestProviderCatalogCache catalogCache,
@@ -406,6 +466,8 @@ public final class ImmortalMainPlugin extends JavaPlugin {
     }
 
     private void cleanupPlayer(UUID playerId) {
+        cultivationHud.remove(playerId);
+        cultivationProjections.remove(playerId);
         sessionCache.remove(playerId);
         questRequests.clearPlayer(playerId);
         questNpcCoordinator.clearPlayer(playerId);

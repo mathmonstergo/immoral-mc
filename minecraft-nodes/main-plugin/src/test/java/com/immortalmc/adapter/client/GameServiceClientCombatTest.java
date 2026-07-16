@@ -50,7 +50,8 @@ class GameServiceClientCombatTest {
                                       "outcome":"accepted",
                                       "kill_event_id":"33333333-3333-4333-8333-333333333333",
                                       "life_id":"22222222-2222-4222-8222-222222222222",
-                                      "reward_amount":12,
+                                      "configured_reward_amount":12,
+                                      "credited_cultivation_amount":0,
                                       "unrefined_balance":120
                                     }]}
                                     """);
@@ -70,7 +71,8 @@ class GameServiceClientCombatTest {
                     assertEquals("damage_over_time", event.get("attribution_kind").textValue());
                     assertFalse(event.has("reward_amount"));
                     assertEquals("accepted", response.results().getFirst().outcome());
-                    assertEquals(12L, response.results().getFirst().rewardAmount());
+                    assertEquals(12L, response.results().getFirst().configuredRewardAmount());
+                    assertEquals(0L, response.results().getFirst().creditedCultivationAmount());
                     assertEquals(120L, response.results().getFirst().unrefinedBalance());
                 });
     }

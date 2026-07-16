@@ -1,14 +1,19 @@
 package com.immortalmc.adapter.outbox;
 
 import com.immortalmc.adapter.client.CombatKillEventRequest;
+import com.immortalmc.adapter.client.CombatKillBatchResponse;
+import com.immortalmc.adapter.client.CombatKillResult;
 import com.immortalmc.adapter.client.GameServiceException;
 import com.immortalmc.adapter.logging.AdapterLogger;
+import com.immortalmc.adapter.presentation.CultivationRewardPresenter;
 import java.io.IOException;
 import java.net.http.HttpTimeoutException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -19,6 +24,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.DoubleSupplier;
+import java.util.function.Consumer;
 
 public final class OutboxDeliveryWorker implements AutoCloseable {
     private final SqliteKillOutbox outbox;
@@ -26,6 +32,8 @@ public final class OutboxDeliveryWorker implements AutoCloseable {
     private final OutboxDeliveryPolicy policy;
     private final Clock clock;
     private final AdapterLogger logger;
+    private final CultivationRewardPresenter rewardPresenter;
+    private final Consumer<Runnable> mainThreadDispatcher;
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean inFlight = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -37,12 +45,16 @@ public final class OutboxDeliveryWorker implements AutoCloseable {
             CombatBatchSender sender,
             OutboxDeliveryPolicy policy,
             Clock clock,
-            AdapterLogger logger) {
+            AdapterLogger logger,
+            CultivationRewardPresenter rewardPresenter,
+            Consumer<Runnable> mainThreadDispatcher) {
         this.outbox = Objects.requireNonNull(outbox, "outbox");
         this.sender = Objects.requireNonNull(sender, "sender");
         this.policy = Objects.requireNonNull(policy, "policy");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.logger = Objects.requireNonNull(logger, "logger");
+        this.rewardPresenter = Objects.requireNonNull(rewardPresenter, "rewardPresenter");
+        this.mainThreadDispatcher = Objects.requireNonNull(mainThreadDispatcher, "mainThreadDispatcher");
         this.scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "immortalmc-combat-outbox-delivery");
             thread.setDaemon(true);
@@ -65,7 +77,10 @@ public final class OutboxDeliveryWorker implements AutoCloseable {
                             .map(KillOutboxRow::request)
                             .toList();
                     return sender.send(requests)
-                            .thenCompose(response -> acknowledge(rows))
+                            .thenCompose(response -> {
+                                dispatchAcceptedPresentations(rows, response);
+                                return acknowledge(rows);
+                            })
                             .exceptionallyCompose(error -> handleFailure(rows, unwrap(error)));
                 });
         activeRun = result;
@@ -113,6 +128,39 @@ public final class OutboxDeliveryWorker implements AutoCloseable {
     private CompletableFuture<DeliveryRun> acknowledge(List<KillOutboxRow> rows) {
         return outbox.acknowledge(rows.stream().map(row -> row.request().eventId()).toList())
                 .thenApply(ignored -> new DeliveryRun(rows.size(), rows.size(), 0, 0, false));
+    }
+
+    private void dispatchAcceptedPresentations(
+            List<KillOutboxRow> rows,
+            CombatKillBatchResponse response) {
+        Map<UUID, KillOutboxRow> rowsByEventId = new HashMap<>();
+        for (KillOutboxRow row : rows) {
+            rowsByEventId.put(row.request().eventId(), row);
+        }
+        for (CombatKillResult result : response.results()) {
+            if (!"accepted".equals(result.outcome())) {
+                continue;
+            }
+            KillOutboxRow row = Objects.requireNonNull(
+                    rowsByEventId.get(result.eventId()),
+                    "Validated combat response contains an unknown event ID");
+            Runnable presentation = () -> {
+                try {
+                    rewardPresenter.present(row.request(), result);
+                } catch (RuntimeException error) {
+                    logger.warn(
+                            "combat_reward_presentation_failed event_id=" + result.eventId(),
+                            error);
+                }
+            };
+            try {
+                mainThreadDispatcher.accept(presentation);
+            } catch (RuntimeException error) {
+                logger.warn(
+                        "combat_reward_presentation_dispatch_failed event_id=" + result.eventId(),
+                        error);
+            }
+        }
     }
 
     private CompletableFuture<DeliveryRun> handleFailure(List<KillOutboxRow> rows, Throwable error) {

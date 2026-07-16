@@ -20,6 +20,7 @@ dependencies {
     compileOnly("org.xerial:sqlite-jdbc:3.53.2.0")
 
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.2")
+    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.18.2")
 
     testImplementation("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
     testImplementation("io.lumine:Mythic-Dist:5.12.1") {
