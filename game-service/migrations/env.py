@@ -12,6 +12,7 @@ from immortal_mmo.combat import db_models as combat_db_models  # noqa: F401
 from immortal_mmo.core.config import Settings
 from immortal_mmo.cultivation import db_models as cultivation_db_models  # noqa: F401
 from immortal_mmo.db.base import Base
+from immortal_mmo.item import db_models as item_db_models  # noqa: F401
 from immortal_mmo.player import db_models as player_db_models  # noqa: F401
 from immortal_mmo.quest import db_models as quest_db_models  # noqa: F401
 

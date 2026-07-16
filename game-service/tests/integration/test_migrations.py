@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -14,8 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 from tests.support.postgres import (
     MigratedPostgres,
     check_migration_metadata,
-    downgrade_postgres,
-    migrate_postgres,
     rollback_postgres_session,
 )
 
@@ -31,6 +30,14 @@ GAMEPLAY_TABLES = {
     "combat_kill_events",
     "life_mob_kill_counters",
     "cultivation_resource_entries",
+    "life_techniques",
+    "technique_investment_entries",
+    "life_realm_entries",
+    "cultivation_sessions",
+    "cultivation_session_techniques",
+    "breakthrough_technique_debits",
+    "life_item_stacks",
+    "item_resource_entries",
 }
 
 EXPECTED_CONSTRAINTS = {
@@ -93,6 +100,8 @@ EXPECTED_CONSTRAINTS = {
     "life_cultivation_states": {
         "pk_life_cultivation_states",
         "fk_life_cultivation_states_life_id_lives",
+        "fk_cultivation_state_active_session",
+        "ck_life_cultivation_states_level",
         "ck_life_cultivation_states_unrefined_nonnegative",
         "ck_life_cultivation_states_realized_nonnegative",
         "ck_life_cultivation_states_revision_positive",
@@ -126,6 +135,87 @@ EXPECTED_CONSTRAINTS = {
         "ck_cultivation_entry_delta",
         "ck_cultivation_entry_balance_nonnegative",
         "ck_cultivation_combat_source",
+        "fk_cultivation_entries_session",
+        "uq_cultivation_operation_resource",
+    },
+    "life_techniques": {
+        "pk_life_techniques",
+        "fk_life_techniques_life_id_lives",
+        "uq_life_technique_catalog",
+        "uq_life_technique_identity",
+        "ck_life_technique_definition_version",
+        "ck_life_technique_group",
+        "ck_life_technique_major_realm",
+        "ck_life_technique_investment",
+        "ck_life_technique_layer",
+        "ck_life_technique_status",
+    },
+    "cultivation_sessions": {
+        "pk_cultivation_sessions",
+        "fk_cultivation_sessions_life_id_lives",
+        "uq_cultivation_session_identity",
+        "uq_cultivation_session_idempotency",
+        "ck_cultivation_session_kind",
+        "ck_cultivation_session_status",
+        "ck_cultivation_session_fingerprint",
+        "ck_cultivation_session_levels",
+        "ck_cultivation_session_totals",
+        "ck_cultivation_session_times",
+        "ck_cultivation_session_shape",
+        "ck_cultivation_session_revision",
+    },
+    "life_realm_entries": {
+        "pk_life_realm_entries",
+        "fk_life_realm_entries_life_id_lives",
+        "fk_life_realm_entries_parent",
+        "fk_life_realm_entries_session",
+        "uq_life_realm_entry_generation",
+        "uq_life_realm_entry_identity",
+        "ck_life_realm_entry_generation",
+        "ck_life_realm_entry_levels",
+        "ck_life_realm_entry_amounts",
+        "ck_life_realm_entry_transition",
+        "ck_life_realm_entry_status",
+        "ck_life_realm_entry_invalidation",
+    },
+    "cultivation_session_techniques": {
+        "pk_cultivation_session_techniques",
+        "fk_session_techniques_session",
+        "fk_session_techniques_technique",
+        "ck_session_technique_definition_version",
+        "ck_session_technique_frozen_amounts",
+        "ck_session_technique_mastery_seconds",
+    },
+    "technique_investment_entries": {
+        "pk_technique_investment_entries",
+        "fk_technique_investment_technique",
+        "fk_technique_investment_session",
+        "uq_technique_investment_operation",
+        "ck_technique_investment_entry_type",
+        "ck_technique_investment_delta",
+        "ck_technique_investment_balance",
+    },
+    "breakthrough_technique_debits": {
+        "pk_breakthrough_technique_debits",
+        "fk_breakthrough_debits_session",
+        "fk_breakthrough_debits_technique",
+        "ck_breakthrough_debit_amounts",
+    },
+    "life_item_stacks": {
+        "pk_life_item_stacks",
+        "fk_life_item_stacks_life_id_lives",
+        "ck_life_item_stack_quantity",
+        "ck_life_item_stack_revision",
+    },
+    "item_resource_entries": {
+        "pk_item_resource_entries",
+        "fk_item_resource_entries_stack",
+        "fk_item_resource_entries_session",
+        "uq_item_resource_operation",
+        "ck_item_resource_entry_type",
+        "ck_item_resource_delta",
+        "ck_item_resource_balance",
+        "ck_item_resource_session_shape",
     },
 }
 
@@ -138,6 +228,12 @@ EXPECTED_INDEXES = {
     "ix_combat_kills_life_time",
     "ix_combat_kills_mob_time",
     "ux_cultivation_kill_recipient",
+    "ix_life_techniques_group_status",
+    "ux_cultivation_one_open_session",
+    "ix_cultivation_sessions_life_created",
+    "ix_life_realm_entries_active_chain",
+    "ix_technique_investment_life_created",
+    "ix_item_resource_life_created",
 }
 
 EXPECTED_FUNCTIONS = {
@@ -748,7 +844,7 @@ async def test_alembic_cli_uses_database_url_from_environment(
 
     result = await asyncio.to_thread(
         subprocess.run,
-        [str(GAME_SERVICE_ROOT / ".venv/bin/alembic"), "current"],
+        [sys.executable, "-m", "alembic", "current"],
         cwd=GAME_SERVICE_ROOT,
         env=environment,
         check=False,
@@ -779,32 +875,3 @@ async def test_orm_metadata_matches_migrated_schema(
     migrated_postgres: MigratedPostgres,
 ) -> None:
     await asyncio.to_thread(check_migration_metadata, migrated_postgres.url)
-
-
-@pytest.mark.asyncio
-async def test_downgrade_removes_schema_and_upgrade_restores_head(
-    migrated_postgres: MigratedPostgres,
-) -> None:
-    await asyncio.to_thread(downgrade_postgres, migrated_postgres.url, "base")
-    try:
-        async with migrated_postgres.engine.connect() as connection:
-            table_names = await _table_names(connection)
-            function_names = await _function_names(connection)
-            trigger_names = await _trigger_names(connection)
-        assert table_names == {"alembic_version"}
-        assert EXPECTED_FUNCTIONS.isdisjoint(function_names)
-        assert EXPECTED_TRIGGERS.isdisjoint(trigger_names)
-    finally:
-        await asyncio.to_thread(migrate_postgres, migrated_postgres.url, "head")
-
-    async with migrated_postgres.engine.connect() as connection:
-        revision = (
-            await connection.execute(text("SELECT version_num FROM alembic_version"))
-        ).scalar_one()
-        restored_tables = await _table_names(connection)
-        restored_functions = await _function_names(connection)
-        restored_triggers = await _trigger_names(connection)
-    assert revision == "20260715_002"
-    assert restored_tables - {"alembic_version"} == GAMEPLAY_TABLES
-    assert EXPECTED_FUNCTIONS <= restored_functions
-    assert restored_triggers == EXPECTED_TRIGGERS

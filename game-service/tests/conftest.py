@@ -40,10 +40,18 @@ async def clean_postgres_data(postgres_engine: AsyncEngine) -> AsyncIterator[Non
     statement = text(
         """
         TRUNCATE TABLE
+            item_resource_entries,
+            life_item_stacks,
+            breakthrough_technique_debits,
+            technique_investment_entries,
+            cultivation_session_techniques,
+            life_realm_entries,
             cultivation_resource_entries,
+            life_cultivation_states,
+            cultivation_sessions,
+            life_techniques,
             life_mob_kill_counters,
             combat_kill_events,
-            life_cultivation_states,
             quest_operations,
             quest_progress,
             life_quest_states,
