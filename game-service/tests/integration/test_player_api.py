@@ -8,6 +8,7 @@ from tests.support.fakes import NoOpQuestRepository
 from immortal_mmo.combat.postgres_repository import PostgresCombatRepository
 from immortal_mmo.cultivation.postgres_repository import PostgresCultivationRepository
 from immortal_mmo.db.uow import SqlAlchemyUnitOfWorkFactory
+from immortal_mmo.item.postgres_repository import PostgresItemRepository
 from immortal_mmo.main import create_app
 
 
@@ -21,6 +22,7 @@ def client(sessions: async_sessionmaker[AsyncSession]) -> httpx.AsyncClient:
             NoOpQuestRepository,
             PostgresCombatRepository,
             PostgresCultivationRepository,
+            PostgresItemRepository,
         )
     )
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")

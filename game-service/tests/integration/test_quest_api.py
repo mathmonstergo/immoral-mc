@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from immortal_mmo.combat.postgres_repository import PostgresCombatRepository
 from immortal_mmo.cultivation.postgres_repository import PostgresCultivationRepository
 from immortal_mmo.db.uow import SqlAlchemyUnitOfWorkFactory
+from immortal_mmo.item.postgres_repository import PostgresItemRepository
 from immortal_mmo.main import create_app
 from immortal_mmo.player.postgres_repository import PostgresPlayerRepository
 from immortal_mmo.quest.definitions import QUEST_CATALOG
@@ -21,6 +22,7 @@ def app_client(sessions: async_sessionmaker[AsyncSession]) -> httpx.AsyncClient:
             PostgresQuestRepository,
             PostgresCombatRepository,
             PostgresCultivationRepository,
+            PostgresItemRepository,
         )
     )
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")

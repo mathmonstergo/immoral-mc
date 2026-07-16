@@ -3,6 +3,7 @@ from typing import Literal, Protocol
 
 from immortal_mmo.combat.repository import CombatRepository
 from immortal_mmo.cultivation.repository import CultivationRepository
+from immortal_mmo.item.repository import ItemRepository
 from immortal_mmo.player.repository import PlayerRepository
 from immortal_mmo.quest.repository import QuestRepository
 
@@ -14,6 +15,7 @@ class UnitOfWork(Protocol):
     quests: QuestRepository
     combat: CombatRepository
     cultivation: CultivationRepository
+    items: ItemRepository
 
     async def __aenter__(self) -> "UnitOfWork": ...
 

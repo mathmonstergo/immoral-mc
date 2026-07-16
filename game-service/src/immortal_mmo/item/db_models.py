@@ -73,8 +73,7 @@ class ItemResourceEntryRow(Base):
         CheckConstraint("delta_quantity <> 0", name=conv("ck_item_resource_delta")),
         CheckConstraint("balance_after >= 0", name=conv("ck_item_resource_balance")),
         CheckConstraint(
-            "(entry_type = 'breakthrough_consumption' "
-            "AND session_id IS NOT NULL AND delta_quantity < 0) OR "
+            "(entry_type = 'breakthrough_consumption' AND delta_quantity < 0) OR "
             "(entry_type = 'administrative_adjustment' AND session_id IS NULL)",
             name=conv("ck_item_resource_session_shape"),
         ),

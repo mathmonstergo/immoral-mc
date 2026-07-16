@@ -13,6 +13,7 @@ from tests.support.fakes import NoOpQuestRepository
 from immortal_mmo.combat.postgres_repository import PostgresCombatRepository
 from immortal_mmo.cultivation.postgres_repository import PostgresCultivationRepository
 from immortal_mmo.db.uow import SqlAlchemyUnitOfWorkFactory
+from immortal_mmo.item.postgres_repository import PostgresItemRepository
 from immortal_mmo.player.db_models import (
     AccountMinecraftNameRow,
     AccountRow,
@@ -36,6 +37,7 @@ def player_service(
             NoOpQuestRepository,
             PostgresCombatRepository,
             PostgresCultivationRepository,
+            PostgresItemRepository,
         ),
         spirit_root_generator=generator,
     )
@@ -197,6 +199,7 @@ async def test_database_rejects_second_alive_life_through_repository(
         NoOpQuestRepository,
         PostgresCombatRepository,
         PostgresCultivationRepository,
+        PostgresItemRepository,
     )
     async with factory() as uow:
         account = await uow.players.upsert_account(uuid4(), "DoubleLife")

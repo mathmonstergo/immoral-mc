@@ -7,7 +7,19 @@ from types import TracebackType
 from uuid import UUID, uuid4
 
 from immortal_mmo.combat.models import CombatKillEvent
-from immortal_mmo.cultivation.models import CombatCultivationCredit
+from immortal_mmo.cultivation.models import (
+    CombatCultivationCredit,
+    CultivationSession,
+    CultivationState,
+    LifeTechnique,
+    RealmEntry,
+    TechniqueInvestmentChange,
+)
+from immortal_mmo.item.models import (
+    InsufficientItemQuantity,
+    ItemResourceEntry,
+    ItemStack,
+)
 from immortal_mmo.player.models import Account, CurrentLifeQuestFacts, Life, SpiritRoot
 from immortal_mmo.quest.repository import (
     QuestOperationCommand,
@@ -34,6 +46,12 @@ class _FakeState:
     cultivation_credits: dict[tuple[UUID, UUID], CombatCultivationCredit] = field(
         default_factory=dict
     )
+    cultivation_states: dict[UUID, CultivationState] = field(default_factory=dict)
+    life_techniques: dict[UUID, LifeTechnique] = field(default_factory=dict)
+    realm_entries: dict[UUID, RealmEntry] = field(default_factory=dict)
+    cultivation_sessions: dict[UUID, CultivationSession] = field(default_factory=dict)
+    item_stacks: dict[tuple[UUID, str], ItemStack] = field(default_factory=dict)
+    item_entries: dict[tuple[UUID, str], ItemResourceEntry] = field(default_factory=dict)
 
 
 class FakeStore:
@@ -361,6 +379,91 @@ class FakeCultivationRepository:
         self._state = state
         self._ensure_active = ensure_active
 
+    async def get_or_create_state(self, life_id: UUID, *, for_update: bool) -> CultivationState:
+        self._ensure_active()
+        del for_update
+        return self._state.cultivation_states.setdefault(
+            life_id,
+            CultivationState(life_id, 1, 0, 0, None, 1),
+        )
+
+    async def get_techniques(
+        self,
+        life_id: UUID,
+        technique_ids: Collection[UUID] = (),
+        *,
+        for_update: bool,
+    ) -> tuple[LifeTechnique, ...]:
+        self._ensure_active()
+        del for_update
+        selected = set(technique_ids)
+        return tuple(
+            sorted(
+                (
+                    technique
+                    for technique in self._state.life_techniques.values()
+                    if technique.life_id == life_id
+                    and (not selected or technique.life_technique_id in selected)
+                ),
+                key=lambda technique: technique.life_technique_id.int,
+            )
+        )
+
+    async def get_active_realm_chain(
+        self, life_id: UUID, *, for_update: bool
+    ) -> tuple[RealmEntry, ...]:
+        self._ensure_active()
+        del for_update
+        return tuple(
+            sorted(
+                (
+                    entry
+                    for entry in self._state.realm_entries.values()
+                    if entry.life_id == life_id and entry.status == "active"
+                ),
+                key=lambda entry: entry.generation,
+            )
+        )
+
+    async def insert_session(self, session: CultivationSession) -> None:
+        self._ensure_active()
+        if any(
+            stored.life_id == session.life_id and stored.status in {"pending", "active"}
+            for stored in self._state.cultivation_sessions.values()
+        ):
+            raise RuntimeError("Active cultivation session exists")
+        self._state.cultivation_sessions[session.session_id] = session
+
+    async def apply_technique_investments(
+        self,
+        *,
+        life_id: UUID,
+        operation_id: UUID,
+        session_id: UUID | None,
+        changes: tuple[TechniqueInvestmentChange, ...],
+        occurred_at: datetime,
+    ) -> CultivationState:
+        self._ensure_active()
+        del operation_id, session_id, occurred_at
+        state = await self.get_or_create_state(life_id, for_update=True)
+        total_delta = 0
+        for change in changes:
+            technique = self._state.life_techniques[change.life_technique_id]
+            balance_after = technique.invested_amount + change.delta_amount
+            if not 0 <= balance_after <= technique.max_investment:
+                raise ValueError("Technique investment exceeds its bounds")
+            self._state.life_techniques[change.life_technique_id] = replace(
+                technique, invested_amount=balance_after
+            )
+            total_delta += change.delta_amount
+        updated = replace(
+            state,
+            realized_cultivation=state.realized_cultivation + total_delta,
+            revision=state.revision + 1,
+        )
+        self._state.cultivation_states[life_id] = updated
+        return updated
+
     async def get_combat_credit(
         self,
         kill_event_id: UUID,
@@ -395,11 +498,98 @@ class FakeCultivationRepository:
         self._state.cultivation_balances[life_id] = balance
         self._state.cultivation_revisions[life_id] = revision
         self._state.cultivation_credits[key] = credit
+        state = await self.get_or_create_state(life_id, for_update=True)
+        self._state.cultivation_states[life_id] = replace(
+            state,
+            unrefined_cultivation=balance,
+            revision=revision,
+        )
         return credit
 
     async def get_unrefined_balance(self, life_id: UUID) -> int:
         self._ensure_active()
         return self._state.cultivation_balances.get(life_id, 0)
+
+
+class FakeItemRepository:
+    def __init__(self, state: _FakeState, ensure_active: Callable[[], None]) -> None:
+        self._state = state
+        self._ensure_active = ensure_active
+
+    async def get_stack(self, life_id: UUID, item_code: str, *, for_update: bool) -> ItemStack:
+        self._ensure_active()
+        del for_update
+        key = (life_id, item_code)
+        return self._state.item_stacks.setdefault(key, ItemStack(life_id, item_code, 0, 1))
+
+    async def adjust(
+        self,
+        *,
+        life_id: UUID,
+        item_code: str,
+        delta_quantity: int,
+        operation_id: UUID,
+        occurred_at: datetime,
+    ) -> ItemResourceEntry:
+        self._ensure_active()
+        replay = self._state.item_entries.get((operation_id, item_code))
+        if replay is not None:
+            return replay
+        stack = await self.get_stack(life_id, item_code, for_update=True)
+        balance_after = stack.quantity + delta_quantity
+        if balance_after < 0:
+            raise InsufficientItemQuantity(item_code)
+        self._state.item_stacks[(life_id, item_code)] = replace(
+            stack, quantity=balance_after, revision=stack.revision + 1
+        )
+        entry = ItemResourceEntry(
+            uuid4(),
+            life_id,
+            item_code,
+            operation_id,
+            None,
+            "administrative_adjustment",
+            delta_quantity,
+            balance_after,
+            occurred_at,
+        )
+        self._state.item_entries[(operation_id, item_code)] = entry
+        return entry
+
+    async def consume(
+        self,
+        *,
+        life_id: UUID,
+        item_code: str,
+        quantity: int,
+        operation_id: UUID,
+        session_id: UUID | None,
+        occurred_at: datetime,
+    ) -> ItemResourceEntry:
+        self._ensure_active()
+        replay = self._state.item_entries.get((operation_id, item_code))
+        if replay is not None:
+            return replay
+        stack = await self.get_stack(life_id, item_code, for_update=True)
+        if stack.quantity < quantity:
+            raise InsufficientItemQuantity(item_code)
+        balance_after = stack.quantity - quantity
+        self._state.item_stacks[(life_id, item_code)] = replace(
+            stack, quantity=balance_after, revision=stack.revision + 1
+        )
+        entry = ItemResourceEntry(
+            uuid4(),
+            life_id,
+            item_code,
+            operation_id,
+            session_id,
+            "breakthrough_consumption",
+            -quantity,
+            balance_after,
+            occurred_at,
+        )
+        self._state.item_entries[(operation_id, item_code)] = entry
+        return entry
 
 
 class FakeUnitOfWork:
@@ -410,6 +600,7 @@ class FakeUnitOfWork:
         self.quests: FakeQuestRepository
         self.combat: FakeCombatRepository
         self.cultivation: FakeCultivationRepository
+        self.items: FakeItemRepository
         self._working_state: _FakeState | None = None
         self._entered = False
         self._active = False
@@ -427,6 +618,7 @@ class FakeUnitOfWork:
         self.quests = FakeQuestRepository(self._working_state, self._ensure_active)
         self.combat = FakeCombatRepository(self._working_state, self._ensure_active)
         self.cultivation = FakeCultivationRepository(self._working_state, self._ensure_active)
+        self.items = FakeItemRepository(self._working_state, self._ensure_active)
         return self
 
     async def __aexit__(

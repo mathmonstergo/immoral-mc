@@ -20,6 +20,7 @@ from immortal_mmo.cultivation.db_models import (
 )
 from immortal_mmo.cultivation.postgres_repository import PostgresCultivationRepository
 from immortal_mmo.db.uow import SqlAlchemyUnitOfWorkFactory
+from immortal_mmo.item.postgres_repository import PostgresItemRepository
 from immortal_mmo.main import create_app
 from immortal_mmo.player.postgres_repository import PostgresPlayerRepository
 from immortal_mmo.quest.postgres_repository import PostgresQuestRepository
@@ -45,6 +46,7 @@ def client(sessions: async_sessionmaker[AsyncSession]) -> httpx.AsyncClient:
             PostgresQuestRepository,
             PostgresCombatRepository,
             PostgresCultivationRepository,
+            PostgresItemRepository,
         ),
         combat_catalog=reward_catalog(),
     )
