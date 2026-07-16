@@ -40,7 +40,7 @@
 - Create `game-service/src/immortal_mmo/item/db_models.py`
 - Create `game-service/src/immortal_mmo/item/repository.py`
 - Create `game-service/src/immortal_mmo/item/postgres_repository.py`
-- Create `game-service/migrations/versions/20260716_003_cultivation_progression_techniques.py`
+- Rewrite/rename the development-only `game-service/migrations/versions/20260715_002_combat_cultivation_rewards.py` as the clean final gameplay-persistence baseline
 - Modify `game-service/src/immortal_mmo/core/uow.py`
 - Modify `game-service/src/immortal_mmo/db/uow.py`
 - Modify `game-service/src/immortal_mmo/main.py`
@@ -248,10 +248,10 @@ git add game-service/src/immortal_mmo/cultivation game-service/tests/unit
 git commit -m "feat: add cultivation content catalogs"
 ```
 
-### Task 3: PostgreSQL Schema and ORM Models
+### Task 3: Zero-to-One PostgreSQL Baseline and ORM Models
 
 **Files:**
-- Create: `game-service/migrations/versions/20260716_003_cultivation_progression_techniques.py`
+- Rewrite/rename: `game-service/migrations/versions/20260715_002_combat_cultivation_rewards.py`
 - Modify: `game-service/src/immortal_mmo/cultivation/db_models.py`
 - Create: `game-service/src/immortal_mmo/item/db_models.py`
 - Modify: `game-service/migrations/env.py`
@@ -259,10 +259,13 @@ git commit -m "feat: add cultivation content catalogs"
 - Modify: `game-service/tests/integration/test_migrations.py`
 - Create: `game-service/tests/integration/test_cultivation_migrations.py`
 
-- [ ] **Step 1: Write failing migration assertions**
+- [ ] **Step 1: Write failing fresh-schema assertions**
 
-Assert Alembic head `20260716_003`, exact tables, named constraints, indexes,
-downgrade, and clean re-upgrade. Required tables:
+Keep the development head at `20260715_002`, but rewrite that unapplied,
+development-only revision into the clean final schema. Assert the exact tables,
+columns, named constraints, and indexes created in a fresh database. Do not
+test compatibility with the previous `002` shape, data backfills, dual schemas,
+or `003 -> 002` downgrade/re-upgrade behavior. Required tables:
 
 ```text
 life_cultivation_states
@@ -277,7 +280,7 @@ life_item_stacks
 item_resource_entries
 ```
 
-- [ ] **Step 2: Verify RED against the old migration head**
+- [ ] **Step 2: Verify RED against the incomplete development baseline**
 
 Run:
 
@@ -286,17 +289,22 @@ Run:
   tests/integration/test_cultivation_migrations.py -q
 ```
 
-Expected: missing revision/tables.
+Expected: the existing development baseline is missing the final tables and
+constraints.
 
-- [ ] **Step 3: Implement migration and matching ORM**
+- [ ] **Step 3: Rewrite the clean baseline and matching ORM**
 
-`life_cultivation_states` gains `current_level` and active-session identity.
+Rewrite the development-only `002` migration directly. This is a zero-to-one
+schema bootstrap, not a production data migration: local databases are reset
+and recreated rather than upgraded from the obsolete shape.
+
+`life_cultivation_states` contains `current_level` and active-session identity.
 `life_realm_entries` stores generation, parent, active status, source floor,
 target baseline, and transition metadata. Sessions store frozen JSON snapshots,
 cumulative elapsed/generated/consumed/retained totals, status, and idempotency
 identity. Use explicit `RESTRICT` FKs and named check constraints.
 
-- [ ] **Step 4: Run migration tests and metadata drift check**
+- [ ] **Step 4: Run fresh-database tests and metadata drift check**
 
 ```bash
 /home/adam/projects/immortal_mc/game-service/.venv/bin/python -m pytest \
@@ -304,6 +312,10 @@ identity. Use explicit `RESTRICT` FKs and named check constraints.
   tests/integration/test_cultivation_migrations.py -q
 /home/adam/projects/immortal_mc/game-service/.venv/bin/alembic check
 ```
+
+The integration fixture must create a fresh PostgreSQL database/volume and run
+`alembic upgrade head`. No test may preserve or translate rows from the obsolete
+development schema.
 
 - [ ] **Step 5: Commit**
 

@@ -48,6 +48,13 @@ PostgreSQL
   - authoritative ledgers, balances, sessions, entry records, and frozen decisions
 ```
 
+This project is still zero-to-one and has no production data compatibility
+requirement. The persistence design is implemented as one clean development
+schema baseline. Existing local PostgreSQL volumes are discarded and recreated;
+the implementation must not add legacy columns, dual reads/writes, backfills,
+or downgrade/re-upgrade compatibility paths for an obsolete development shape.
+Alembic is used only to bootstrap and verify the fresh target schema.
+
 Visual XP orbs are owner-bound feedback. They appear only after an authoritative
 `accepted` MythicMob result. They do not contain cultivation currency and do
 not mutate vanilla XP.

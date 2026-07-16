@@ -51,10 +51,13 @@ account_technique_marks
 
 `accounts` are permanent and login-linked. `lives` are per-generation character records. Do not collapse them into a single player table once reincarnation work begins.
 
-## Migrations
+## Schema Bootstrap and Production Migrations
 
-* Every schema change requires a migration.
-* Migrations must be deterministic and reversible when practical.
+* Before production, Alembic revisions are schema-bootstrap artifacts for a
+  fresh database. Rewrite an obsolete development-only revision into the clean
+  target shape instead of layering compatibility migrations on top of it.
+* After production data exists, every schema change requires a new migration.
+* Production migrations must be deterministic and reversible when practical.
 * Migration filenames should include a short purpose, e.g. `20260708_001_create_accounts_lives.py`.
 * Do not edit a production-applied migration to change behavior. Add a new migration.
 * Seed/demo content should be separated from structural migrations unless the schema requires reference rows.
@@ -88,8 +91,9 @@ docker compose up -d postgres
 * Do not add dual reads, dual writes, legacy columns, endpoint aliases,
   fallback defaults, silent coercion, or background backfills unless a task
   explicitly identifies real data that must survive.
-* A stale local database must fail visibly. Reset or migrate it deliberately;
-  runtime code must not detect old shapes and silently adapt.
+* A stale local database must fail visibly. During zero-to-one development,
+  reset and recreate it; runtime code must not detect old shapes and silently
+  adapt.
 * Reliability mechanisms required by the target design—transactions,
   idempotency, durable outboxes, and retry classification—remain mandatory.
   They protect current correctness and are not legacy compatibility layers.
@@ -98,7 +102,7 @@ docker compose up -d postgres
 
 | Condition | Expected behavior |
 |---|---|
-| Local database has an obsolete schema | Migration/readiness fails visibly; developer resets or rebuilds it |
+| Local database has an obsolete schema | Readiness fails visibly; developer resets or rebuilds it |
 | Old API payload uses removed fields | Typed validation rejects it; service does not translate it silently |
 | Old config key is present | Startup/config validation fails unless the current schema defines it |
 | Target model changes before production | Rewrite the development migration/schema and update tests directly |
@@ -116,8 +120,10 @@ docker compose up -d postgres
 
 ### 6. Tests Required
 
-* Migration tests assert the exact head revision, table set, columns,
-  constraints, indexes, downgrade, and clean re-upgrade.
+* Fresh-schema tests assert the exact head revision, table set, columns,
+  constraints, and indexes after `alembic upgrade head` on an empty database.
+* Zero-to-one tests do not preserve rows from an obsolete development schema
+  and do not require downgrade/re-upgrade compatibility.
 * ORM metadata comparison must report no drift from a freshly migrated
   database.
 * API/config tests reject removed legacy shapes instead of exercising a

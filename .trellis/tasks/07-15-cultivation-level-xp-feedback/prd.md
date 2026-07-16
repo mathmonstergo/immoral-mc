@@ -139,6 +139,12 @@ complete rule set covering the special 练气十至十三层 -> 筑基初期 pat
 
 ## Assumptions
 
+* The project is still zero-to-one. No production cultivation data or schema
+  history must survive this work. The final persistence shape is written into
+  the clean development schema baseline, and local PostgreSQL volumes are reset
+  and recreated. Do not implement legacy columns, data backfills, dual
+  reads/writes, compatibility adapters, or downgrade/re-upgrade support for the
+  obsolete development schema.
 * Experience orbs are a presentation mechanism, not trusted currency.
 * Orbs should be owner-bound so another player cannot steal cultivation
   feedback or cause the wrong HUD to update.
