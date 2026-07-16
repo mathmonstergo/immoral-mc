@@ -149,6 +149,85 @@ def test_loader_rejects_boolean_and_unknown_effect_fields(tmp_path: Path) -> Non
         load_technique_catalog(path)
 
 
+@pytest.mark.parametrize(
+    ("effect", "message"),
+    [
+        (
+            {
+                "attr": "attack",
+                "status": "burn",
+                "effect_type": "triggered",
+                "mode": "percent",
+                "value": 1,
+            },
+            "(?i)attribute.*status",
+        ),
+        (
+            {"attr": "attack", "effect_type": "status", "mode": "chance", "value": 0.5},
+            "(?i)attribute.*effect_type|attribute.*mode",
+        ),
+        (
+            {
+                "attr": "attack",
+                "effect_type": "triggered",
+                "mode": "percent",
+                "value": 1,
+                "chance": 0.5,
+            },
+            "(?i)chance.*mode",
+        ),
+        (
+            {
+                "kind": "status",
+                "status": "burn",
+                "effect_type": "cost",
+                "mode": "percent",
+                "value": 0.5,
+            },
+            "(?i)status.*effect_type|status.*mode",
+        ),
+        (
+            {
+                "kind": "status",
+                "status": "burn",
+                "effect_type": "status",
+                "mode": "percent",
+                "value": 0.5,
+            },
+            "(?i)status.*mode",
+        ),
+    ],
+)
+def test_loader_rejects_illegal_effect_shape_combinations(
+    tmp_path: Path, effect: dict[str, object], message: str
+) -> None:
+    document = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    document["techniques"][0]["effects"][0] = effect
+    path = tmp_path / "techniques.json"
+    path.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        load_technique_catalog(path)
+
+
+@pytest.mark.parametrize(
+    ("container", "field"),
+    [("prerequisites", "min_layer"), ("equipped_item_requirements", "quantity")],
+)
+def test_loader_rejects_boolean_nested_integer_fields(
+    tmp_path: Path, container: str, field: str
+) -> None:
+    document = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    document["techniques"][0][container] = [
+        {"technique_id": "Gongfa_68726c", field: True}
+        if container == "prerequisites"
+        else {"item_id": "training_item", field: True}
+    ]
+    path = tmp_path / "techniques.json"
+    path.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match=f"{field}.*integer"):
+        load_technique_catalog(path)
+
+
 def test_loader_rejects_group_realm_minimum_level_mismatch(tmp_path: Path) -> None:
     document = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
     document["techniques"][0]["group"] = "level:14"

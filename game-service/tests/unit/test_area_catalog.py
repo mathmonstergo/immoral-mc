@@ -17,8 +17,10 @@ def catalog() -> AreaCatalog:
 def test_seeded_areas_match_approved_basis_points(catalog: AreaCatalog) -> None:
     assert catalog.area("neutral_training_ground").speed_basis_points == 10_000
     assert catalog.area("neutral_training_ground").yield_basis_points == 10_000
-    assert catalog.area("accelerated_cave").speed_basis_points == 20_000
-    assert catalog.area("rich_spirit_vein").yield_basis_points == 15_000
+    accelerated = catalog.area("accelerated_cave")
+    rich = catalog.area("rich_spirit_vein")
+    assert (accelerated.speed_basis_points, accelerated.yield_basis_points) == (20_000, 10_000)
+    assert (rich.speed_basis_points, rich.yield_basis_points) == (10_000, 15_000)
 
 
 def test_area_catalog_is_immutable(catalog: AreaCatalog) -> None:

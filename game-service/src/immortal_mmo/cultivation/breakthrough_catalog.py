@@ -12,6 +12,21 @@ class BreakthroughCatalogError(ValueError):
     """Raised when versioned breakthrough content fails strict validation."""
 
 
+_APPROVED_PROFILES = {
+    "one_to_three_root": ((1, 2, 3), (1,), (10_000,)),
+    "four_root": (
+        (4,),
+        tuple(range(1, 11)),
+        (500, 1000, 1600, 2400, 3200, 4200, 5300, 6700, 8200, 10000),
+    ),
+    "five_root": (
+        (5,),
+        tuple(range(1, 11)),
+        (200, 400, 700, 1100, 1600, 2200, 2900, 3600, 4300, 5000),
+    ),
+}
+
+
 @dataclass(frozen=True, slots=True)
 class BreakthroughProfile:
     profile_id: str
@@ -143,16 +158,14 @@ class BreakthroughCatalog:
             raise BreakthroughCatalogError("Breakthrough basis points must be bounded integers")
         if tuple(sorted(profile.basis_points)) != profile.basis_points:
             raise BreakthroughCatalogError("Breakthrough basis points must be monotonic")
-        if profile.root_counts == (1, 2, 3) and (profile.pill_counts, profile.basis_points) != (
-            (1,),
-            (10_000,),
-        ):
+        approved = _APPROVED_PROFILES.get(profile.profile_id)
+        if approved is not None and (
+            profile.root_counts,
+            profile.pill_counts,
+            profile.basis_points,
+        ) != approved:
             raise BreakthroughCatalogError(
-                "one-to-three-root profile requires exactly one pill at 10000 basis points"
-            )
-        if profile.root_counts in ((4,), (5,)) and profile.pill_counts != tuple(range(1, 11)):
-            raise BreakthroughCatalogError(
-                "four- and five-root profiles require explicit pill counts 1 through 10"
+                f"Breakthrough profile {profile.profile_id} must match the approved table"
             )
 
     @staticmethod
@@ -219,12 +232,55 @@ class BreakthroughCatalog:
             elif policy.advance_target_level is not None:
                 raise BreakthroughCatalogError("forced_loss failure policy must not advance")
             if (
+                isinstance(policy.loss_numerator, bool)
+                or not isinstance(policy.loss_numerator, int)
+                or isinstance(policy.loss_denominator, bool)
+                or not isinstance(policy.loss_denominator, int)
+                or isinstance(policy.secondary_basis_points, bool)
+                or not isinstance(policy.secondary_basis_points, int)
+                or (
+                    policy.advance_target_level is not None
+                    and (
+                        isinstance(policy.advance_target_level, bool)
+                        or not isinstance(policy.advance_target_level, int)
+                    )
+                )
+            ):
+                raise BreakthroughCatalogError(
+                    "Breakthrough failure policy numeric fields must be integers"
+                )
+            if (
                 policy.loss_numerator <= 0
                 or policy.loss_denominator <= 0
                 or policy.loss_numerator > policy.loss_denominator
             ):
                 raise BreakthroughCatalogError(
                     "Breakthrough loss fraction must be positive and bounded"
+                )
+        if rule.rule_id == "qi_to_foundation":
+            expected_profiles = {
+                "one_to_three_root": "one_to_three_root",
+                "four_root": "four_root",
+                "five_root": "five_root",
+            }
+            expected_policies = {
+                10: FailurePolicy("secondary_50_50", 11),
+                11: FailurePolicy("secondary_50_50", 12),
+                12: FailurePolicy("secondary_50_50", 13),
+                13: FailurePolicy("forced_loss"),
+            }
+            if (
+                rule.source_levels != (10, 11, 12, 13)
+                or rule.target_level != 14
+                or rule.duration_seconds != 600
+                or rule.duration_min_seconds != 600
+                or rule.duration_max_seconds != 900
+                or rule.required_item_id != "foundation_pill"
+                or dict(rule.profile_ids) != expected_profiles
+                or dict(rule.failure_policies) != expected_policies
+            ):
+                raise BreakthroughCatalogError(
+                    "qi_to_foundation must match the exact initial foundation breakthrough contract"
                 )
 
     @property

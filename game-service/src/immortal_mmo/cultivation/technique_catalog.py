@@ -245,6 +245,28 @@ class TechniqueCatalog:
                 )
             if effect.mode not in {"value", "percent", "chance"}:
                 raise TechniqueCatalogError(f"Unsupported technique effect mode: {effect.mode}")
+            if effect.chance is not None and effect.mode != "chance":
+                raise TechniqueCatalogError(
+                    "Technique effect chance is only compatible with mode=chance"
+                )
+            if effect.kind == "status":
+                if effect.effect_type != "status":
+                    raise TechniqueCatalogError(
+                        "Status technique effect requires effect_type=status"
+                    )
+                if effect.mode != "chance":
+                    raise TechniqueCatalogError("Status technique effect requires mode=chance")
+            else:
+                if effect.status is not None:
+                    raise TechniqueCatalogError("Attribute technique effect must not define status")
+                if effect.effect_type == "status":
+                    raise TechniqueCatalogError(
+                        "Attribute technique effect must not use effect_type=status"
+                    )
+                if effect.mode == "chance":
+                    raise TechniqueCatalogError(
+                        "Attribute technique effect must not use mode=chance"
+                    )
             if not math.isfinite(effect.value) or not math.isfinite(effect.growth):
                 raise TechniqueCatalogError("Technique effect values must be finite")
             if effect.chance is not None and (
