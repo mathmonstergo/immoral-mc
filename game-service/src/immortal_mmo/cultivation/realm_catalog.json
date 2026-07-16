@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "levels": [
+    {"level_id": 1, "name": "练气一层", "major_realm": "练气", "max_exp": 100, "next_level_id": 2},
+    {"level_id": 2, "name": "练气二层", "major_realm": "练气", "max_exp": 150, "next_level_id": 3},
+    {"level_id": 3, "name": "练气三层", "major_realm": "练气", "max_exp": 225, "next_level_id": 4},
+    {"level_id": 4, "name": "练气四层", "major_realm": "练气", "max_exp": 337, "next_level_id": 5},
+    {"level_id": 5, "name": "练气五层", "major_realm": "练气", "max_exp": 505, "next_level_id": 6},
+    {"level_id": 6, "name": "练气六层", "major_realm": "练气", "max_exp": 757, "next_level_id": 7},
+    {"level_id": 7, "name": "练气七层", "major_realm": "练气", "max_exp": 1135, "next_level_id": 8},
+    {"level_id": 8, "name": "练气八层", "major_realm": "练气", "max_exp": 1702, "next_level_id": 9},
+    {"level_id": 9, "name": "练气九层", "major_realm": "练气", "max_exp": 2553, "next_level_id": 10},
+    {"level_id": 10, "name": "练气十层", "major_realm": "练气", "max_exp": 3829, "next_level_id": 11},
+    {"level_id": 11, "name": "练气十一层", "major_realm": "练气", "max_exp": 5169, "next_level_id": 12},
+    {"level_id": 12, "name": "练气十二层", "major_realm": "练气", "max_exp": 6978, "next_level_id": 13},
+    {"level_id": 13, "name": "练气十三层", "major_realm": "练气", "max_exp": 9420, "next_level_id": 14},
+    {"level_id": 14, "name": "筑基初期", "major_realm": "筑基", "max_exp": 43931, "next_level_id": 15},
+    {"level_id": 15, "name": "筑基中期", "major_realm": "筑基", "max_exp": 74682, "next_level_id": 16},
+    {"level_id": 16, "name": "筑基后期", "major_realm": "筑基", "max_exp": 298728, "next_level_id": 17},
+    {"level_id": 17, "name": "结丹初期", "major_realm": "结丹", "max_exp": 537710, "next_level_id": 18},
+    {"level_id": 18, "name": "结丹中期", "major_realm": "结丹", "max_exp": 967878, "next_level_id": 19},
+    {"level_id": 19, "name": "结丹后期", "major_realm": "结丹", "max_exp": 4839390, "next_level_id": 20},
+    {"level_id": 20, "name": "元婴初期", "major_realm": "元婴", "max_exp": 9678780, "next_level_id": 21},
+    {"level_id": 21, "name": "元婴中期", "major_realm": "元婴", "max_exp": 19357560, "next_level_id": 22},
+    {"level_id": 22, "name": "元婴后期", "major_realm": "元婴", "max_exp": 116145360, "next_level_id": null}
+  ]
+}
