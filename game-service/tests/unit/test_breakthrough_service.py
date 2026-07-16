@@ -3,12 +3,13 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from tests.support.fakes import FakeStore, FakeUnitOfWorkFactory
+from tests.support.fakes import FakeCultivationRepository, FakeStore, FakeUnitOfWorkFactory
 
-from immortal_mmo.core.errors import ConflictError
+from immortal_mmo.core.errors import ConflictError, DomainError
 from immortal_mmo.cultivation.breakthrough_catalog import load_breakthrough_catalog
 from immortal_mmo.cultivation.models import CultivationState, LifeTechnique, RealmEntry
 from immortal_mmo.cultivation.realm_catalog import load_realm_catalog
+from immortal_mmo.cultivation.repository import ActiveCultivationSessionExists
 from immortal_mmo.cultivation.service import CultivationService
 from immortal_mmo.item.models import ItemStack
 from immortal_mmo.player.models import SpiritRoot
@@ -262,3 +263,79 @@ async def test_administrative_item_adjustment_is_idempotent() -> None:
             delta_quantity=6,
             idempotency_key=operation_id,
         )
+
+
+@pytest.mark.asyncio
+async def test_breakthrough_item_shortage_is_domain_conflict_and_rolls_back() -> None:
+    factory = FakeUnitOfWorkFactory(FakeStore())
+    account_id, life_id = await full_qi_player(
+        factory,
+        suffix=5,
+        level=10,
+        quality="triple",
+        root_count=3,
+        technique_amounts=(11_293,),
+    )
+    clock = MutableClock(datetime(2026, 7, 16, 8, tzinfo=UTC))
+    state_before = factory.store._state.cultivation_states[life_id]
+    techniques_before = dict(factory.store._state.life_techniques)
+
+    with pytest.raises(DomainError) as raised:
+        await service(factory, clock, 1, 1).start_breakthrough(
+            account_id=account_id,
+            pill_count=1,
+            idempotency_key=UUID(int=8_005),
+        )
+
+    assert raised.value.status_code == 409
+    assert raised.value.code == "item.insufficient_quantity"
+    assert factory.store._state.cultivation_states[life_id] == state_before
+    assert factory.store._state.life_techniques == techniques_before
+    assert factory.store._state.cultivation_sessions == {}
+    assert factory.store._state.breakthrough_debits == {}
+    assert factory.store._state.item_entries == {}
+
+
+@pytest.mark.asyncio
+async def test_breakthrough_active_session_race_is_domain_conflict_and_rolls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory = FakeUnitOfWorkFactory(FakeStore())
+    account_id, life_id = await full_qi_player(
+        factory,
+        suffix=6,
+        level=10,
+        quality="triple",
+        root_count=3,
+        technique_amounts=(11_293,),
+    )
+    factory.store._state.item_stacks[(life_id, "foundation_pill")] = ItemStack(
+        life_id, "foundation_pill", 1, 1
+    )
+    clock = MutableClock(datetime(2026, 7, 16, 8, tzinfo=UTC))
+    state_before = factory.store._state.cultivation_states[life_id]
+
+    async def raise_race(
+        repository: FakeCultivationRepository,
+        session,
+        techniques,
+    ) -> None:
+        del repository, techniques
+        raise ActiveCultivationSessionExists(session.life_id)
+
+    monkeypatch.setattr(FakeCultivationRepository, "start_session", raise_race)
+
+    with pytest.raises(DomainError) as raised:
+        await service(factory, clock, 1, 1).start_breakthrough(
+            account_id=account_id,
+            pill_count=1,
+            idempotency_key=UUID(int=8_006),
+        )
+
+    assert raised.value.status_code == 409
+    assert raised.value.code == "cultivation.breakthrough_conflict"
+    assert factory.store._state.cultivation_states[life_id] == state_before
+    assert factory.store._state.cultivation_sessions == {}
+    assert factory.store._state.breakthrough_debits == {}
+    assert factory.store._state.item_stacks[(life_id, "foundation_pill")].quantity == 1
+    assert factory.store._state.item_entries == {}

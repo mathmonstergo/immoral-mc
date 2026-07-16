@@ -16,6 +16,11 @@ from immortal_mmo.cultivation.breakthrough_catalog import (
     BreakthroughCatalog,
     load_breakthrough_catalog,
 )
+from immortal_mmo.cultivation.errors import (
+    CultivationSeclusionConflictError,
+    CultivationSeclusionNotFoundError,
+    CultivationSeclusionRuleError,
+)
 from immortal_mmo.cultivation.layer_curves import layer_for_investment
 from immortal_mmo.cultivation.models import (
     BreakthroughTechniqueDebit,
@@ -34,6 +39,7 @@ from immortal_mmo.cultivation.progression import (
     valid_active_chain,
 )
 from immortal_mmo.cultivation.realm_catalog import RealmCatalog
+from immortal_mmo.cultivation.repository import ActiveCultivationSessionExists
 from immortal_mmo.cultivation.schemas import (
     BreakthroughSnapshotResponse,
     CultivationSnapshotResponse,
@@ -50,6 +56,8 @@ from immortal_mmo.cultivation.technique_catalog import (
     TechniqueCatalog,
     load_technique_catalog,
 )
+from immortal_mmo.item.errors import ItemInsufficientQuantityError
+from immortal_mmo.item.models import InsufficientItemQuantity
 from immortal_mmo.player.service import PlayerAccountNotFoundError, PlayerLifecycleError
 
 FULL_MASTERY_SECONDS = {"练气": 36_000, "筑基": 72_000, "结丹": 180_000, "元婴": 360_000}
@@ -198,6 +206,9 @@ class CultivationService:
                     definition_version=technique.definition_version,
                     group_code=technique.group_code,
                     major_realm=technique.major_realm,
+                    attribute_codes=(
+                        () if definition is None else definition.required_elements
+                    ),
                     invested_amount=technique.invested_amount,
                     max_investment=technique.max_investment,
                     current_layer=current_layer,
@@ -627,7 +638,12 @@ class CultivationService:
                 settled_at=None,
                 revision=1,
             )
-            await uow.cultivation.start_session(session, ())
+            try:
+                await uow.cultivation.start_session(session, ())
+            except ActiveCultivationSessionExists as error:
+                raise CultivationBreakthroughConflictError(
+                    "Another cultivation session is already active"
+                ) from error
             await uow.cultivation.store_breakthrough_debits(
                 tuple(
                     BreakthroughTechniqueDebit(
@@ -644,14 +660,17 @@ class CultivationService:
                     for technique in techniques
                 )
             )
-            await uow.items.consume(
-                life_id=facts.life_id,
-                item_code=rule.required_item_id,
-                quantity=pill_count,
-                operation_id=session_id,
-                session_id=session_id,
-                occurred_at=now,
-            )
+            try:
+                await uow.items.consume(
+                    life_id=facts.life_id,
+                    item_code=rule.required_item_id,
+                    quantity=pill_count,
+                    operation_id=session_id,
+                    session_id=session_id,
+                    occurred_at=now,
+                )
+            except InsufficientItemQuantity as error:
+                raise ItemInsufficientQuantityError() from error
             await uow.commit()
         return _breakthrough_snapshot(session)
 
@@ -799,8 +818,9 @@ class CultivationService:
         idempotency_key: UUID,
     ) -> SeclusionSnapshotResponse:
         if not 1 <= len(technique_ids) <= 5 or len(set(technique_ids)) != len(technique_ids):
-            raise ValueError("Seclusion requires one to five unique techniques")
-        area = self._area_catalog.area(area_id)
+            raise CultivationSeclusionRuleError(
+                "Seclusion requires one to five unique techniques"
+            )
         now = self._clock()
         request_fingerprint = hashlib.sha256(
             json.dumps(
@@ -823,24 +843,47 @@ class CultivationService:
                 life.life_id, idempotency_key
             )
             if existing is not None:
-                if existing.request_fingerprint != request_fingerprint:
-                    raise ValueError("Seclusion idempotency key was reused")
+                if (
+                    existing.session_kind != "ordinary"
+                    or existing.request_fingerprint != request_fingerprint
+                ):
+                    raise CultivationSeclusionConflictError(
+                        "Seclusion idempotency key was reused"
+                    )
                 await uow.rollback()
                 return _seclusion_snapshot(existing)
-            await uow.cultivation.get_or_create_state(life.life_id, for_update=True)
+            state = await uow.cultivation.get_or_create_state(
+                life.life_id, for_update=True
+            )
+            if state.active_session_id is not None:
+                raise CultivationSeclusionConflictError(
+                    "Another cultivation session is already active"
+                )
+            try:
+                area = self._area_catalog.area(area_id)
+            except KeyError as error:
+                raise CultivationSeclusionRuleError(str(error)) from error
             techniques = await uow.cultivation.get_techniques(
                 life.life_id, technique_ids, for_update=True
             )
             if len(techniques) != len(technique_ids):
-                raise ValueError("Unknown selected technique")
+                raise CultivationSeclusionRuleError("Unknown selected technique")
             if len({item.major_realm for item in techniques}) != 1:
-                raise ValueError("Selected techniques must share the same major realm")
+                raise CultivationSeclusionRuleError(
+                    "Selected techniques must share the same major realm"
+                )
             if any(
                 item.status != "active" or item.invested_amount >= item.max_investment
                 for item in techniques
             ):
-                raise ValueError("Selected technique is not eligible for seclusion")
-            full_seconds = FULL_MASTERY_SECONDS[techniques[0].major_realm]
+                raise CultivationSeclusionRuleError(
+                    "Selected technique is not eligible for seclusion"
+                )
+            full_seconds = FULL_MASTERY_SECONDS.get(techniques[0].major_realm)
+            if full_seconds is None:
+                raise CultivationSeclusionRuleError(
+                    "Selected technique has an unsupported major realm"
+                )
             session_id = uuid4()
             session = CultivationSession(
                 session_id=session_id,
@@ -883,7 +926,12 @@ class CultivationService:
                 )
                 for item in techniques
             )
-            await uow.cultivation.start_session(session, selections)
+            try:
+                await uow.cultivation.start_session(session, selections)
+            except ActiveCultivationSessionExists as error:
+                raise CultivationSeclusionConflictError(
+                    "Another cultivation session is already active"
+                ) from error
             await uow.commit()
         return _seclusion_snapshot(session)
 
@@ -896,20 +944,34 @@ class CultivationService:
             if life is None:
                 raise PlayerLifecycleError()
             session = await uow.cultivation.get_session(session_id, for_update=True)
-            if session is None or session.life_id != life.life_id:
-                raise ValueError("Unknown seclusion session")
+            if (
+                session is None
+                or session.life_id != life.life_id
+                or session.session_kind != "ordinary"
+            ):
+                raise CultivationSeclusionNotFoundError()
             if session.status not in {"active", "pending"}:
                 await uow.rollback()
                 return _seclusion_snapshot(session)
             selections = await uow.cultivation.get_session_techniques(session_id)
+            if not selections:
+                raise CultivationSeclusionConflictError(
+                    "Seclusion session has no selected techniques"
+                )
             techniques = await uow.cultivation.get_techniques(
                 life.life_id,
                 tuple(item.life_technique_id for item in selections),
                 for_update=True,
             )
+            if len(techniques) != len(selections):
+                raise CultivationSeclusionConflictError(
+                    "Seclusion selected techniques are unavailable"
+                )
             elapsed = max(int((now - session.started_at).total_seconds()), 0)
-            if elapsed <= 0:
-                raise ValueError("Seclusion has no elapsed time to settle")
+            if elapsed <= session.cumulative_elapsed_seconds:
+                raise CultivationSeclusionConflictError(
+                    "Seclusion has no new elapsed time to settle"
+                )
             speed = int(session.frozen_snapshot["speed_basis_points"])
             yield_points = int(session.frozen_snapshot["yield_basis_points"])
             capacities = [item.frozen_capacity for item in selections]
@@ -919,6 +981,10 @@ class CultivationService:
                 capacities,
                 selections[0].frozen_full_mastery_seconds,
             )
+            if cumulative_generated <= session.cumulative_generated:
+                raise CultivationSeclusionConflictError(
+                    "Seclusion has not generated new cultivation to settle"
+                )
             unused_time_budget = max(cumulative_generated - session.cumulative_generated, 0)
             remaining = {
                 item.life_technique_id: item.max_investment - item.invested_amount
@@ -1024,8 +1090,12 @@ class CultivationService:
             if life is None:
                 raise PlayerLifecycleError()
             session = await uow.cultivation.get_session(session_id, for_update=False)
-            if session is None or session.life_id != life.life_id:
-                raise ValueError("Unknown seclusion session")
+            if (
+                session is None
+                or session.life_id != life.life_id
+                or session.session_kind != "ordinary"
+            ):
+                raise CultivationSeclusionNotFoundError()
             await uow.rollback()
         return _seclusion_snapshot(session)
 

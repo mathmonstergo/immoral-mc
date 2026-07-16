@@ -1,19 +1,83 @@
 package com.immortalmc.adapter.command;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.immortalmc.adapter.client.HealthCheckResult;
 import com.immortalmc.adapter.client.QuestProviderCatalog;
 import com.immortalmc.adapter.client.QuestProviderTemplate;
 import com.immortalmc.adapter.citizens.CitizensNpcResolver;
 import com.immortalmc.adapter.citizens.CitizensNpcSelector;
+import com.immortalmc.adapter.cultivation.CultivationCommandRunner;
 import com.immortalmc.adapter.quest.QuestProviderCatalogCache;
 import com.immortalmc.adapter.testsupport.RecordingAdapterLogger;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
 
 class ImmortalBukkitCommandExecutorTest {
+    @Test
+    void requiresPublicCultivationPermissionForPlayerCultivationCommands() {
+        ImmortalCommandService commandService = mock(ImmortalCommandService.class);
+        CultivationCommandRunner cultivationCommands = mock(CultivationCommandRunner.class);
+        ImmortalBukkitCommandExecutor executor = executor(commandService, cultivationCommands);
+        CommandSender sender = mock(CommandSender.class);
+
+        executor.onCommand(sender, mock(Command.class), "immortal", new String[] {"seclusion"});
+
+        verify(sender).hasPermission("immortalmc.cultivation");
+        verify(sender).sendMessage("你没有使用修炼命令的权限。");
+        verify(cultivationCommands, never()).handle(sender, new String[] {"seclusion"});
+        verify(commandService, never()).execute(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void dispatchesCultivationCommandWhenPublicPermissionIsGranted() {
+        ImmortalCommandService commandService = mock(ImmortalCommandService.class);
+        CultivationCommandRunner cultivationCommands = mock(CultivationCommandRunner.class);
+        ImmortalBukkitCommandExecutor executor = executor(commandService, cultivationCommands);
+        CommandSender sender = mock(CommandSender.class);
+        when(sender.hasPermission("immortalmc.cultivation")).thenReturn(true);
+        when(cultivationCommands.handle(sender, new String[] {"breakthrough", "1"})).thenReturn(true);
+
+        executor.onCommand(
+                sender,
+                mock(Command.class),
+                "immortal",
+                new String[] {"breakthrough", "1"});
+
+        verify(cultivationCommands).handle(sender, new String[] {"breakthrough", "1"});
+        verify(commandService, never()).execute(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void retainsAdminPermissionForExistingOperations() {
+        ImmortalCommandService commandService = mock(ImmortalCommandService.class);
+        CultivationCommandRunner cultivationCommands = mock(CultivationCommandRunner.class);
+        ImmortalBukkitCommandExecutor executor = executor(commandService, cultivationCommands);
+        CommandSender sender = mock(CommandSender.class);
+
+        executor.onCommand(sender, mock(Command.class), "immortal", new String[] {"health"});
+
+        verify(sender).hasPermission("immortalmc.command");
+        verify(sender).sendMessage("你没有使用管理命令的权限。");
+        verify(commandService, never()).execute(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
+    }
+
     @Test
     void completesQuestCommandsAndConfirmedProviderIds() {
         QuestProviderCatalogCache cache = new QuestProviderCatalogCache();
@@ -49,5 +113,16 @@ class ImmortalBukkitCommandExecutorTest {
                         new RecordingAdapterLogger(),
                         Runnable::run),
                 messages);
+    }
+
+    private static ImmortalBukkitCommandExecutor executor(
+            ImmortalCommandService commandService,
+            CultivationCommandRunner cultivationCommands) {
+        return new ImmortalBukkitCommandExecutor(
+                commandService,
+                CitizensNpcResolver.unavailable(),
+                CitizensNpcSelector.unavailable(),
+                new QuestProviderCatalogCache(),
+                cultivationCommands);
     }
 }

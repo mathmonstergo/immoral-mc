@@ -17,6 +17,7 @@ from immortal_mmo.cultivation.models import (
     SessionTechnique,
     TechniqueInvestmentChange,
 )
+from immortal_mmo.cultivation.repository import ActiveCultivationSessionExists
 from immortal_mmo.item.models import (
     InsufficientItemQuantity,
     ItemResourceEntry,
@@ -549,7 +550,7 @@ class FakeCultivationRepository:
             stored.life_id == session.life_id and stored.status in {"pending", "active"}
             for stored in self._state.cultivation_sessions.values()
         ):
-            raise RuntimeError("Active cultivation session exists")
+            raise ActiveCultivationSessionExists(session.life_id)
         self._state.cultivation_sessions[session.session_id] = session
 
     async def start_session(

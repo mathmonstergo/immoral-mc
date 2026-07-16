@@ -26,6 +26,9 @@ import com.immortalmc.adapter.config.CombatSettings;
 import com.immortalmc.adapter.config.PluginSettings;
 import com.immortalmc.adapter.content.BukkitConfigEntityInteractionRepository;
 import com.immortalmc.adapter.content.EntityInteractionRegistry;
+import com.immortalmc.adapter.cultivation.CultivationAreaResolver;
+import com.immortalmc.adapter.cultivation.CultivationCommandRunner;
+import com.immortalmc.adapter.cultivation.SeclusionInventoryController;
 import com.immortalmc.adapter.dialogue.NpcDialogueAudience;
 import com.immortalmc.adapter.dialogue.NpcDialoguePresenter;
 import com.immortalmc.adapter.dialogue.NpcDialogueRegistry;
@@ -100,6 +103,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
     private CultivationProjectionStore cultivationProjections;
     private BetterHudCultivationIntegration cultivationHud;
     private BukkitCultivationRewardPresenter cultivationRewardPresenter;
+    private SeclusionInventoryController seclusionInventory;
 
     @Override
     public void onEnable() {
@@ -125,6 +129,13 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 this,
                 playerId -> refreshCultivation(playerId, gameServiceClient, adapterLogger),
                 adapterLogger);
+        CultivationAreaResolver cultivationAreas = CultivationAreaResolver.from(getConfig());
+        seclusionInventory = new SeclusionInventoryController(
+                this, gameServiceClient, sessionCache, cultivationAreas,
+                playerId -> refreshCultivation(playerId, gameServiceClient, adapterLogger));
+        CultivationCommandRunner cultivationCommands = new CultivationCommandRunner(
+                this, gameServiceClient, sessionCache, seclusionInventory,
+                playerId -> refreshCultivation(playerId, gameServiceClient, adapterLogger));
         CombatAttributionTracker combatTracker = new CombatAttributionTracker(
                 combatSettings.maxSourceAge(),
                 combatSettings.maxActiveTargets());
@@ -311,7 +322,8 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                         commandService,
                         citizensNpcResolver,
                         citizensIntegration.selector(),
-                        questProviderCatalog);
+                        questProviderCatalog,
+                        cultivationCommands);
         PluginCommand immortalCommand =
                 Objects.requireNonNull(getCommand("immortal"), "Command 'immortal' is missing from plugin.yml");
         immortalCommand.setExecutor(commandExecutor);
@@ -320,6 +332,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
 
         getServer().getPluginManager().registerEvents(new ImmortalPlayerJoinListener(playerJoinLoginService), this);
         getServer().getPluginManager().registerEvents(cultivationRewardPresenter, this);
+        getServer().getPluginManager().registerEvents(seclusionInventory, this);
         getServer().getPluginManager().registerEvents(
                 new ImmortalPlayerLifecycleListener(
                         this::cleanupPlayer,
@@ -359,6 +372,10 @@ public final class ImmortalMainPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (seclusionInventory != null) {
+            seclusionInventory.close();
+            seclusionInventory = null;
+        }
         if (mythicMobsIntegration != null) {
             mythicMobsIntegration.close();
             mythicMobsIntegration = null;

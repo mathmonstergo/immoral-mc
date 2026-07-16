@@ -1,5 +1,6 @@
 package com.immortalmc.adapter.client;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -11,6 +12,7 @@ public record TechniqueSnapshot(
         int definitionVersion,
         String groupCode,
         String majorRealm,
+        List<String> attributeCodes,
         long investedAmount,
         long maxInvestment,
         int currentLayer,
@@ -24,6 +26,8 @@ public record TechniqueSnapshot(
         requireText(displayName, "displayName");
         requireText(groupCode, "groupCode");
         requireText(majorRealm, "majorRealm");
+        attributeCodes = List.copyOf(Objects.requireNonNull(attributeCodes, "attributeCodes"));
+        attributeCodes.forEach(attribute -> requireText(attribute, "attributeCodes"));
         requireText(status, "status");
         if (definitionVersion <= 0) {
             throw new IllegalArgumentException("definitionVersion must be positive");

@@ -44,6 +44,7 @@ class TechniqueSnapshotResponse(BaseModel):
     definition_version: int
     group_code: str
     major_realm: str
+    attribute_codes: tuple[str, ...]
     invested_amount: int
     max_investment: int
     current_layer: int

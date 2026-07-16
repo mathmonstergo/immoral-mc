@@ -15,9 +15,11 @@ softdepend:
 commands:
   immortal:
     description: ImmortalMC adapter operations.
-    usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue|quest>
-    permission: immortalmc.command
+    usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue|quest|seclusion|breakthrough|cultivation>
 permissions:
   immortalmc.command:
-    description: Allows use of ImmortalMC adapter commands.
+    description: Allows use of ImmortalMC administrative commands.
     default: op
+  immortalmc.cultivation:
+    description: Allows players to use cultivation and breakthrough commands.
+    default: true

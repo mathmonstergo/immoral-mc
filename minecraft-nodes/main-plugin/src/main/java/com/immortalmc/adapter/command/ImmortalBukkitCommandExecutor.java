@@ -4,6 +4,7 @@ import com.immortalmc.adapter.citizens.CitizensNpcResolver;
 import com.immortalmc.adapter.citizens.CitizensNpcSelector;
 import com.immortalmc.adapter.content.EntityBinding;
 import com.immortalmc.adapter.content.EntityInteractionEntity;
+import com.immortalmc.adapter.cultivation.CultivationCommandRunner;
 import com.immortalmc.adapter.targeting.EntityTargetCandidate;
 import com.immortalmc.adapter.targeting.EntityTargetSelector;
 import com.immortalmc.adapter.quest.QuestProviderCatalogCache;
@@ -29,21 +30,31 @@ import org.jetbrains.annotations.Nullable;
 
 public final class ImmortalBukkitCommandExecutor implements CommandExecutor, TabCompleter {
     private static final double MAX_TARGET_DISTANCE = 8.0;
+    private static final String ADMIN_PERMISSION = "immortalmc.command";
+    private static final String CULTIVATION_PERMISSION = "immortalmc.cultivation";
     private static final EntityTargetSelector TARGET_SELECTOR = new EntityTargetSelector(MAX_TARGET_DISTANCE);
-    private static final List<String> ROOT_SUBCOMMANDS =
-            List.of("health", "spirit-root", "spirit-root-detector", "npc-dialogue", "quest");
+    private static final List<String> ROOT_SUBCOMMANDS = List.of(
+            "health",
+            "spirit-root",
+            "spirit-root-detector",
+            "npc-dialogue",
+            "quest",
+            "seclusion",
+            "breakthrough",
+            "cultivation");
 
     private final ImmortalCommandService commandService;
     private final CitizensNpcResolver citizensNpcResolver;
     private final CitizensNpcSelector citizensNpcSelector;
     private final QuestProviderCatalogCache questProviderCatalog;
+    private final CultivationCommandRunner cultivationCommands;
 
     public ImmortalBukkitCommandExecutor(ImmortalCommandService commandService) {
         this(
                 commandService,
                 CitizensNpcResolver.unavailable(),
                 CitizensNpcSelector.unavailable(),
-                new QuestProviderCatalogCache());
+                new QuestProviderCatalogCache(), null);
     }
 
     public ImmortalBukkitCommandExecutor(
@@ -53,7 +64,7 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
                 commandService,
                 citizensNpcResolver,
                 CitizensNpcSelector.unavailable(),
-                new QuestProviderCatalogCache());
+                new QuestProviderCatalogCache(), null);
     }
 
     public ImmortalBukkitCommandExecutor(
@@ -61,10 +72,20 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
             CitizensNpcResolver citizensNpcResolver,
             CitizensNpcSelector citizensNpcSelector,
             QuestProviderCatalogCache questProviderCatalog) {
+        this(commandService, citizensNpcResolver, citizensNpcSelector, questProviderCatalog, null);
+    }
+
+    public ImmortalBukkitCommandExecutor(
+            ImmortalCommandService commandService,
+            CitizensNpcResolver citizensNpcResolver,
+            CitizensNpcSelector citizensNpcSelector,
+            QuestProviderCatalogCache questProviderCatalog,
+            CultivationCommandRunner cultivationCommands) {
         this.commandService = Objects.requireNonNull(commandService, "commandService");
         this.citizensNpcResolver = Objects.requireNonNull(citizensNpcResolver, "citizensNpcResolver");
         this.citizensNpcSelector = Objects.requireNonNull(citizensNpcSelector, "citizensNpcSelector");
         this.questProviderCatalog = Objects.requireNonNull(questProviderCatalog, "questProviderCatalog");
+        this.cultivationCommands = cultivationCommands;
     }
 
     @Override
@@ -73,8 +94,27 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
             @NotNull Command command,
             @NotNull String label,
             @NotNull String[] args) {
-        commandService.execute(args, sourceFor(sender), sender::sendMessage);
+        if (isPlayerCultivationCommand(args)) {
+            if (!sender.hasPermission(CULTIVATION_PERMISSION)) {
+                sender.sendMessage("你没有使用修炼命令的权限。");
+                return true;
+            }
+        } else if (!sender.hasPermission(ADMIN_PERMISSION)) {
+            sender.sendMessage("你没有使用管理命令的权限。");
+            return true;
+        }
+        if (cultivationCommands == null || !cultivationCommands.handle(sender, args)) {
+            commandService.execute(args, sourceFor(sender), sender::sendMessage);
+        }
         return true;
+    }
+
+    private static boolean isPlayerCultivationCommand(String[] args) {
+        if (args.length == 0) {
+            return false;
+        }
+        String subcommand = args[0].toLowerCase(Locale.ROOT);
+        return "seclusion".equals(subcommand) || "breakthrough".equals(subcommand);
     }
 
     @Override

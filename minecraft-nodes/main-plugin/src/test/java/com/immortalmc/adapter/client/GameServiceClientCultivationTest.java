@@ -46,6 +46,7 @@ class GameServiceClientCultivationTest {
                               "technique_id":"wind_split_escape_blade",
                               "display_name":"风裂遁刃诀","definition_version":1,
                               "group_code":"level:22","major_realm":"元婴",
+                              "attribute_codes":["wind"],
                               "invested_amount":500,"max_investment":1000,
                               "current_layer":7,"status":"active"}]
                             """));
@@ -68,6 +69,7 @@ class GameServiceClientCultivationTest {
                     assertEquals(0.5, snapshot.reserveRatio());
                     assertEquals(1, techniques.size());
                     assertEquals("风裂遁刃诀", techniques.getFirst().displayName());
+                    assertEquals(List.of("wind"), techniques.getFirst().attributeCodes());
                     assertEquals(7, techniques.getFirst().currentLayer());
                 });
     }

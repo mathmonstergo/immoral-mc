@@ -6,6 +6,10 @@ import pytest
 from tests.support.fakes import FakeStore, FakeUnitOfWorkFactory
 
 from immortal_mmo.cultivation.area_catalog import load_area_catalog
+from immortal_mmo.cultivation.errors import (
+    CultivationSeclusionConflictError,
+    CultivationSeclusionRuleError,
+)
 from immortal_mmo.cultivation.models import CultivationState, LifeTechnique, RealmEntry
 from immortal_mmo.cultivation.realm_catalog import load_realm_catalog
 from immortal_mmo.cultivation.service import CultivationService
@@ -92,7 +96,7 @@ async def test_start_rejects_mixed_major_realm_selection() -> None:
         load_realm_catalog(ROOT / "realm_catalog.json"),
         area_catalog=load_area_catalog(ROOT / "areas.json"),
     )
-    with pytest.raises(ValueError, match="same major realm"):
+    with pytest.raises(CultivationSeclusionRuleError, match="same major realm"):
         await service.start_seclusion(
             account_id=login.account.account_id,
             area_id="neutral_training_ground",
@@ -181,7 +185,7 @@ async def test_start_seclusion_rejects_changed_request_for_same_idempotency_key(
         idempotency_key=idempotency_key,
     )
 
-    with pytest.raises(ValueError, match="idempotency key was reused"):
+    with pytest.raises(CultivationSeclusionConflictError, match="idempotency key was reused"):
         await service.start_seclusion(
             account_id=login.account.account_id,
             area_id="accelerated_cave",
@@ -317,7 +321,7 @@ async def test_learned_technique_snapshot_derives_name_and_layer_from_catalog() 
     factory.store._state.life_techniques[technique_id] = LifeTechnique(
         technique_id,
         life_id,
-        "GF_YinqiShu_01",
+        "Gongfa_68726c",
         1,
         "qi",
         "练气",
@@ -333,5 +337,6 @@ async def test_learned_technique_snapshot_derives_name_and_layer_from_catalog() 
     ).list_techniques(login.account.account_id)
 
     assert len(snapshots) == 1
-    assert snapshots[0].display_name == "引气术"
+    assert snapshots[0].display_name == "冰冻术"
+    assert snapshots[0].attribute_codes == ("water", "ice")
     assert snapshots[0].current_layer == 13

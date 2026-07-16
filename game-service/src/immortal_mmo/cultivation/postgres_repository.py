@@ -28,10 +28,7 @@ from immortal_mmo.cultivation.models import (
     SessionTechnique,
     TechniqueInvestmentChange,
 )
-
-
-class ActiveCultivationSessionExists(RuntimeError):
-    """Raised when a life already owns an open cultivation mutation session."""
+from immortal_mmo.cultivation.repository import ActiveCultivationSessionExists
 
 
 class PostgresCultivationRepository:

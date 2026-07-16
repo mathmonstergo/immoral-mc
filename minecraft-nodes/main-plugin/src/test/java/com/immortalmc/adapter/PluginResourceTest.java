@@ -20,11 +20,13 @@ class PluginResourceTest {
         assertTrue(pluginYml.contains("api-version: '1.21.11'"));
         assertTrue(pluginYml.contains("immortal:"));
         assertTrue(pluginYml.contains(
-                "usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue|quest>"));
+                "usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue|quest|seclusion|breakthrough|cultivation>"));
         assertTrue(pluginYml.contains("com.fasterxml.jackson.core:jackson-databind:2.18.2"));
         assertTrue(pluginYml.contains("org.xerial:sqlite-jdbc:3.53.2.0"));
         assertTrue(pluginYml.contains("- BetterHud"));
         assertTrue(pluginYml.contains("- MythicMobs"));
+        assertTrue(pluginYml.contains("immortalmc.cultivation:"));
+        assertTrue(pluginYml.contains("default: true"));
     }
 
     @Test
@@ -45,6 +47,8 @@ class PluginResourceTest {
         assertTrue(configYml.contains("high-load-interval-ms: 5000"));
         assertTrue(configYml.contains("batch-size: 100"));
         assertTrue(configYml.contains("max-pending-age-seconds: 30"));
+        assertTrue(configYml.contains("area-id: neutral_training_ground"));
+        assertTrue(configYml.contains("world: world"));
     }
 
     @Test

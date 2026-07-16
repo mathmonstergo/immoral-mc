@@ -15,6 +15,10 @@ from immortal_mmo.cultivation.models import (
 )
 
 
+class ActiveCultivationSessionExists(RuntimeError):
+    """Raised when a life already owns an open cultivation session."""
+
+
 class CultivationRepository(Protocol):
     async def get_or_create_state(self, life_id: UUID, *, for_update: bool) -> CultivationState: ...
 

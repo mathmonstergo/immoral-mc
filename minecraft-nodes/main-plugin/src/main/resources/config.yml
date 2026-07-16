@@ -26,6 +26,13 @@ quest:
   proximity-radius: 6.0
   max-players-per-scan: 100
 
+cultivation:
+  areas:
+    - area-id: neutral_training_ground
+      world: world
+      min: {x: -32, y: -64, z: -32}
+      max: {x: 32, y: 320, z: 32}
+
 content:
   entity-interactions:
     entries: []
