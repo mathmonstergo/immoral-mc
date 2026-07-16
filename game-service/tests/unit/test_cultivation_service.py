@@ -306,3 +306,32 @@ async def test_exact_level_settlement_fills_bar_without_advancing() -> None:
     assert snapshot.current_level == 14
     assert snapshot.current_progress == 43_931
     assert snapshot.progress_full is True
+
+
+@pytest.mark.asyncio
+async def test_learned_technique_snapshot_derives_name_and_layer_from_catalog() -> None:
+    factory = FakeUnitOfWorkFactory(FakeStore())
+    login = await PlayerService(factory).login(UUID(int=706), "TechniqueList")
+    life_id = login.current_life.life_id
+    technique_id = UUID(int=7_061)
+    factory.store._state.life_techniques[technique_id] = LifeTechnique(
+        technique_id,
+        life_id,
+        "GF_YinqiShu_01",
+        1,
+        "qi",
+        "练气",
+        3_765,
+        3_765,
+        1,
+        "active",
+    )
+
+    snapshots = await CultivationService(
+        factory,
+        load_realm_catalog(ROOT / "realm_catalog.json"),
+    ).list_techniques(login.account.account_id)
+
+    assert len(snapshots) == 1
+    assert snapshots[0].display_name == "引气术"
+    assert snapshots[0].current_layer == 13

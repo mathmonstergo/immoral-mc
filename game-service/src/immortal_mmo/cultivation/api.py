@@ -11,6 +11,7 @@ from immortal_mmo.cultivation.schemas import (
     StartBreakthroughRequest,
     StartSeclusionRequest,
     TechniqueMutationResponse,
+    TechniqueSnapshotResponse,
     TransferTechniqueRequest,
 )
 from immortal_mmo.cultivation.service import CultivationService
@@ -35,6 +36,17 @@ async def current_life_cultivation(
     service: CultivationService = cultivation_service_dependency,
 ) -> CultivationSnapshotResponse:
     return await service.current_life_snapshot(account_id)
+
+
+@router.get(
+    "/{account_id}/current-life/cultivation/techniques",
+    response_model=list[TechniqueSnapshotResponse],
+)
+async def list_techniques(
+    account_id: UUID,
+    service: CultivationService = cultivation_service_dependency,
+) -> tuple[TechniqueSnapshotResponse, ...]:
+    return await service.list_techniques(account_id)
 
 
 @router.post(

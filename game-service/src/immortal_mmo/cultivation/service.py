@@ -16,6 +16,7 @@ from immortal_mmo.cultivation.breakthrough_catalog import (
     BreakthroughCatalog,
     load_breakthrough_catalog,
 )
+from immortal_mmo.cultivation.layer_curves import layer_for_investment
 from immortal_mmo.cultivation.models import (
     BreakthroughTechniqueDebit,
     CultivationSession,
@@ -39,10 +40,15 @@ from immortal_mmo.cultivation.schemas import (
     ItemAdjustmentResponse,
     SeclusionSnapshotResponse,
     TechniqueMutationResponse,
+    TechniqueSnapshotResponse,
 )
 from immortal_mmo.cultivation.seclusion import (
     cumulative_time_budget,
     maximum_convertible_reserve,
+)
+from immortal_mmo.cultivation.technique_catalog import (
+    TechniqueCatalog,
+    load_technique_catalog,
 )
 from immortal_mmo.player.service import PlayerAccountNotFoundError, PlayerLifecycleError
 
@@ -53,6 +59,12 @@ DEFAULT_TRANSFER_PROFILES = {
 }
 TECHNIQUE_MUTATION_CONTENT_VERSION = "technique-mutation:v1"
 BREAKTHROUGH_CONTENT_VERSION = "breakthrough:v1"
+TECHNIQUE_GROWTH_RATIOS = {
+    "练气": (3, 2),
+    "筑基": (17, 10),
+    "结丹": (9, 5),
+    "元婴": (2, 1),
+}
 
 
 class CultivationMutationConflictError(ConflictError):
@@ -88,6 +100,7 @@ class CultivationService:
         *,
         area_catalog: AreaCatalog | None = None,
         breakthrough_catalog: BreakthroughCatalog | None = None,
+        technique_catalog: TechniqueCatalog | None = None,
         clock: Callable[[], datetime] | None = None,
         transfer_profiles: Mapping[str, int] | None = None,
         basis_point_roll: Callable[[], int] | None = None,
@@ -101,6 +114,9 @@ class CultivationService:
         self._clock = clock or (lambda: datetime.now(UTC))
         self._breakthrough_catalog = breakthrough_catalog or load_breakthrough_catalog(
             Path(__file__).resolve().parent / "breakthrough_rules.json"
+        )
+        self._technique_catalog = technique_catalog or load_technique_catalog(
+            Path(__file__).resolve().parent / "techniques.json"
         )
         self._basis_point_roll = basis_point_roll or (
             lambda: secrets.randbelow(10_000) + 1
@@ -139,6 +155,56 @@ class CultivationService:
             )
             await uow.commit()
         return CultivationSnapshotResponse(**asdict(snapshot))
+
+    async def list_techniques(
+        self, account_id: UUID
+    ) -> tuple[TechniqueSnapshotResponse, ...]:
+        async with self._uow_factory() as uow:
+            account = await uow.players.lock_account(account_id)
+            if account is None:
+                raise PlayerAccountNotFoundError()
+            life = await uow.players.get_current_life(account_id, for_update=False)
+            if life is None:
+                raise PlayerLifecycleError()
+            techniques = await uow.cultivation.get_techniques(
+                life.life_id, for_update=False
+            )
+            await uow.rollback()
+        snapshots: list[TechniqueSnapshotResponse] = []
+        for technique in techniques:
+            definition = self._technique_catalog.techniques.get(
+                technique.technique_id
+            )
+            ratio = TECHNIQUE_GROWTH_RATIOS.get(technique.major_realm)
+            current_layer = technique.current_layer
+            if ratio is not None:
+                try:
+                    current_layer = layer_for_investment(
+                        technique.invested_amount,
+                        technique.max_investment,
+                        *ratio,
+                    )
+                except ValueError:
+                    current_layer = technique.current_layer
+            snapshots.append(
+                TechniqueSnapshotResponse(
+                    life_technique_id=technique.life_technique_id,
+                    technique_id=technique.technique_id,
+                    display_name=(
+                        technique.technique_id
+                        if definition is None
+                        else definition.name
+                    ),
+                    definition_version=technique.definition_version,
+                    group_code=technique.group_code,
+                    major_realm=technique.major_realm,
+                    invested_amount=technique.invested_amount,
+                    max_investment=technique.max_investment,
+                    current_layer=current_layer,
+                    status=technique.status,
+                )
+            )
+        return tuple(snapshots)
 
     async def abandon_technique(
         self,

@@ -36,6 +36,20 @@ class StartSeclusionRequest(BaseModel):
     technique_ids: list[UUID] = Field(min_length=1, max_length=5)
 
 
+class TechniqueSnapshotResponse(BaseModel):
+    contract_version: Literal[1] = 1
+    life_technique_id: UUID
+    technique_id: str
+    display_name: str
+    definition_version: int
+    group_code: str
+    major_realm: str
+    invested_amount: int
+    max_investment: int
+    current_layer: int
+    status: str
+
+
 class TransferTechniqueRequest(BaseModel):
     target_technique_id: UUID
     transfer_profile_id: str = Field(min_length=1, max_length=64)

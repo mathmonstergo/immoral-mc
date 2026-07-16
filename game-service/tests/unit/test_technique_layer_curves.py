@@ -1,6 +1,9 @@
 import pytest
 
-from immortal_mmo.cultivation.layer_curves import build_transition_costs
+from immortal_mmo.cultivation.layer_curves import (
+    build_transition_costs,
+    layer_for_investment,
+)
 
 
 @pytest.mark.parametrize("capacity,ratio", [(3_765, (3, 2)), (14_644, (17, 10))])
@@ -32,6 +35,15 @@ def test_largest_fractional_remainder_tie_prefers_lower_transition_index() -> No
 
 def test_largest_remainders_can_make_zero_floor_quotas_positive() -> None:
     assert build_transition_costs(12, 101, 100) == (1,) * 12
+
+
+def test_layer_is_derived_from_authoritative_total_investment() -> None:
+    costs = build_transition_costs(3_765, 3, 2)
+
+    assert layer_for_investment(0, 3_765, 3, 2) == 1
+    assert layer_for_investment(costs[0] - 1, 3_765, 3, 2) == 1
+    assert layer_for_investment(costs[0], 3_765, 3, 2) == 2
+    assert layer_for_investment(3_765, 3_765, 3, 2) == 13
 
 
 @pytest.mark.parametrize(

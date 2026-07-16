@@ -22,3 +22,26 @@ def build_transition_costs(capacity: int, p: int, q: int) -> tuple[int, ...]:
         raise ValueError("capacity and ratio must produce positive transition costs")
 
     return tuple(costs)
+
+
+def layer_for_investment(
+    invested_amount: int,
+    capacity: int,
+    p: int,
+    q: int,
+) -> int:
+    if (
+        isinstance(invested_amount, bool)
+        or not isinstance(invested_amount, int)
+        or invested_amount < 0
+        or invested_amount > capacity
+    ):
+        raise ValueError("invested_amount must be within technique capacity")
+    cumulative = 0
+    layer = 1
+    for cost in build_transition_costs(capacity, p, q):
+        cumulative += cost
+        if invested_amount < cumulative:
+            break
+        layer += 1
+    return min(layer, 13)
