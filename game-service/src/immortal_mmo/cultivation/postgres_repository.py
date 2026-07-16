@@ -11,6 +11,7 @@ from immortal_mmo.combat.catalog import MAX_REWARD_AMOUNT
 from immortal_mmo.cultivation.db_models import (
     CultivationResourceEntryRow,
     CultivationSessionRow,
+    CultivationSessionTechniqueRow,
     LifeCultivationStateRow,
     LifeRealmEntryRow,
     LifeTechniqueRow,
@@ -22,6 +23,7 @@ from immortal_mmo.cultivation.models import (
     CultivationState,
     LifeTechnique,
     RealmEntry,
+    SessionTechnique,
     TechniqueInvestmentChange,
 )
 
@@ -100,6 +102,48 @@ class PostgresCultivationRepository:
         ).all()
         return {group_code: int(total) for group_code, total in rows}
 
+    async def get_latest_realm_generation(self, life_id: UUID) -> int:
+        generation = await self._session.scalar(
+            select(func.coalesce(func.max(LifeRealmEntryRow.generation), 0)).where(
+                LifeRealmEntryRow.life_id == life_id
+            )
+        )
+        return int(generation or 0)
+
+    async def append_realm_entry(self, entry: RealmEntry) -> CultivationState:
+        self._session.add(
+            LifeRealmEntryRow(
+                realm_entry_id=entry.realm_entry_id,
+                life_id=entry.life_id,
+                generation=entry.generation,
+                parent_entry_id=entry.parent_entry_id,
+                source_level=entry.source_level,
+                target_level=entry.target_level,
+                source_group=entry.source_group,
+                target_group=entry.target_group,
+                source_floor=entry.source_floor,
+                target_baseline=entry.target_baseline,
+                transition_kind=entry.transition_kind,
+                transition_session_id=entry.transition_session_id,
+                status=entry.status,
+                invalidated_at=entry.invalidated_at,
+            )
+        )
+        row = (
+            await self._session.execute(
+                update(LifeCultivationStateRow)
+                .where(LifeCultivationStateRow.life_id == entry.life_id)
+                .values(
+                    current_level=entry.target_level,
+                    revision=LifeCultivationStateRow.revision + 1,
+                    updated_at=func.now(),
+                )
+                .returning(LifeCultivationStateRow)
+            )
+        ).scalar_one()
+        await self._session.flush()
+        return _state(row)
+
     async def insert_session(self, session: CultivationSession) -> None:
         row = CultivationSessionRow(
             session_id=session.session_id,
@@ -131,6 +175,153 @@ class PostgresCultivationRepository:
             if constraint_name == "ux_cultivation_one_open_session":
                 raise ActiveCultivationSessionExists(session.life_id) from error
             raise
+
+    async def start_session(
+        self,
+        session: CultivationSession,
+        techniques: tuple[SessionTechnique, ...],
+    ) -> None:
+        await self.insert_session(session)
+        self._session.add_all(
+            [
+                CultivationSessionTechniqueRow(
+                    session_id=item.session_id,
+                    life_id=item.life_id,
+                    life_technique_id=item.life_technique_id,
+                    definition_version=item.definition_version,
+                    group_code=item.group_code,
+                    major_realm=item.major_realm,
+                    frozen_capacity=item.frozen_capacity,
+                    frozen_invested=item.frozen_invested,
+                    frozen_full_mastery_seconds=item.frozen_full_mastery_seconds,
+                )
+                for item in techniques
+            ]
+        )
+        await self._session.execute(
+            update(LifeCultivationStateRow)
+            .where(LifeCultivationStateRow.life_id == session.life_id)
+            .values(
+                active_session_id=session.session_id,
+                revision=LifeCultivationStateRow.revision + 1,
+                updated_at=func.now(),
+            )
+        )
+        await self._session.flush()
+
+    async def get_session(self, session_id: UUID, *, for_update: bool) -> CultivationSession | None:
+        statement = select(CultivationSessionRow).where(
+            CultivationSessionRow.session_id == session_id
+        )
+        if for_update:
+            statement = statement.with_for_update(of=CultivationSessionRow)
+        row = await self._session.scalar(statement)
+        return None if row is None else _session(row)
+
+    async def get_session_by_idempotency(
+        self, life_id: UUID, idempotency_key: UUID
+    ) -> CultivationSession | None:
+        row = await self._session.scalar(
+            select(CultivationSessionRow).where(
+                CultivationSessionRow.life_id == life_id,
+                CultivationSessionRow.idempotency_key == idempotency_key,
+            )
+        )
+        return None if row is None else _session(row)
+
+    async def get_session_techniques(self, session_id: UUID) -> tuple[SessionTechnique, ...]:
+        rows = (
+            await self._session.scalars(
+                select(CultivationSessionTechniqueRow)
+                .where(CultivationSessionTechniqueRow.session_id == session_id)
+                .order_by(CultivationSessionTechniqueRow.life_technique_id)
+            )
+        ).all()
+        return tuple(_session_technique(row) for row in rows)
+
+    async def consume_unrefined(
+        self,
+        *,
+        life_id: UUID,
+        session_id: UUID,
+        operation_id: UUID,
+        amount: int,
+        occurred_at: datetime,
+    ) -> CultivationState:
+        if amount <= 0:
+            raise ValueError("Consumed unrefined cultivation must be positive")
+        state = await self.get_or_create_state(life_id, for_update=True)
+        if state.unrefined_cultivation < amount:
+            raise ValueError("Insufficient unrefined cultivation")
+        balance_after = state.unrefined_cultivation - amount
+        updated = (
+            await self._session.execute(
+                update(LifeCultivationStateRow)
+                .where(LifeCultivationStateRow.life_id == life_id)
+                .values(
+                    unrefined_cultivation=balance_after,
+                    revision=LifeCultivationStateRow.revision + 1,
+                    updated_at=func.now(),
+                )
+                .returning(LifeCultivationStateRow)
+            )
+        ).scalar_one()
+        self._session.add(
+            CultivationResourceEntryRow(
+                entry_id=uuid4(),
+                life_id=life_id,
+                resource_code="unrefined_cultivation",
+                entry_type="seclusion_consumption",
+                delta_amount=-amount,
+                balance_after=balance_after,
+                kill_event_id=None,
+                session_id=session_id,
+                operation_id=operation_id,
+                created_at=occurred_at,
+            )
+        )
+        await self._session.flush()
+        return _state(updated)
+
+    async def update_session_settlement(
+        self,
+        *,
+        session_id: UUID,
+        cumulative_elapsed_seconds: int,
+        cumulative_generated: int,
+        cumulative_reserve_consumed: int,
+        cumulative_retained: int,
+        status: str,
+        settled_at: datetime | None,
+    ) -> CultivationSession:
+        row = (
+            await self._session.execute(
+                update(CultivationSessionRow)
+                .where(CultivationSessionRow.session_id == session_id)
+                .values(
+                    cumulative_elapsed_seconds=cumulative_elapsed_seconds,
+                    cumulative_generated=cumulative_generated,
+                    cumulative_reserve_consumed=cumulative_reserve_consumed,
+                    cumulative_retained=cumulative_retained,
+                    status=status,
+                    settled_at=settled_at,
+                    revision=CultivationSessionRow.revision + 1,
+                    updated_at=func.now(),
+                )
+                .returning(CultivationSessionRow)
+            )
+        ).scalar_one()
+        if status in {"completed", "failed", "cancelled"}:
+            await self._session.execute(
+                update(LifeCultivationStateRow)
+                .where(LifeCultivationStateRow.active_session_id == session_id)
+                .values(
+                    active_session_id=None,
+                    revision=LifeCultivationStateRow.revision + 1,
+                    updated_at=func.now(),
+                )
+            )
+        return _session(row)
 
     async def apply_technique_investments(
         self,
@@ -354,6 +545,44 @@ def _realm_entry(row: LifeRealmEntryRow) -> RealmEntry:
         transition_session_id=row.transition_session_id,
         status=row.status,
         invalidated_at=row.invalidated_at,
+    )
+
+
+def _session(row: CultivationSessionRow) -> CultivationSession:
+    return CultivationSession(
+        session_id=row.session_id,
+        life_id=row.life_id,
+        session_kind=row.session_kind,
+        status=row.status,
+        idempotency_key=row.idempotency_key,
+        request_fingerprint=row.request_fingerprint,
+        area_id=row.area_id,
+        content_version=row.content_version,
+        source_level=row.source_level,
+        target_level=row.target_level,
+        frozen_snapshot=row.frozen_snapshot,
+        cumulative_elapsed_seconds=row.cumulative_elapsed_seconds,
+        cumulative_generated=row.cumulative_generated,
+        cumulative_reserve_consumed=row.cumulative_reserve_consumed,
+        cumulative_retained=row.cumulative_retained,
+        started_at=row.started_at,
+        completes_at=row.completes_at,
+        settled_at=row.settled_at,
+        revision=row.revision,
+    )
+
+
+def _session_technique(row: CultivationSessionTechniqueRow) -> SessionTechnique:
+    return SessionTechnique(
+        session_id=row.session_id,
+        life_id=row.life_id,
+        life_technique_id=row.life_technique_id,
+        definition_version=row.definition_version,
+        group_code=row.group_code,
+        major_realm=row.major_realm,
+        frozen_capacity=row.frozen_capacity,
+        frozen_invested=row.frozen_invested,
+        frozen_full_mastery_seconds=row.frozen_full_mastery_seconds,
     )
 
 

@@ -341,7 +341,7 @@ class CultivationSessionRow(Base):
     idempotency_key: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     area_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    content_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_version: Mapped[str] = mapped_column(String(80), nullable=False)
     source_level: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     target_level: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     frozen_snapshot: Mapped[dict[str, object]] = mapped_column(

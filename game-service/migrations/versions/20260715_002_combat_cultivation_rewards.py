@@ -144,7 +144,7 @@ def upgrade() -> None:
         sa.Column("idempotency_key", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("request_fingerprint", sa.String(length=64), nullable=False),
         sa.Column("area_id", sa.String(length=64), nullable=True),
-        sa.Column("content_version", sa.String(length=64), nullable=False),
+        sa.Column("content_version", sa.String(length=80), nullable=False),
         sa.Column("source_level", sa.SmallInteger(), nullable=False),
         sa.Column("target_level", sa.SmallInteger(), nullable=True),
         sa.Column("frozen_snapshot", postgresql.JSONB(none_as_null=True), nullable=False),

@@ -83,3 +83,16 @@ class TechniqueInvestmentChange:
     life_technique_id: UUID
     delta_amount: int
     entry_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class SessionTechnique:
+    session_id: UUID
+    life_id: UUID
+    life_technique_id: UUID
+    definition_version: int
+    group_code: str
+    major_realm: str
+    frozen_capacity: int
+    frozen_invested: int
+    frozen_full_mastery_seconds: int

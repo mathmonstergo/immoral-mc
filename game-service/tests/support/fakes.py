@@ -13,6 +13,7 @@ from immortal_mmo.cultivation.models import (
     CultivationState,
     LifeTechnique,
     RealmEntry,
+    SessionTechnique,
     TechniqueInvestmentChange,
 )
 from immortal_mmo.item.models import (
@@ -50,6 +51,7 @@ class _FakeState:
     life_techniques: dict[UUID, LifeTechnique] = field(default_factory=dict)
     realm_entries: dict[UUID, RealmEntry] = field(default_factory=dict)
     cultivation_sessions: dict[UUID, CultivationSession] = field(default_factory=dict)
+    session_techniques: dict[UUID, tuple[SessionTechnique, ...]] = field(default_factory=dict)
     item_stacks: dict[tuple[UUID, str], ItemStack] = field(default_factory=dict)
     item_entries: dict[tuple[UUID, str], ItemResourceEntry] = field(default_factory=dict)
 
@@ -453,6 +455,29 @@ class FakeCultivationRepository:
                 )
         return totals
 
+    async def get_latest_realm_generation(self, life_id: UUID) -> int:
+        self._ensure_active()
+        return max(
+            (
+                entry.generation
+                for entry in self._state.realm_entries.values()
+                if entry.life_id == life_id
+            ),
+            default=0,
+        )
+
+    async def append_realm_entry(self, entry: RealmEntry) -> CultivationState:
+        self._ensure_active()
+        self._state.realm_entries[entry.realm_entry_id] = entry
+        state = await self.get_or_create_state(entry.life_id, for_update=True)
+        updated = replace(
+            state,
+            current_level=entry.target_level,
+            revision=state.revision + 1,
+        )
+        self._state.cultivation_states[entry.life_id] = updated
+        return updated
+
     async def insert_session(self, session: CultivationSession) -> None:
         self._ensure_active()
         if any(
@@ -461,6 +486,96 @@ class FakeCultivationRepository:
         ):
             raise RuntimeError("Active cultivation session exists")
         self._state.cultivation_sessions[session.session_id] = session
+
+    async def start_session(
+        self,
+        session: CultivationSession,
+        techniques: tuple[SessionTechnique, ...],
+    ) -> None:
+        await self.insert_session(session)
+        self._state.session_techniques[session.session_id] = techniques
+        state = await self.get_or_create_state(session.life_id, for_update=True)
+        self._state.cultivation_states[session.life_id] = replace(
+            state,
+            active_session_id=session.session_id,
+            revision=state.revision + 1,
+        )
+
+    async def get_session(self, session_id: UUID, *, for_update: bool) -> CultivationSession | None:
+        self._ensure_active()
+        del for_update
+        return self._state.cultivation_sessions.get(session_id)
+
+    async def get_session_by_idempotency(
+        self, life_id: UUID, idempotency_key: UUID
+    ) -> CultivationSession | None:
+        self._ensure_active()
+        return next(
+            (
+                session
+                for session in self._state.cultivation_sessions.values()
+                if session.life_id == life_id and session.idempotency_key == idempotency_key
+            ),
+            None,
+        )
+
+    async def get_session_techniques(self, session_id: UUID) -> tuple[SessionTechnique, ...]:
+        self._ensure_active()
+        return self._state.session_techniques.get(session_id, ())
+
+    async def consume_unrefined(
+        self,
+        *,
+        life_id: UUID,
+        session_id: UUID,
+        operation_id: UUID,
+        amount: int,
+        occurred_at: datetime,
+    ) -> CultivationState:
+        self._ensure_active()
+        del session_id, operation_id, occurred_at
+        state = await self.get_or_create_state(life_id, for_update=True)
+        if state.unrefined_cultivation < amount:
+            raise ValueError("Insufficient unrefined cultivation")
+        updated = replace(
+            state,
+            unrefined_cultivation=state.unrefined_cultivation - amount,
+            revision=state.revision + 1,
+        )
+        self._state.cultivation_states[life_id] = updated
+        self._state.cultivation_balances[life_id] = updated.unrefined_cultivation
+        return updated
+
+    async def update_session_settlement(
+        self,
+        *,
+        session_id: UUID,
+        cumulative_elapsed_seconds: int,
+        cumulative_generated: int,
+        cumulative_reserve_consumed: int,
+        cumulative_retained: int,
+        status: str,
+        settled_at: datetime | None,
+    ) -> CultivationSession:
+        self._ensure_active()
+        session = self._state.cultivation_sessions[session_id]
+        updated = replace(
+            session,
+            cumulative_elapsed_seconds=cumulative_elapsed_seconds,
+            cumulative_generated=cumulative_generated,
+            cumulative_reserve_consumed=cumulative_reserve_consumed,
+            cumulative_retained=cumulative_retained,
+            status=status,
+            settled_at=settled_at,
+            revision=session.revision + 1,
+        )
+        self._state.cultivation_sessions[session_id] = updated
+        if status in {"completed", "failed", "cancelled"}:
+            state = self._state.cultivation_states[session.life_id]
+            self._state.cultivation_states[session.life_id] = replace(
+                state, active_session_id=None, revision=state.revision + 1
+            )
+        return updated
 
     async def apply_technique_investments(
         self,
