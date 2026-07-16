@@ -186,6 +186,10 @@ class TechniqueCatalog:
         expected_realm, expected_weight = _GROUP_REALMS[technique.group]
         if technique.major_realm != expected_realm:
             raise TechniqueCatalogError("Technique group and major_realm are inconsistent")
+        if isinstance(technique.time_weight, bool) or not isinstance(
+            technique.time_weight, int
+        ):
+            raise TechniqueCatalogError("Technique time_weight must be an integer")
         if technique.time_weight != expected_weight:
             raise TechniqueCatalogError("Technique time_weight is inconsistent with major realm")
         if technique.max_layer != 13:
@@ -288,6 +292,15 @@ class TechniqueCatalog:
             ):
                 raise TechniqueCatalogError(
                     "Technique effect stacks must be a positive integer or null"
+                )
+            if (
+                isinstance(effect.layer_start, bool)
+                or not isinstance(effect.layer_start, int)
+                or isinstance(effect.layer_end, bool)
+                or not isinstance(effect.layer_end, int)
+            ):
+                raise TechniqueCatalogError(
+                    "Technique effect layer bounds must be integers"
                 )
             if not 1 <= effect.layer_start <= effect.layer_end <= 13:
                 raise TechniqueCatalogError(

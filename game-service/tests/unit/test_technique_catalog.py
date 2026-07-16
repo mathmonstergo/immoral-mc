@@ -10,6 +10,7 @@ from immortal_mmo.cultivation.technique_catalog import (
     TechniqueCatalog,
     TechniqueDefinition,
     TechniqueEffect,
+    TechniqueEffectDefinition,
     TechniquePrerequisite,
     load_technique_catalog,
 )
@@ -116,6 +117,69 @@ def test_constructor_rejects_duplicate_ids_and_group_overflow() -> None:
     )
     with pytest.raises(ValueError, match="retention cap"):
         TechniqueCatalog(schema_version=1, techniques=overflow)
+
+
+@pytest.mark.parametrize("time_weight", [True, 1.0])
+def test_constructor_rejects_non_integer_time_weight(time_weight: object) -> None:
+    definition = TechniqueDefinition(
+        technique_id="invalid-weight",
+        name="Invalid",
+        description="desc",
+        group="qi",
+        major_realm="练气",
+        time_weight=cast(Any, time_weight),
+        max_layer=13,
+        required_elements=(),
+        minimum_player_level=1,
+        prerequisites=(),
+        equipped_item_requirements=(),
+        category="辅助",
+        effects=(),
+    )
+
+    with pytest.raises(ValueError, match="time_weight.*integer"):
+        TechniqueCatalog(schema_version=1, techniques=(definition,))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("layer_start", True), ("layer_start", 1.0), ("layer_end", True), ("layer_end", 13.0)],
+)
+def test_constructor_rejects_non_integer_effect_layer_bounds(field: str, value: object) -> None:
+    bounds = {"layer_start": 1, "layer_end": 13}
+    bounds[field] = cast(Any, value)
+    effect = TechniqueEffectDefinition(
+        attribute="attack",
+        kind="attribute",
+        status=None,
+        effect_type="triggered",
+        mode="percent",
+        value=1.0,
+        growth=0.0,
+        chance=None,
+        duration_rounds=None,
+        stacks=None,
+        layer_start=bounds["layer_start"],
+        layer_end=bounds["layer_end"],
+    )
+    definition = TechniqueDefinition(
+        technique_id="invalid-effect-layer",
+        name="Invalid",
+        description="desc",
+        group="qi",
+        major_realm="练气",
+        time_weight=1,
+        max_layer=13,
+        required_elements=(),
+        minimum_player_level=1,
+        prerequisites=(),
+        equipped_item_requirements=(),
+        category="辅助",
+        effects=(effect,),
+    )
+
+    with pytest.raises(ValueError, match="layer.*integer"):
+        TechniqueCatalog(schema_version=1, techniques=(definition,))
 
 
 @pytest.mark.parametrize("schema_version", [True, 1.0, 2])
