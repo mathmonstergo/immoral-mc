@@ -105,3 +105,49 @@ async def test_open_sessions_are_unique_per_life(postgres_engine: AsyncEngine) -
     assert "life_id" in definition
     assert "pending" in definition
     assert "active" in definition
+
+
+@pytest.mark.asyncio
+async def test_completed_technique_mutation_is_an_explicit_session_shape(
+    postgres_engine: AsyncEngine,
+) -> None:
+    async with postgres_engine.connect() as connection:
+        constraints = dict(
+            (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT con.conname, pg_get_constraintdef(con.oid)
+                        FROM pg_constraint AS con
+                        JOIN pg_class AS rel ON rel.oid = con.conrelid
+                        WHERE rel.relname = 'cultivation_sessions'
+                          AND con.conname IN (
+                            'ck_cultivation_session_kind',
+                            'ck_cultivation_session_shape'
+                          )
+                        """
+                    )
+                )
+            ).all()
+        )
+        session_kind_length = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT character_maximum_length
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'cultivation_sessions'
+                      AND column_name = 'session_kind'
+                    """
+                )
+            )
+        ).scalar_one()
+
+    assert session_kind_length == 32
+    assert "technique_mutation" in constraints["ck_cultivation_session_kind"]
+    shape = constraints["ck_cultivation_session_shape"]
+    assert "technique_mutation" in shape
+    assert "area_id IS NULL" in shape
+    assert "target_level IS NULL" in shape
+    assert "status" in shape and "completed" in shape

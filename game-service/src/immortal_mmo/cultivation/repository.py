@@ -33,7 +33,31 @@ class CultivationRepository(Protocol):
 
     async def get_latest_realm_generation(self, life_id: UUID) -> int: ...
 
+    async def has_realm_transition_history(
+        self,
+        life_id: UUID,
+        *,
+        source_level: int,
+        target_level: int,
+    ) -> bool: ...
+
     async def append_realm_entry(self, entry: RealmEntry) -> CultivationState: ...
+
+    async def invalidate_realm_suffix(
+        self,
+        *,
+        life_id: UUID,
+        retained_entry_ids: tuple[UUID, ...],
+        current_level: int,
+        invalidated_at: datetime,
+    ) -> CultivationState: ...
+
+    async def abandon_technique(
+        self,
+        *,
+        life_id: UUID,
+        life_technique_id: UUID,
+    ) -> CultivationState: ...
 
     async def insert_session(self, session: CultivationSession) -> None: ...
 
@@ -52,6 +76,13 @@ class CultivationRepository(Protocol):
     ) -> CultivationSession | None: ...
 
     async def get_session_techniques(self, session_id: UUID) -> tuple[SessionTechnique, ...]: ...
+
+    async def update_session_frozen_snapshot(
+        self,
+        *,
+        session_id: UUID,
+        frozen_snapshot: dict[str, object],
+    ) -> CultivationSession: ...
 
     async def consume_unrefined(
         self,

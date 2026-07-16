@@ -280,7 +280,7 @@ class CultivationSessionRow(Base):
             name=conv("uq_cultivation_session_idempotency"),
         ),
         CheckConstraint(
-            "session_kind IN ('ordinary', 'breakthrough')",
+            "session_kind IN ('ordinary', 'breakthrough', 'technique_mutation')",
             name=conv("ck_cultivation_session_kind"),
         ),
         CheckConstraint(
@@ -309,7 +309,9 @@ class CultivationSessionRow(Base):
             "(session_kind = 'ordinary' AND area_id IS NOT NULL "
             "AND target_level IS NULL) OR "
             "(session_kind = 'breakthrough' AND area_id IS NULL "
-            "AND target_level IS NOT NULL)",
+            "AND target_level IS NOT NULL) OR "
+            "(session_kind = 'technique_mutation' AND area_id IS NULL "
+            "AND target_level IS NULL AND status = 'completed')",
             name=conv("ck_cultivation_session_shape"),
         ),
         CheckConstraint("revision > 0", name=conv("ck_cultivation_session_revision")),
@@ -336,7 +338,7 @@ class CultivationSessionRow(Base):
         ),
         nullable=False,
     )
-    session_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    session_kind: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     idempotency_key: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)

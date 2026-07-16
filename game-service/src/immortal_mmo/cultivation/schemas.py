@@ -34,3 +34,20 @@ class SeclusionSnapshotResponse(BaseModel):
 class StartSeclusionRequest(BaseModel):
     area_id: str = Field(min_length=1, max_length=64)
     technique_ids: list[UUID] = Field(min_length=1, max_length=5)
+
+
+class TransferTechniqueRequest(BaseModel):
+    target_technique_id: UUID
+    transfer_profile_id: str = Field(min_length=1, max_length=64)
+
+
+class TechniqueMutationResponse(BaseModel):
+    contract_version: Literal[1] = 1
+    operation_id: UUID
+    operation_kind: Literal["abandonment", "transfer"]
+    source_technique_id: UUID
+    target_technique_id: UUID | None
+    removed_amount: int
+    transferred_amount: int
+    destroyed_amount: int
+    cultivation: CultivationSnapshotResponse

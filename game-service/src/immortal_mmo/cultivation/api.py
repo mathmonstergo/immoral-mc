@@ -6,6 +6,8 @@ from immortal_mmo.cultivation.schemas import (
     CultivationSnapshotResponse,
     SeclusionSnapshotResponse,
     StartSeclusionRequest,
+    TechniqueMutationResponse,
+    TransferTechniqueRequest,
 )
 from immortal_mmo.cultivation.service import CultivationService
 
@@ -29,6 +31,43 @@ async def current_life_cultivation(
     service: CultivationService = cultivation_service_dependency,
 ) -> CultivationSnapshotResponse:
     return await service.current_life_snapshot(account_id)
+
+
+@router.post(
+    "/{account_id}/current-life/cultivation/techniques/{life_technique_id}/abandon",
+    response_model=TechniqueMutationResponse,
+)
+async def abandon_technique(
+    account_id: UUID,
+    life_technique_id: UUID,
+    idempotency_key: UUID = idempotency_key_header,
+    service: CultivationService = cultivation_service_dependency,
+) -> TechniqueMutationResponse:
+    return await service.abandon_technique(
+        account_id=account_id,
+        life_technique_id=life_technique_id,
+        idempotency_key=idempotency_key,
+    )
+
+
+@router.post(
+    "/{account_id}/current-life/cultivation/techniques/{life_technique_id}/transfer",
+    response_model=TechniqueMutationResponse,
+)
+async def transfer_technique(
+    account_id: UUID,
+    life_technique_id: UUID,
+    body: TransferTechniqueRequest,
+    idempotency_key: UUID = idempotency_key_header,
+    service: CultivationService = cultivation_service_dependency,
+) -> TechniqueMutationResponse:
+    return await service.transfer_technique(
+        account_id=account_id,
+        source_technique_id=life_technique_id,
+        target_technique_id=body.target_technique_id,
+        transfer_profile_id=body.transfer_profile_id,
+        idempotency_key=idempotency_key,
+    )
 
 
 @router.post(

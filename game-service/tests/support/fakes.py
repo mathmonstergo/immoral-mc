@@ -449,7 +449,7 @@ class FakeCultivationRepository:
         self._ensure_active()
         totals: dict[str, int] = {}
         for technique in self._state.life_techniques.values():
-            if technique.life_id == life_id:
+            if technique.life_id == life_id and technique.status == "active":
                 totals[technique.group_code] = (
                     totals.get(technique.group_code, 0) + technique.invested_amount
                 )
@@ -466,6 +466,21 @@ class FakeCultivationRepository:
             default=0,
         )
 
+    async def has_realm_transition_history(
+        self,
+        life_id: UUID,
+        *,
+        source_level: int,
+        target_level: int,
+    ) -> bool:
+        self._ensure_active()
+        return any(
+            entry.life_id == life_id
+            and entry.source_level == source_level
+            and entry.target_level == target_level
+            for entry in self._state.realm_entries.values()
+        )
+
     async def append_realm_entry(self, entry: RealmEntry) -> CultivationState:
         self._ensure_active()
         self._state.realm_entries[entry.realm_entry_id] = entry
@@ -476,6 +491,52 @@ class FakeCultivationRepository:
             revision=state.revision + 1,
         )
         self._state.cultivation_states[entry.life_id] = updated
+        return updated
+
+    async def invalidate_realm_suffix(
+        self,
+        *,
+        life_id: UUID,
+        retained_entry_ids: tuple[UUID, ...],
+        current_level: int,
+        invalidated_at: datetime,
+    ) -> CultivationState:
+        self._ensure_active()
+        retained = set(retained_entry_ids)
+        for entry_id, entry in tuple(self._state.realm_entries.items()):
+            if entry.life_id != life_id or entry.status != "active" or entry_id in retained:
+                continue
+            self._state.realm_entries[entry_id] = replace(
+                entry,
+                status="invalidated",
+                invalidated_at=invalidated_at,
+            )
+        state = await self.get_or_create_state(life_id, for_update=True)
+        updated = replace(
+            state,
+            current_level=current_level,
+            revision=state.revision + 1,
+        )
+        self._state.cultivation_states[life_id] = updated
+        return updated
+
+    async def abandon_technique(
+        self,
+        *,
+        life_id: UUID,
+        life_technique_id: UUID,
+    ) -> CultivationState:
+        self._ensure_active()
+        technique = self._state.life_techniques[life_technique_id]
+        if technique.life_id != life_id or technique.status != "active":
+            raise KeyError("Unknown active life technique")
+        self._state.life_techniques[life_technique_id] = replace(
+            technique,
+            status="abandoned",
+        )
+        state = await self.get_or_create_state(life_id, for_update=True)
+        updated = replace(state, revision=state.revision + 1)
+        self._state.cultivation_states[life_id] = updated
         return updated
 
     async def insert_session(self, session: CultivationSession) -> None:
@@ -522,6 +583,22 @@ class FakeCultivationRepository:
     async def get_session_techniques(self, session_id: UUID) -> tuple[SessionTechnique, ...]:
         self._ensure_active()
         return self._state.session_techniques.get(session_id, ())
+
+    async def update_session_frozen_snapshot(
+        self,
+        *,
+        session_id: UUID,
+        frozen_snapshot: dict[str, object],
+    ) -> CultivationSession:
+        self._ensure_active()
+        session = self._state.cultivation_sessions[session_id]
+        updated = replace(
+            session,
+            frozen_snapshot=frozen_snapshot,
+            revision=session.revision + 1,
+        )
+        self._state.cultivation_sessions[session_id] = updated
+        return updated
 
     async def consume_unrefined(
         self,

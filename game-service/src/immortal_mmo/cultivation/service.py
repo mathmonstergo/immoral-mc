@@ -1,11 +1,12 @@
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from immortal_mmo.core.errors import ConflictError, NotFoundError, RuleViolationError
 from immortal_mmo.core.uow import UnitOfWorkFactory
 from immortal_mmo.cultivation.allocation import allocate_equal
 from immortal_mmo.cultivation.area_catalog import AreaCatalog, load_area_catalog
@@ -15,11 +16,16 @@ from immortal_mmo.cultivation.models import (
     SessionTechnique,
     TechniqueInvestmentChange,
 )
-from immortal_mmo.cultivation.progression import group_for_level, project_progress
+from immortal_mmo.cultivation.progression import (
+    group_for_level,
+    project_progress,
+    valid_active_chain,
+)
 from immortal_mmo.cultivation.realm_catalog import RealmCatalog
 from immortal_mmo.cultivation.schemas import (
     CultivationSnapshotResponse,
     SeclusionSnapshotResponse,
+    TechniqueMutationResponse,
 )
 from immortal_mmo.cultivation.seclusion import (
     cumulative_time_budget,
@@ -28,6 +34,26 @@ from immortal_mmo.cultivation.seclusion import (
 from immortal_mmo.player.service import PlayerAccountNotFoundError, PlayerLifecycleError
 
 FULL_MASTERY_SECONDS = {"练气": 36_000, "筑基": 72_000, "结丹": 180_000, "元婴": 360_000}
+DEFAULT_TRANSFER_PROFILES = {
+    "Trans_Gongfa_01": 5_000,
+    "Trans_Gongfa_02": 8_000,
+}
+TECHNIQUE_MUTATION_CONTENT_VERSION = "technique-mutation:v1"
+
+
+class CultivationMutationConflictError(ConflictError):
+    code = "cultivation.technique_mutation_conflict"
+    message = "Technique mutation conflicts with current cultivation state."
+
+
+class CultivationTechniqueNotFoundError(NotFoundError):
+    code = "cultivation.technique_not_found"
+    message = "Life technique was not found."
+
+
+class CultivationTechniqueRuleError(RuleViolationError):
+    code = "cultivation.technique_rule_violation"
+    message = "Technique mutation is not allowed."
 
 
 class CultivationService:
@@ -38,6 +64,7 @@ class CultivationService:
         *,
         area_catalog: AreaCatalog | None = None,
         clock: Callable[[], datetime] | None = None,
+        transfer_profiles: Mapping[str, int] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._realm_catalog = realm_catalog
@@ -45,6 +72,16 @@ class CultivationService:
             Path(__file__).resolve().parent / "areas.json"
         )
         self._clock = clock or (lambda: datetime.now(UTC))
+        configured_profiles = transfer_profiles or DEFAULT_TRANSFER_PROFILES
+        if not configured_profiles or any(
+            not profile_id
+            or isinstance(basis_points, bool)
+            or not isinstance(basis_points, int)
+            or not 0 <= basis_points <= 10_000
+            for profile_id, basis_points in configured_profiles.items()
+        ):
+            raise ValueError("Technique transfer profiles must use basis points from 0 to 10000")
+        self._transfer_profiles = dict(configured_profiles)
 
     async def current_life_snapshot(self, account_id: UUID) -> CultivationSnapshotResponse:
         async with self._uow_factory() as uow:
@@ -57,6 +94,7 @@ class CultivationService:
             state = await uow.cultivation.get_or_create_state(life.life_id, for_update=False)
             group_investments = await uow.cultivation.get_group_investments(life.life_id)
             chain = await uow.cultivation.get_active_realm_chain(life.life_id, for_update=False)
+            chain = valid_active_chain(chain, group_investments)
             snapshot = project_progress(
                 catalog=self._realm_catalog,
                 current_level=state.current_level,
@@ -67,6 +105,235 @@ class CultivationService:
             )
             await uow.commit()
         return CultivationSnapshotResponse(**asdict(snapshot))
+
+    async def abandon_technique(
+        self,
+        *,
+        account_id: UUID,
+        life_technique_id: UUID,
+        idempotency_key: UUID,
+    ) -> TechniqueMutationResponse:
+        return await self._mutate_technique(
+            account_id=account_id,
+            source_technique_id=life_technique_id,
+            target_technique_id=None,
+            transfer_profile_id=None,
+            idempotency_key=idempotency_key,
+        )
+
+    async def transfer_technique(
+        self,
+        *,
+        account_id: UUID,
+        source_technique_id: UUID,
+        target_technique_id: UUID,
+        transfer_profile_id: str,
+        idempotency_key: UUID,
+    ) -> TechniqueMutationResponse:
+        if source_technique_id == target_technique_id:
+            raise CultivationTechniqueRuleError("Source and target techniques must differ")
+        if transfer_profile_id not in self._transfer_profiles:
+            raise CultivationTechniqueRuleError("Unknown technique transfer profile")
+        return await self._mutate_technique(
+            account_id=account_id,
+            source_technique_id=source_technique_id,
+            target_technique_id=target_technique_id,
+            transfer_profile_id=transfer_profile_id,
+            idempotency_key=idempotency_key,
+        )
+
+    async def _mutate_technique(
+        self,
+        *,
+        account_id: UUID,
+        source_technique_id: UUID,
+        target_technique_id: UUID | None,
+        transfer_profile_id: str | None,
+        idempotency_key: UUID,
+    ) -> TechniqueMutationResponse:
+        operation_kind = "transfer" if target_technique_id is not None else "abandonment"
+        request_payload = {
+            "operation_kind": operation_kind,
+            "source_technique_id": str(source_technique_id),
+            "target_technique_id": (
+                None if target_technique_id is None else str(target_technique_id)
+            ),
+            "transfer_profile_id": transfer_profile_id,
+        }
+        request_fingerprint = _request_fingerprint(request_payload)
+        now = self._clock()
+        async with self._uow_factory() as uow:
+            account = await uow.players.lock_account(account_id)
+            if account is None:
+                raise PlayerAccountNotFoundError()
+            life = await uow.players.get_current_life(account_id, for_update=True)
+            if life is None:
+                raise PlayerLifecycleError()
+            replay = await uow.cultivation.get_session_by_idempotency(
+                life.life_id, idempotency_key
+            )
+            if replay is not None:
+                if (
+                    replay.session_kind != "technique_mutation"
+                    or replay.request_fingerprint != request_fingerprint
+                ):
+                    raise CultivationMutationConflictError(
+                        "Technique mutation idempotency key was reused"
+                    )
+                frozen_response = replay.frozen_snapshot.get("response")
+                if not isinstance(frozen_response, dict):
+                    raise RuntimeError("Technique mutation replay has no frozen response")
+                await uow.rollback()
+                return TechniqueMutationResponse.model_validate(frozen_response)
+
+            state = await uow.cultivation.get_or_create_state(life.life_id, for_update=True)
+            if state.active_session_id is not None:
+                active_session = await uow.cultivation.get_session(
+                    state.active_session_id, for_update=True
+                )
+                if active_session is None:
+                    raise RuntimeError("Cultivation state points to an unknown active session")
+                if active_session.status in {"pending", "active"}:
+                    session_label = (
+                        "breakthrough"
+                        if active_session.session_kind == "breakthrough"
+                        else "seclusion"
+                    )
+                    raise CultivationMutationConflictError(
+                        f"Technique mutation is blocked by an active {session_label}"
+                    )
+
+            requested_ids = (
+                (source_technique_id,)
+                if target_technique_id is None
+                else (source_technique_id, target_technique_id)
+            )
+            techniques = await uow.cultivation.get_techniques(
+                life.life_id, requested_ids, for_update=True
+            )
+            by_id = {item.life_technique_id: item for item in techniques}
+            source = by_id.get(source_technique_id)
+            if source is None:
+                raise CultivationTechniqueNotFoundError("Source life technique was not found")
+            if source.status != "active":
+                raise CultivationTechniqueRuleError("Source life technique is not active")
+            target = None
+            if target_technique_id is not None:
+                target = by_id.get(target_technique_id)
+                if target is None:
+                    raise CultivationTechniqueNotFoundError(
+                        "Target life technique was not found"
+                    )
+                if target.status != "active":
+                    raise CultivationTechniqueRuleError("Target life technique is not active")
+
+            operation_id = uuid4()
+            operation_session = CultivationSession(
+                session_id=operation_id,
+                life_id=life.life_id,
+                session_kind="technique_mutation",
+                status="completed",
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                area_id=None,
+                content_version=TECHNIQUE_MUTATION_CONTENT_VERSION,
+                source_level=state.current_level,
+                target_level=None,
+                frozen_snapshot={"request": request_payload},
+                cumulative_elapsed_seconds=0,
+                cumulative_generated=0,
+                cumulative_reserve_consumed=0,
+                cumulative_retained=0,
+                started_at=now,
+                completes_at=now,
+                settled_at=now,
+                revision=1,
+            )
+            await uow.cultivation.insert_session(operation_session)
+
+            removed_amount = source.invested_amount
+            transferred_amount = 0
+            changes: list[TechniqueInvestmentChange] = []
+            if removed_amount > 0:
+                changes.append(
+                    TechniqueInvestmentChange(
+                        source_technique_id,
+                        -removed_amount,
+                        "transfer_out" if target is not None else "abandonment",
+                    )
+                )
+            if target is not None:
+                assert transfer_profile_id is not None
+                preserved = (
+                    removed_amount * self._transfer_profiles[transfer_profile_id] // 10_000
+                )
+                transferred_amount = min(
+                    preserved,
+                    target.max_investment - target.invested_amount,
+                )
+                if transferred_amount > 0:
+                    changes.append(
+                        TechniqueInvestmentChange(
+                            target.life_technique_id,
+                            transferred_amount,
+                            "transfer_in",
+                        )
+                    )
+            if changes:
+                state = await uow.cultivation.apply_technique_investments(
+                    life_id=life.life_id,
+                    operation_id=operation_id,
+                    session_id=operation_id,
+                    changes=tuple(changes),
+                    occurred_at=now,
+                )
+            state = await uow.cultivation.abandon_technique(
+                life_id=life.life_id,
+                life_technique_id=source_technique_id,
+            )
+
+            group_investments = await uow.cultivation.get_group_investments(life.life_id)
+            active_chain = await uow.cultivation.get_active_realm_chain(
+                life.life_id, for_update=True
+            )
+            valid_chain = valid_active_chain(active_chain, group_investments)
+            if len(valid_chain) != len(active_chain):
+                current_level = valid_chain[-1].target_level if valid_chain else 1
+                state = await uow.cultivation.invalidate_realm_suffix(
+                    life_id=life.life_id,
+                    retained_entry_ids=tuple(
+                        entry.realm_entry_id for entry in valid_chain
+                    ),
+                    current_level=current_level,
+                    invalidated_at=now,
+                )
+            snapshot = project_progress(
+                catalog=self._realm_catalog,
+                current_level=state.current_level,
+                group_investments=group_investments,
+                active_entry=valid_chain[-1] if valid_chain else None,
+                unrefined_reserve=state.unrefined_cultivation,
+                revision=state.revision,
+            )
+            response = TechniqueMutationResponse(
+                operation_id=operation_id,
+                operation_kind=operation_kind,
+                source_technique_id=source_technique_id,
+                target_technique_id=target_technique_id,
+                removed_amount=removed_amount,
+                transferred_amount=transferred_amount,
+                destroyed_amount=removed_amount - transferred_amount,
+                cultivation=CultivationSnapshotResponse(**asdict(snapshot)),
+            )
+            await uow.cultivation.update_session_frozen_snapshot(
+                session_id=operation_id,
+                frozen_snapshot={
+                    "request": request_payload,
+                    "response": response.model_dump(mode="json"),
+                },
+            )
+            await uow.commit()
+        return response
 
     async def start_seclusion(
         self,
@@ -241,6 +508,11 @@ class CultivationService:
             while current_level < 10 and group_investments.get("qi", 0) >= qi_totals[current_level]:
                 generation += 1
                 source_floor = qi_totals[current_level]
+                reentry = await uow.cultivation.has_realm_transition_history(
+                    life.life_id,
+                    source_level=current_level,
+                    target_level=current_level + 1,
+                )
                 realm_entry = RealmEntry(
                     realm_entry_id=uuid4(),
                     life_id=life.life_id,
@@ -254,7 +526,7 @@ class CultivationService:
                     target_group="qi",
                     source_floor=source_floor,
                     target_baseline=source_floor,
-                    transition_kind="adjacent",
+                    transition_kind="reentry" if reentry else "adjacent",
                     transition_session_id=session_id,
                     status="active",
                     invalidated_at=None,
@@ -313,3 +585,9 @@ def _seclusion_snapshot(session: CultivationSession) -> SeclusionSnapshotRespons
         cumulative_reserve_consumed=session.cumulative_reserve_consumed,
         cumulative_retained=session.cumulative_retained,
     )
+
+
+def _request_fingerprint(payload: dict[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()

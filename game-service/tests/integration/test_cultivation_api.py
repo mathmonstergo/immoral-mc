@@ -1,3 +1,4 @@
+from datetime import timedelta
 from uuid import UUID
 
 import httpx
@@ -7,9 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from immortal_mmo.combat.postgres_repository import PostgresCombatRepository
 from immortal_mmo.cultivation.db_models import (
+    CultivationResourceEntryRow,
     CultivationSessionRow,
     CultivationSessionTechniqueRow,
+    LifeCultivationStateRow,
+    LifeRealmEntryRow,
     LifeTechniqueRow,
+    TechniqueInvestmentEntryRow,
 )
 from immortal_mmo.cultivation.postgres_repository import PostgresCultivationRepository
 from immortal_mmo.db.uow import SqlAlchemyUnitOfWorkFactory
@@ -118,3 +123,319 @@ async def test_start_seclusion_persists_unordered_authoritative_selection(
         ).all()
     assert session_count == 1
     assert tuple(selections) == tuple(sorted(technique_ids))
+
+
+@pytest.mark.asyncio
+async def test_abandonment_api_replays_across_app_restart_without_double_debit(
+    postgres_sessions: async_sessionmaker[AsyncSession],
+    clean_postgres_data: None,
+) -> None:
+    del clean_postgres_data
+    idempotency_key = UUID(int=9_101)
+    abandoned_id = UUID(int=9_111)
+    other_id = UUID(int=9_112)
+    async with client(postgres_sessions) as first_client:
+        login = await first_client.post(
+            "/api/v1/players/login",
+            json={"minecraft_uuid": str(UUID(int=9_100)), "player_name": "Abandoner"},
+        )
+        account_id = login.json()["account"]["account_id"]
+        life_id = UUID(login.json()["current_life"]["life_id"])
+        async with postgres_sessions() as session:
+            session.add(
+                LifeCultivationStateRow(
+                    life_id=life_id,
+                    current_level=1,
+                    unrefined_cultivation=33,
+                    realized_cultivation=80,
+                    revision=1,
+                )
+            )
+            for technique_id, invested in ((abandoned_id, 80), (other_id, 0)):
+                session.add(
+                    LifeTechniqueRow(
+                        life_technique_id=technique_id,
+                        life_id=life_id,
+                        technique_id=f"GF_Test_{technique_id.int}",
+                        definition_version=1,
+                        group_code="qi",
+                        major_realm="练气",
+                        invested_amount=invested,
+                        max_investment=100,
+                        current_layer=1,
+                        status="active",
+                    )
+                )
+            await session.commit()
+        first = await first_client.post(
+            f"/api/v1/players/{account_id}/current-life/cultivation/techniques/"
+            f"{abandoned_id}/abandon",
+            headers={"Idempotency-Key": str(idempotency_key)},
+        )
+
+    async with client(postgres_sessions) as restarted_client:
+        replay = await restarted_client.post(
+            f"/api/v1/players/{account_id}/current-life/cultivation/techniques/"
+            f"{abandoned_id}/abandon",
+            headers={"Idempotency-Key": str(idempotency_key)},
+        )
+        conflict = await restarted_client.post(
+            f"/api/v1/players/{account_id}/current-life/cultivation/techniques/"
+            f"{other_id}/abandon",
+            headers={"Idempotency-Key": str(idempotency_key)},
+        )
+
+    assert first.status_code == 200
+    assert replay.status_code == 200
+    assert replay.json() == first.json()
+    assert first.json()["removed_amount"] == 80
+    assert first.json()["destroyed_amount"] == 80
+    assert first.json()["cultivation"]["realized_total"] == 0
+    assert first.json()["cultivation"]["unrefined_reserve"] == 33
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "cultivation.technique_mutation_conflict"
+
+    operation_id = UUID(first.json()["operation_id"])
+    async with postgres_sessions() as session:
+        source = await session.get(LifeTechniqueRow, abandoned_id)
+        state = await session.get(LifeCultivationStateRow, life_id)
+        mutation = await session.get(CultivationSessionRow, operation_id)
+        technique_entries = (
+            await session.scalars(
+                select(TechniqueInvestmentEntryRow).where(
+                    TechniqueInvestmentEntryRow.operation_id == operation_id
+                )
+            )
+        ).all()
+        resource_entries = (
+            await session.scalars(
+                select(CultivationResourceEntryRow).where(
+                    CultivationResourceEntryRow.operation_id == operation_id
+                )
+            )
+        ).all()
+    assert source is not None
+    assert source.status == "abandoned"
+    assert source.invested_amount == 0
+    assert state is not None
+    assert state.realized_cultivation == 0
+    assert state.unrefined_cultivation == 33
+    assert mutation is not None
+    assert mutation.session_kind == "technique_mutation"
+    assert mutation.status == "completed"
+    assert mutation.frozen_snapshot["response"] == first.json()
+    assert len(technique_entries) == 1
+    assert technique_entries[0].entry_type == "abandonment"
+    assert technique_entries[0].delta_amount == -80
+    assert len(resource_entries) == 1
+    assert resource_entries[0].entry_type == "technique_abandonment"
+    assert resource_entries[0].delta_amount == -80
+
+
+@pytest.mark.asyncio
+async def test_transfer_api_applies_profile_fraction_and_target_capacity(
+    postgres_sessions: async_sessionmaker[AsyncSession],
+    clean_postgres_data: None,
+) -> None:
+    del clean_postgres_data
+    source_id = UUID(int=9_211)
+    target_id = UUID(int=9_212)
+    async with client(postgres_sessions) as test_client:
+        login = await test_client.post(
+            "/api/v1/players/login",
+            json={"minecraft_uuid": str(UUID(int=9_200)), "player_name": "Transferer"},
+        )
+        account_id = login.json()["account"]["account_id"]
+        life_id = UUID(login.json()["current_life"]["life_id"])
+        async with postgres_sessions() as session:
+            session.add(
+                LifeCultivationStateRow(
+                    life_id=life_id,
+                    current_level=1,
+                    unrefined_cultivation=55,
+                    realized_cultivation=171,
+                    revision=1,
+                )
+            )
+            session.add_all(
+                [
+                    LifeTechniqueRow(
+                        life_technique_id=source_id,
+                        life_id=life_id,
+                        technique_id="GF_Transfer_Source",
+                        definition_version=1,
+                        group_code="qi",
+                        major_realm="练气",
+                        invested_amount=101,
+                        max_investment=200,
+                        current_layer=1,
+                        status="active",
+                    ),
+                    LifeTechniqueRow(
+                        life_technique_id=target_id,
+                        life_id=life_id,
+                        technique_id="GF_Transfer_Target",
+                        definition_version=1,
+                        group_code="qi",
+                        major_realm="练气",
+                        invested_amount=70,
+                        max_investment=100,
+                        current_layer=1,
+                        status="active",
+                    ),
+                ]
+            )
+            await session.commit()
+        response = await test_client.post(
+            f"/api/v1/players/{account_id}/current-life/cultivation/techniques/"
+            f"{source_id}/transfer",
+            headers={"Idempotency-Key": str(UUID(int=9_299))},
+            json={
+                "target_technique_id": str(target_id),
+                "transfer_profile_id": "Trans_Gongfa_01",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["removed_amount"] == 101
+    assert response.json()["transferred_amount"] == 30
+    assert response.json()["destroyed_amount"] == 71
+    assert response.json()["cultivation"]["realized_total"] == 100
+    assert response.json()["cultivation"]["unrefined_reserve"] == 55
+
+
+@pytest.mark.asyncio
+async def test_regression_reentry_appends_a_new_postgres_branch(
+    postgres_sessions: async_sessionmaker[AsyncSession],
+    clean_postgres_data: None,
+) -> None:
+    del clean_postgres_data
+    abandoned_id = UUID(int=9_311)
+    retained_id = UUID(int=9_312)
+    first_entry_id = UUID(int=9_321)
+    invalidated_entry_id = UUID(int=9_322)
+    async with client(postgres_sessions) as test_client:
+        login = await test_client.post(
+            "/api/v1/players/login",
+            json={"minecraft_uuid": str(UUID(int=9_300)), "player_name": "Reentry"},
+        )
+        account_id = login.json()["account"]["account_id"]
+        life_id = UUID(login.json()["current_life"]["life_id"])
+        async with postgres_sessions() as session:
+            session.add(
+                LifeCultivationStateRow(
+                    life_id=life_id,
+                    current_level=3,
+                    unrefined_cultivation=100,
+                    realized_cultivation=250,
+                    revision=1,
+                )
+            )
+            session.add_all(
+                [
+                    LifeTechniqueRow(
+                        life_technique_id=abandoned_id,
+                        life_id=life_id,
+                        technique_id="GF_Reentry_Abandoned",
+                        definition_version=1,
+                        group_code="qi",
+                        major_realm="练气",
+                        invested_amount=100,
+                        max_investment=100,
+                        current_layer=1,
+                        status="active",
+                    ),
+                    LifeTechniqueRow(
+                        life_technique_id=retained_id,
+                        life_id=life_id,
+                        technique_id="GF_Reentry_Retained",
+                        definition_version=1,
+                        group_code="qi",
+                        major_realm="练气",
+                        invested_amount=150,
+                        max_investment=250,
+                        current_layer=1,
+                        status="active",
+                    ),
+                    LifeRealmEntryRow(
+                        realm_entry_id=first_entry_id,
+                        life_id=life_id,
+                        generation=1,
+                        parent_entry_id=None,
+                        source_level=1,
+                        target_level=2,
+                        source_group="qi",
+                        target_group="qi",
+                        source_floor=100,
+                        target_baseline=100,
+                        transition_kind="adjacent",
+                        transition_session_id=None,
+                        status="active",
+                        invalidated_at=None,
+                    ),
+                    LifeRealmEntryRow(
+                        realm_entry_id=invalidated_entry_id,
+                        life_id=life_id,
+                        generation=2,
+                        parent_entry_id=first_entry_id,
+                        source_level=2,
+                        target_level=3,
+                        source_group="qi",
+                        target_group="qi",
+                        source_floor=250,
+                        target_baseline=250,
+                        transition_kind="adjacent",
+                        transition_session_id=None,
+                        status="active",
+                        invalidated_at=None,
+                    ),
+                ]
+            )
+            await session.commit()
+
+        regressed = await test_client.post(
+            f"/api/v1/players/{account_id}/current-life/cultivation/techniques/"
+            f"{abandoned_id}/abandon",
+            headers={"Idempotency-Key": str(UUID(int=9_390))},
+        )
+        assert regressed.status_code == 200
+        assert regressed.json()["cultivation"]["current_level"] == 2
+
+        started = await test_client.post(
+            f"/api/v1/players/{account_id}/current-life/cultivation/seclusions",
+            headers={"Idempotency-Key": str(UUID(int=9_391))},
+            json={
+                "area_id": "neutral_training_ground",
+                "technique_ids": [str(retained_id)],
+            },
+        )
+        assert started.status_code == 200
+        session_id = UUID(started.json()["session_id"])
+        async with postgres_sessions() as session:
+            seclusion = await session.get(CultivationSessionRow, session_id)
+            assert seclusion is not None
+            seclusion.started_at -= timedelta(hours=4)
+            await session.commit()
+        settled = await test_client.post(
+            f"/api/v1/players/{account_id}/current-life/cultivation/seclusions/"
+            f"{session_id}/settle"
+        )
+
+    assert settled.status_code == 200
+    async with postgres_sessions() as session:
+        entries = (
+            await session.scalars(
+                select(LifeRealmEntryRow)
+                .where(LifeRealmEntryRow.life_id == life_id)
+                .order_by(LifeRealmEntryRow.generation)
+            )
+        ).all()
+        state = await session.get(LifeCultivationStateRow, life_id)
+    assert state is not None
+    assert state.current_level == 3
+    assert [entry.generation for entry in entries] == [1, 2, 3]
+    assert entries[0].status == "active"
+    assert entries[1].status == "invalidated"
+    assert entries[2].status == "active"
+    assert entries[2].parent_entry_id == first_entry_id
+    assert entries[2].transition_kind == "reentry"

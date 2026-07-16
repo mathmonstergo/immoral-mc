@@ -139,7 +139,7 @@ def upgrade() -> None:
         "cultivation_sessions",
         sa.Column("session_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("life_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("session_kind", sa.String(length=16), nullable=False),
+        sa.Column("session_kind", sa.String(length=32), nullable=False),
         sa.Column("status", sa.String(length=16), nullable=False),
         sa.Column("idempotency_key", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("request_fingerprint", sa.String(length=64), nullable=False),
@@ -184,7 +184,7 @@ def upgrade() -> None:
             "life_id", "idempotency_key", name="uq_cultivation_session_idempotency"
         ),
         sa.CheckConstraint(
-            "session_kind IN ('ordinary', 'breakthrough')",
+            "session_kind IN ('ordinary', 'breakthrough', 'technique_mutation')",
             name=op.f("ck_cultivation_session_kind"),
         ),
         sa.CheckConstraint(
@@ -213,7 +213,9 @@ def upgrade() -> None:
             "(session_kind = 'ordinary' AND area_id IS NOT NULL "
             "AND target_level IS NULL) OR "
             "(session_kind = 'breakthrough' AND area_id IS NULL "
-            "AND target_level IS NOT NULL)",
+            "AND target_level IS NOT NULL) OR "
+            "(session_kind = 'technique_mutation' AND area_id IS NULL "
+            "AND target_level IS NULL AND status = 'completed')",
             name=op.f("ck_cultivation_session_shape"),
         ),
         sa.CheckConstraint(

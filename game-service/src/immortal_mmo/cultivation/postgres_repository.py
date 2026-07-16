@@ -96,7 +96,10 @@ class PostgresCultivationRepository:
                     LifeTechniqueRow.group_code,
                     func.coalesce(func.sum(LifeTechniqueRow.invested_amount), 0),
                 )
-                .where(LifeTechniqueRow.life_id == life_id)
+                .where(
+                    LifeTechniqueRow.life_id == life_id,
+                    LifeTechniqueRow.status == "active",
+                )
                 .group_by(LifeTechniqueRow.group_code)
             )
         ).all()
@@ -109,6 +112,24 @@ class PostgresCultivationRepository:
             )
         )
         return int(generation or 0)
+
+    async def has_realm_transition_history(
+        self,
+        life_id: UUID,
+        *,
+        source_level: int,
+        target_level: int,
+    ) -> bool:
+        count = await self._session.scalar(
+            select(func.count())
+            .select_from(LifeRealmEntryRow)
+            .where(
+                LifeRealmEntryRow.life_id == life_id,
+                LifeRealmEntryRow.source_level == source_level,
+                LifeRealmEntryRow.target_level == target_level,
+            )
+        )
+        return bool(count)
 
     async def append_realm_entry(self, entry: RealmEntry) -> CultivationState:
         self._session.add(
@@ -135,6 +156,71 @@ class PostgresCultivationRepository:
                 .where(LifeCultivationStateRow.life_id == entry.life_id)
                 .values(
                     current_level=entry.target_level,
+                    revision=LifeCultivationStateRow.revision + 1,
+                    updated_at=func.now(),
+                )
+                .returning(LifeCultivationStateRow)
+            )
+        ).scalar_one()
+        await self._session.flush()
+        return _state(row)
+
+    async def invalidate_realm_suffix(
+        self,
+        *,
+        life_id: UUID,
+        retained_entry_ids: tuple[UUID, ...],
+        current_level: int,
+        invalidated_at: datetime,
+    ) -> CultivationState:
+        statement = update(LifeRealmEntryRow).where(
+            LifeRealmEntryRow.life_id == life_id,
+            LifeRealmEntryRow.status == "active",
+        )
+        if retained_entry_ids:
+            statement = statement.where(
+                LifeRealmEntryRow.realm_entry_id.not_in(retained_entry_ids)
+            )
+        await self._session.execute(
+            statement.values(status="invalidated", invalidated_at=invalidated_at)
+        )
+        row = (
+            await self._session.execute(
+                update(LifeCultivationStateRow)
+                .where(LifeCultivationStateRow.life_id == life_id)
+                .values(
+                    current_level=current_level,
+                    revision=LifeCultivationStateRow.revision + 1,
+                    updated_at=func.now(),
+                )
+                .returning(LifeCultivationStateRow)
+            )
+        ).scalar_one()
+        await self._session.flush()
+        return _state(row)
+
+    async def abandon_technique(
+        self,
+        *,
+        life_id: UUID,
+        life_technique_id: UUID,
+    ) -> CultivationState:
+        result = await self._session.execute(
+            update(LifeTechniqueRow)
+            .where(
+                LifeTechniqueRow.life_id == life_id,
+                LifeTechniqueRow.life_technique_id == life_technique_id,
+                LifeTechniqueRow.status == "active",
+            )
+            .values(status="abandoned", updated_at=func.now())
+        )
+        if result.rowcount != 1:
+            raise KeyError("Unknown active life technique")
+        row = (
+            await self._session.execute(
+                update(LifeCultivationStateRow)
+                .where(LifeCultivationStateRow.life_id == life_id)
+                .values(
                     revision=LifeCultivationStateRow.revision + 1,
                     updated_at=func.now(),
                 )
@@ -238,6 +324,26 @@ class PostgresCultivationRepository:
             )
         ).all()
         return tuple(_session_technique(row) for row in rows)
+
+    async def update_session_frozen_snapshot(
+        self,
+        *,
+        session_id: UUID,
+        frozen_snapshot: dict[str, object],
+    ) -> CultivationSession:
+        row = (
+            await self._session.execute(
+                update(CultivationSessionRow)
+                .where(CultivationSessionRow.session_id == session_id)
+                .values(
+                    frozen_snapshot=frozen_snapshot,
+                    revision=CultivationSessionRow.revision + 1,
+                    updated_at=func.now(),
+                )
+                .returning(CultivationSessionRow)
+            )
+        ).scalar_one()
+        return _session(row)
 
     async def consume_unrefined(
         self,
