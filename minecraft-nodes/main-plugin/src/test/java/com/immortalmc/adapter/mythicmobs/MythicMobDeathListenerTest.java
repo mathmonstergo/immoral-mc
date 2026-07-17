@@ -1,7 +1,7 @@
 package com.immortalmc.adapter.mythicmobs;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -51,7 +51,7 @@ class MythicMobDeathListenerTest {
         assertEquals("main-1", snapshot.serverId());
         assertEquals(ENTITY_ID, snapshot.entityUuid());
         assertEquals("AzureWolf", snapshot.mobInternalName());
-        assertEquals(new BigDecimal("12.5"), snapshot.mobLevel());
+        assertEquals(new BigDecimal("12.500"), snapshot.mobLevel());
         assertEquals(PLAYER_ID, snapshot.source().playerUuid());
         assertEquals(LIFE_ID, snapshot.source().sourceLifeId());
         assertEquals("venom_mist", snapshot.source().techniqueId());
@@ -99,11 +99,54 @@ class MythicMobDeathListenerTest {
     }
 
     @Test
-    void invalidMythicLevelFailsInsteadOfBeingCoerced() {
+    void spawnEggFloatingPointTailIsNormalizedAtTheAdapterBoundary() {
         Fixture fixture = fixtureWithAttribution("main-1");
 
-        assertThrows(IllegalArgumentException.class, () -> fixture.listener().onDeath(event(Double.NaN)));
-        assertTrue(fixture.snapshots().isEmpty());
+        fixture.listener().onDeath(event(1.0000000000000002));
+
+        assertEquals(new BigDecimal("1.000"), fixture.snapshots().getFirst().mobLevel());
+    }
+
+    @Test
+    void finiteMythicLevelUsesExplicitThreeDecimalHalfUpRounding() {
+        Fixture fixture = fixtureWithAttribution("main-1");
+
+        fixture.listener().onDeath(event(12.3456));
+
+        assertEquals(new BigDecimal("12.346"), fixture.snapshots().getFirst().mobLevel());
+    }
+
+    @Test
+    void invalidRawMythicLevelsFailClosedWithoutEscapingThePaperEvent() {
+        double[] invalidLevels = {
+            Double.NaN,
+            Double.POSITIVE_INFINITY,
+            Double.NEGATIVE_INFINITY,
+            -0.0001,
+            999999999.9991,
+        };
+
+        for (double invalidLevel : invalidLevels) {
+            Fixture fixture = fixtureWithAttribution("main-1");
+
+            assertDoesNotThrow(() -> fixture.listener().onDeath(event(invalidLevel)));
+
+            assertTrue(fixture.snapshots().isEmpty());
+            assertTrue(fixture.logger().messagesAt("error").stream()
+                    .anyMatch(message -> message.contains("combat_kill_capture_failed")
+                            && message.contains("raw_mob_level=" + invalidLevel)));
+        }
+    }
+
+    @Test
+    void exactMaximumMythicLevelIsAcceptedWithoutRoundingIntoOverflow() {
+        Fixture fixture = fixtureWithAttribution("main-1");
+
+        fixture.listener().onDeath(event(999999999.999));
+
+        assertEquals(
+                new BigDecimal("999999999.999"),
+                fixture.snapshots().getFirst().mobLevel());
     }
 
     @Test
@@ -154,6 +197,7 @@ class MythicMobDeathListenerTest {
                 true,
                 NOW);
         List<MythicMobDeathSnapshot> snapshots = new ArrayList<>();
+        RecordingAdapterLogger logger = new RecordingAdapterLogger();
         MythicMobDeathListener listener = new MythicMobDeathListener(
                 serverId,
                 tracker,
@@ -161,9 +205,9 @@ class MythicMobDeathListenerTest {
                     snapshots.add(snapshot);
                     return CompletableFuture.completedFuture(true);
                 },
-                new RecordingAdapterLogger(),
+                logger,
                 Clock.fixed(NOW, ZoneOffset.UTC));
-        return new Fixture(listener, snapshots);
+        return new Fixture(listener, snapshots, logger);
     }
 
     private static MythicMobDeathEvent event(double level) {
@@ -188,5 +232,6 @@ class MythicMobDeathListenerTest {
 
     private record Fixture(
             MythicMobDeathListener listener,
-            List<MythicMobDeathSnapshot> snapshots) {}
+            List<MythicMobDeathSnapshot> snapshots,
+            RecordingAdapterLogger logger) {}
 }

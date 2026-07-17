@@ -20,7 +20,7 @@ public record MythicMobDeathSnapshot(
         double y,
         double z,
         Instant occurredAt) {
-    private static final BigDecimal MAX_MOB_LEVEL = new BigDecimal("999999999.999");
+    static final BigDecimal MAX_MOB_LEVEL = new BigDecimal("999999999.999");
     private static final Pattern STABLE_ID = Pattern.compile("[A-Za-z0-9_.:-]{1,128}");
 
     public MythicMobDeathSnapshot {

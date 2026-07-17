@@ -5,6 +5,7 @@ import com.immortalmc.adapter.combat.LethalAttribution;
 import com.immortalmc.adapter.logging.AdapterLogger;
 import io.lumine.mythic.bukkit.events.MythicMobDeathEvent;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Objects;
@@ -51,23 +52,28 @@ public final class MythicMobDeathListener implements Listener {
             return;
         }
 
-        Location location = entity.getLocation();
-        MythicMobDeathSnapshot snapshot = new MythicMobDeathSnapshot(
-                MythicMobDeathSnapshot.eventId(serverId, entityUuid),
-                serverId,
-                entityUuid,
-                event.getMobType().getInternalName(),
-                level(event.getMobLevel()),
-                attribution.orElseThrow().source(),
-                entity.getWorld().getKey().toString(),
-                location.getX(),
-                location.getY(),
-                location.getZ(),
-                occurredAt);
+        double rawMobLevel = Double.NaN;
         try {
+            rawMobLevel = event.getMobLevel();
+            Location location = entity.getLocation();
+            MythicMobDeathSnapshot snapshot = new MythicMobDeathSnapshot(
+                    MythicMobDeathSnapshot.eventId(serverId, entityUuid),
+                    serverId,
+                    entityUuid,
+                    event.getMobType().getInternalName(),
+                    level(rawMobLevel),
+                    attribution.orElseThrow().source(),
+                    entity.getWorld().getKey().toString(),
+                    location.getX(),
+                    location.getY(),
+                    location.getZ(),
+                    occurredAt);
             snapshotSink.apply(snapshot).join();
         } catch (RuntimeException error) {
-            logger.error("combat_kill_capture_failed entity_uuid=" + entityUuid, error);
+            logger.error(
+                    "combat_kill_capture_failed entity_uuid=" + entityUuid
+                            + " raw_mob_level=" + rawMobLevel,
+                    error);
         }
     }
 
@@ -75,6 +81,11 @@ public final class MythicMobDeathListener implements Listener {
         if (!Double.isFinite(value)) {
             throw new IllegalArgumentException("Mythic mob level must be finite");
         }
-        return BigDecimal.valueOf(value);
+        BigDecimal decimal = BigDecimal.valueOf(value);
+        if (decimal.signum() < 0
+                || decimal.compareTo(MythicMobDeathSnapshot.MAX_MOB_LEVEL) > 0) {
+            throw new IllegalArgumentException("Mythic mob level is outside supported bounds");
+        }
+        return decimal.setScale(3, RoundingMode.HALF_UP);
     }
 }
