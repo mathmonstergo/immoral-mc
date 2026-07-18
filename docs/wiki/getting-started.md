@@ -150,4 +150,3 @@ docker compose stop postgres
 
 除非明确要删除全部本地数据，否则不要执行 `docker compose down -v`。详见
 [运维与故障排查](operations-and-troubleshooting.md)。
-
