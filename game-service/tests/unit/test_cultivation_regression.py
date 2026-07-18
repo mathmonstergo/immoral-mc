@@ -209,7 +209,7 @@ async def test_reentry_uses_new_generation_and_never_revives_invalidated_branch(
         group="qi",
         realm="练气",
         invested=100,
-        capacity=108,
+        capacity=109,
     )
     factory.store._state.life_techniques[retained_id] = technique(
         technique_id=retained_id,
@@ -217,7 +217,7 @@ async def test_reentry_uses_new_generation_and_never_revives_invalidated_branch(
         group="qi",
         realm="练气",
         invested=150,
-        capacity=250,
+        capacity=251,
     )
     factory.store._state.cultivation_states[life_id] = CultivationState(
         life_id, 3, 100, 250, None, 1
@@ -296,7 +296,7 @@ async def test_transfer_preserves_configured_fraction_bounded_by_target_capacity
         group="qi",
         realm="练气",
         invested=101,
-        capacity=200,
+        capacity=201,
     )
     factory.store._state.life_techniques[target_id] = technique(
         technique_id=target_id,
@@ -304,7 +304,7 @@ async def test_transfer_preserves_configured_fraction_bounded_by_target_capacity
         group="qi",
         realm="练气",
         invested=78,
-        capacity=108,
+        capacity=109,
     )
     factory.store._state.cultivation_states[life_id] = CultivationState(
         life_id, 1, 55, 179, None, 1
@@ -330,13 +330,13 @@ async def test_transfer_preserves_configured_fraction_bounded_by_target_capacity
     assert replay == first
     assert first.operation_kind == "transfer"
     assert first.removed_amount == 101
-    assert first.transferred_amount == 30
-    assert first.destroyed_amount == 71
-    assert first.cultivation.realized_total == 108
+    assert first.transferred_amount == 31
+    assert first.destroyed_amount == 70
+    assert first.cultivation.realized_total == 109
     assert first.cultivation.unrefined_reserve == 55
     assert factory.store._state.life_techniques[source_id].status == "abandoned"
     assert factory.store._state.life_techniques[source_id].invested_amount == 0
-    assert factory.store._state.life_techniques[target_id].invested_amount == 108
+    assert factory.store._state.life_techniques[target_id].invested_amount == 109
 
 
 @pytest.mark.asyncio

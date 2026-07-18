@@ -4,7 +4,7 @@ import java.time.Duration;
 import java.time.Instant;
 
 final class CultivationSchedule {
-    static final long ACTIVE_SECLUSION_RETRY_TICKS = 20L * 60L;
+    static final long ORDINARY_SECLUSION_CYCLE_TICKS = 20L * 10L;
 
     private CultivationSchedule() {}
 

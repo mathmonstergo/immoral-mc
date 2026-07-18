@@ -56,8 +56,8 @@ async def test_default_state_creation_and_sorted_technique_locking(
                     group_code="qi",
                     major_realm="练气",
                     invested_amount=0,
-                    max_investment=100,
-                    current_layer=1,
+                    max_investment=109,
+                    current_layer=0,
                     status="active",
                 ),
                 LifeTechniqueRow(
@@ -68,8 +68,8 @@ async def test_default_state_creation_and_sorted_technique_locking(
                     group_code="qi",
                     major_realm="练气",
                     invested_amount=0,
-                    max_investment=100,
-                    current_layer=1,
+                    max_investment=109,
+                    current_layer=0,
                     status="active",
                 ),
             ]
@@ -171,7 +171,7 @@ async def test_open_session_exclusivity_is_translated_to_domain_conflict(
             cumulative_reserve_consumed=0,
             cumulative_retained=0,
             started_at=now,
-            completes_at=now + timedelta(hours=1),
+            completes_at=now + timedelta(seconds=10),
             settled_at=None,
             revision=1,
         )
@@ -207,8 +207,8 @@ async def test_technique_ledger_and_realized_aggregate_update_atomically(
                 group_code="qi",
                 major_realm="练气",
                 invested_amount=0,
-                max_investment=3_765,
-                current_layer=1,
+                max_investment=3_780,
+                current_layer=0,
                 status="active",
             )
         )
@@ -218,7 +218,7 @@ async def test_technique_ledger_and_realized_aggregate_update_atomically(
             operation_id=operation_id,
             session_id=None,
             changes=(
-                TechniqueInvestmentChange(technique_id, 3_765, "seclusion_realization"),
+                TechniqueInvestmentChange(technique_id, 3_780, "seclusion_realization"),
             ),
             occurred_at=now,
         )
@@ -237,10 +237,10 @@ async def test_technique_ledger_and_realized_aggregate_update_atomically(
         resource_count = len((await session.scalars(select(CultivationResourceEntryRow))).all())
         stored_state = await session.get(LifeCultivationStateRow, life_id)
 
-    assert state.realized_cultivation == 3_765
-    assert technique_values.invested_amount == 3_765
+    assert state.realized_cultivation == 3_780
+    assert technique_values.invested_amount == 3_780
     assert technique_values.current_layer == 13
-    assert stored_state is not None and stored_state.realized_cultivation == 3_765
+    assert stored_state is not None and stored_state.realized_cultivation == 3_780
     assert investment_count == 1
     assert resource_count == 1
 
@@ -266,8 +266,8 @@ async def test_negative_investment_persists_reduced_current_layer(
                 group_code="qi",
                 major_realm="练气",
                 invested_amount=0,
-                max_investment=3_765,
-                current_layer=1,
+                max_investment=3_780,
+                current_layer=0,
                 status="active",
             )
         )
@@ -277,7 +277,7 @@ async def test_negative_investment_persists_reduced_current_layer(
             operation_id=uuid4(),
             session_id=None,
             changes=(
-                TechniqueInvestmentChange(technique_id, 3_765, "seclusion_realization"),
+                TechniqueInvestmentChange(technique_id, 3_780, "seclusion_realization"),
             ),
             occurred_at=now,
         )
@@ -289,7 +289,7 @@ async def test_negative_investment_persists_reduced_current_layer(
             life_id=life_id,
             operation_id=uuid4(),
             session_id=None,
-            changes=(TechniqueInvestmentChange(technique_id, -3_765, "abandonment"),),
+            changes=(TechniqueInvestmentChange(technique_id, -3_780, "abandonment"),),
             occurred_at=now + timedelta(seconds=1),
         )
         await session.commit()
@@ -308,7 +308,7 @@ async def test_negative_investment_persists_reduced_current_layer(
 
     assert state.realized_cultivation == 0
     assert technique_values.invested_amount == 0
-    assert technique_values.current_layer == 1
+    assert technique_values.current_layer == 0
     assert stored_state is not None and stored_state.realized_cultivation == 0
     assert investment_count == 2
 
@@ -338,8 +338,8 @@ async def test_invalid_investment_batch_leaves_every_balance_unchanged(
                     group_code="qi",
                     major_realm="练气",
                     invested_amount=0,
-                    max_investment=3_765,
-                    current_layer=1,
+                    max_investment=3_780,
+                    current_layer=0,
                     status="active",
                 )
             )
@@ -351,7 +351,7 @@ async def test_invalid_investment_batch_leaves_every_balance_unchanged(
                 session_id=None,
                 changes=(
                     TechniqueInvestmentChange(first_id, 10, "seclusion_realization"),
-                    TechniqueInvestmentChange(second_id, 3_766, "seclusion_realization"),
+                    TechniqueInvestmentChange(second_id, 3_781, "seclusion_realization"),
                 ),
                 occurred_at=now,
             )

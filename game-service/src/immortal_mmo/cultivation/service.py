@@ -48,8 +48,13 @@ from immortal_mmo.cultivation.schemas import (
     TechniqueSnapshotResponse,
 )
 from immortal_mmo.cultivation.seclusion import (
-    cumulative_time_budget,
-    maximum_convertible_reserve,
+    CULTIVATION_CYCLE_SECONDS,
+    base_cycle_rate,
+    cumulative_cycle_budget,
+    full_mastery_seconds_for_major_realm,
+    reserve_required_for_retained,
+    scaled_cycle_rate,
+    speed_weight_for_major_realm,
 )
 from immortal_mmo.cultivation.technique_catalog import (
     TechniqueCatalog,
@@ -63,7 +68,6 @@ from immortal_mmo.item.models import (
 )
 from immortal_mmo.player.service import PlayerAccountNotFoundError, PlayerLifecycleError
 
-FULL_MASTERY_SECONDS = {"练气": 36_000, "筑基": 72_000, "结丹": 180_000, "元婴": 360_000}
 DEFAULT_TRANSFER_PROFILES = {
     "Trans_Gongfa_01": 5_000,
     "Trans_Gongfa_02": 8_000,
@@ -864,9 +868,17 @@ class CultivationService:
             )
             if len(techniques) != len(technique_ids):
                 raise CultivationSeclusionRuleError("Unknown selected technique")
+            if len({item.group_code for item in techniques}) != 1:
+                raise CultivationSeclusionRuleError(
+                    "Selected techniques must share the same technique group"
+                )
+            if len({item.max_investment for item in techniques}) != 1:
+                raise CultivationSeclusionRuleError(
+                    "Selected techniques must share the same capacity"
+                )
             if len({item.major_realm for item in techniques}) != 1:
                 raise CultivationSeclusionRuleError(
-                    "Selected techniques must share the same major realm"
+                    "Selected technique group has inconsistent major realms"
                 )
             if any(
                 item.status != "active" or item.invested_amount >= item.max_investment
@@ -875,11 +887,32 @@ class CultivationService:
                 raise CultivationSeclusionRuleError(
                     "Selected technique is not eligible for seclusion"
                 )
-            full_seconds = FULL_MASTERY_SECONDS.get(techniques[0].major_realm)
-            if full_seconds is None:
-                raise CultivationSeclusionRuleError(
-                    "Selected technique has an unsupported major realm"
+            technique_group = techniques[0].group_code
+            technique_capacity = techniques[0].max_investment
+            technique_major_realm = techniques[0].major_realm
+            player_major_realm = self._realm_catalog.level(state.current_level).major_realm
+            try:
+                full_seconds = full_mastery_seconds_for_major_realm(
+                    technique_major_realm
                 )
+                player_speed_weight = speed_weight_for_major_realm(player_major_realm)
+                technique_speed_weight = speed_weight_for_major_realm(
+                    technique_major_realm
+                )
+            except ValueError as error:
+                raise CultivationSeclusionRuleError(
+                    "Seclusion uses an unsupported major realm"
+                ) from error
+            base_rate = base_cycle_rate(
+                technique_capacity=technique_capacity,
+                full_mastery_seconds=full_seconds,
+            )
+            cultivation_per_cycle = scaled_cycle_rate(
+                base_rate=base_rate,
+                player_speed_weight=player_speed_weight,
+                technique_speed_weight=technique_speed_weight,
+                area_speed_basis_points=area.speed_basis_points,
+            )
             session_id = uuid4()
             session = CultivationSession(
                 session_id=session_id,
@@ -890,21 +923,29 @@ class CultivationService:
                 request_fingerprint=request_fingerprint,
                 area_id=area.area_id,
                 content_version=self._area_catalog.revision,
-                source_level=(
-                    await uow.cultivation.get_or_create_state(life.life_id, for_update=False)
-                ).current_level,
+                source_level=state.current_level,
                 target_level=None,
                 frozen_snapshot={
                     "area_version": area.version,
+                    "cycle_seconds": CULTIVATION_CYCLE_SECONDS,
+                    "technique_group": technique_group,
+                    "technique_capacity": technique_capacity,
+                    "full_mastery_seconds": full_seconds,
+                    "base_cultivation_per_cycle": base_rate,
+                    "player_major_realm": player_major_realm,
+                    "player_speed_weight": player_speed_weight,
+                    "technique_major_realm": technique_major_realm,
+                    "technique_speed_weight": technique_speed_weight,
                     "speed_basis_points": area.speed_basis_points,
                     "yield_basis_points": area.yield_basis_points,
+                    "cultivation_per_cycle": cultivation_per_cycle,
                 },
                 cumulative_elapsed_seconds=0,
                 cumulative_generated=0,
                 cumulative_reserve_consumed=0,
                 cumulative_retained=0,
                 started_at=now,
-                completes_at=now + timedelta(seconds=full_seconds),
+                completes_at=now + timedelta(seconds=CULTIVATION_CYCLE_SECONDS),
                 settled_at=None,
                 revision=1,
             )
@@ -918,7 +959,6 @@ class CultivationService:
                     major_realm=item.major_realm,
                     frozen_capacity=item.max_investment,
                     frozen_invested=item.invested_amount,
-                    frozen_full_mastery_seconds=full_seconds,
                 )
                 for item in techniques
             )
@@ -968,52 +1008,101 @@ class CultivationService:
                 raise CultivationSeclusionConflictError(
                     "Seclusion has no new elapsed time to settle"
                 )
-            speed = int(session.frozen_snapshot["speed_basis_points"])
             yield_points = int(session.frozen_snapshot["yield_basis_points"])
-            capacities = [item.frozen_capacity for item in selections]
-            cumulative_generated = cumulative_time_budget(
-                elapsed,
-                speed,
-                capacities,
-                selections[0].frozen_full_mastery_seconds,
+            cumulative_generated = cumulative_cycle_budget(
+                elapsed_seconds=elapsed,
+                cultivation_per_cycle=int(
+                    session.frozen_snapshot["cultivation_per_cycle"]
+                ),
+                cycle_seconds=int(session.frozen_snapshot["cycle_seconds"]),
             )
             if cumulative_generated <= session.cumulative_generated:
                 raise CultivationSeclusionConflictError(
                     "Seclusion has not generated new cultivation to settle"
                 )
-            unused_time_budget = max(cumulative_generated - session.cumulative_generated, 0)
-            remaining = {
-                item.life_technique_id: item.max_investment - item.invested_amount
-                for item in techniques
-            }
-            effective_cap = min(unused_time_budget, sum(remaining.values()))
-            state = await uow.cultivation.get_or_create_state(life.life_id, for_update=True)
-            reserve_consumed = min(
-                state.unrefined_cultivation,
-                maximum_convertible_reserve(effective_cap, yield_points),
+            selections_by_id = {item.life_technique_id: item for item in selections}
+            initial_remaining: dict[UUID, int] = {}
+            prior_allocations: dict[UUID, int] = {}
+            for technique in techniques:
+                selection = selections_by_id[technique.life_technique_id]
+                if (
+                    technique.max_investment != selection.frozen_capacity
+                    or technique.invested_amount < selection.frozen_invested
+                    or technique.invested_amount > selection.frozen_capacity
+                ):
+                    raise CultivationSeclusionConflictError(
+                        "Seclusion technique state no longer matches its frozen snapshot"
+                    )
+                initial_remaining[technique.life_technique_id] = (
+                    selection.frozen_capacity - selection.frozen_invested
+                )
+                prior_allocations[technique.life_technique_id] = (
+                    technique.invested_amount - selection.frozen_invested
+                )
+            if sum(prior_allocations.values()) != session.cumulative_retained:
+                raise CultivationSeclusionConflictError(
+                    "Seclusion retained total does not match technique investments"
+                )
+
+            cumulative_capacity_budget = min(
+                cumulative_generated,
+                sum(initial_remaining.values()),
             )
-            retained = reserve_consumed * yield_points // 10_000
-            allocations = allocate_equal(retained, remaining)
-            operation_id = uuid4()
-            if retained > 0:
-                await uow.cultivation.apply_technique_investments(
-                    life_id=life.life_id,
-                    operation_id=operation_id,
-                    session_id=session_id,
-                    changes=tuple(
-                        TechniqueInvestmentChange(technique_id, amount, "seclusion_realization")
-                        for technique_id, amount in allocations.items()
-                        if amount > 0
-                    ),
-                    occurred_at=now,
+            state = await uow.cultivation.get_or_create_state(life.life_id, for_update=True)
+            total_available_reserve = (
+                session.cumulative_reserve_consumed + state.unrefined_cultivation
+            )
+            target_reserve_consumed = min(
+                total_available_reserve,
+                reserve_required_for_retained(cumulative_capacity_budget, yield_points),
+            )
+            target_retained = min(
+                target_reserve_consumed * yield_points // 10_000,
+                cumulative_capacity_budget,
+            )
+            target_allocations = allocate_equal(target_retained, initial_remaining)
+            investment_changes = {
+                technique_id: target_amount - prior_allocations[technique_id]
+                for technique_id, target_amount in target_allocations.items()
+            }
+            if any(amount < 0 for amount in investment_changes.values()):
+                raise CultivationSeclusionConflictError(
+                    "Seclusion allocation would reduce a technique investment"
                 )
-                await uow.cultivation.consume_unrefined(
-                    life_id=life.life_id,
-                    session_id=session_id,
-                    operation_id=operation_id,
-                    amount=reserve_consumed,
-                    occurred_at=now,
+            reserve_consumed = (
+                target_reserve_consumed - session.cumulative_reserve_consumed
+            )
+            retained = target_retained - session.cumulative_retained
+            if reserve_consumed < 0 or retained < 0 or sum(investment_changes.values()) != retained:
+                raise CultivationSeclusionConflictError(
+                    "Seclusion cumulative settlement snapshot is inconsistent"
                 )
+            if reserve_consumed > 0 or retained > 0:
+                operation_id = uuid4()
+                if retained > 0:
+                    state = await uow.cultivation.apply_technique_investments(
+                        life_id=life.life_id,
+                        operation_id=operation_id,
+                        session_id=session_id,
+                        changes=tuple(
+                            TechniqueInvestmentChange(
+                                technique_id,
+                                amount,
+                                "seclusion_realization",
+                            )
+                            for technique_id, amount in investment_changes.items()
+                            if amount > 0
+                        ),
+                        occurred_at=now,
+                    )
+                if reserve_consumed > 0:
+                    state = await uow.cultivation.consume_unrefined(
+                        life_id=life.life_id,
+                        session_id=session_id,
+                        operation_id=operation_id,
+                        amount=reserve_consumed,
+                        occurred_at=now,
+                    )
             active_chain = await uow.cultivation.get_active_realm_chain(
                 life.life_id, for_update=True
             )
@@ -1022,7 +1111,11 @@ class CultivationService:
             parent_entry = active_chain[-1] if active_chain else None
             generation = await uow.cultivation.get_latest_realm_generation(life.life_id)
             qi_totals = self._realm_catalog.qi_cumulative_totals()
-            while current_level < 10 and group_investments.get("qi", 0) >= qi_totals[current_level]:
+            while (
+                selections[0].group_code == "qi"
+                and current_level < 10
+                and group_investments.get("qi", 0) >= qi_totals[current_level]
+            ):
                 generation += 1
                 source_floor = qi_totals[current_level]
                 reentry = await uow.cultivation.has_realm_transition_history(
@@ -1056,22 +1149,25 @@ class CultivationService:
                 current_level=current_level,
                 group_investments=group_investments,
                 active_entry=parent_entry,
-                unrefined_reserve=state.unrefined_cultivation - reserve_consumed,
+                unrefined_reserve=state.unrefined_cultivation,
                 revision=state.revision,
             )
-            selected_mastered = retained == sum(remaining.values()) and bool(remaining)
-            explicit_barrier_full = progress.progress_full and (
-                current_level >= 10 or group_for_level(current_level) != "qi"
+            selected_mastered = target_retained == sum(initial_remaining.values()) and bool(
+                initial_remaining
+            )
+            progress_group = group_for_level(current_level)
+            explicit_barrier_full = (
+                selections[0].group_code == progress_group
+                and progress.progress_full
+                and (current_level >= 10 or progress_group != "qi")
             )
             terminal = selected_mastered or explicit_barrier_full
             updated = await uow.cultivation.update_session_settlement(
                 session_id=session_id,
                 cumulative_elapsed_seconds=elapsed,
                 cumulative_generated=cumulative_generated,
-                cumulative_reserve_consumed=(
-                    session.cumulative_reserve_consumed + reserve_consumed
-                ),
-                cumulative_retained=session.cumulative_retained + retained,
+                cumulative_reserve_consumed=target_reserve_consumed,
+                cumulative_retained=target_retained,
                 status="completed" if terminal else "active",
                 settled_at=now if terminal else None,
             )

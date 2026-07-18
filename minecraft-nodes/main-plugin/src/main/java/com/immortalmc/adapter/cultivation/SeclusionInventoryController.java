@@ -3,10 +3,8 @@ package com.immortalmc.adapter.cultivation;
 import com.immortalmc.adapter.client.GameServiceClient;
 import com.immortalmc.adapter.client.PlayerLoginResult;
 import com.immortalmc.adapter.client.SeclusionRequest;
-import com.immortalmc.adapter.client.SeclusionSnapshot;
 import com.immortalmc.adapter.client.TechniqueSnapshot;
 import com.immortalmc.adapter.session.PlayerSessionCache;
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -101,7 +99,7 @@ public final class SeclusionInventoryController implements Listener, AutoCloseab
         }
         TechniqueSnapshot technique = holder.techniques().get(slot);
         if (!holder.selection().toggle(technique.lifeTechniqueId())) {
-            player.sendMessage("该功法不可选择：需为 active、未满层，且最多五门同大境界功法。");
+            player.sendMessage("该功法不可选择：需为 active、未满层，且最多五门同组同容量功法。");
             return;
         }
         event.getInventory().setItem(slot, item(technique, holder.selection().selected(technique.lifeTechniqueId())));
@@ -146,21 +144,14 @@ public final class SeclusionInventoryController implements Listener, AutoCloseab
                         player.sendMessage("闭关开始失败：" + message(error));
                         return;
                     }
-                    player.sendMessage("闭关已开始，预计完成时间：" + snapshot.completesAt());
-                    scheduleSettlement(player.getUniqueId(), session.account().accountId(), snapshot);
+                    player.sendMessage("闭关已开始。");
+                    scheduleSettlement(
+                            player.getUniqueId(), session.account().accountId(), snapshot.sessionId());
                     refresh.accept(player.getUniqueId());
                 }));
     }
 
-    private void scheduleSettlement(UUID playerId, UUID accountId, SeclusionSnapshot snapshot) {
-        scheduleSettlement(
-                playerId,
-                accountId,
-                snapshot.sessionId(),
-                CultivationSchedule.delayTicks(Instant.now(), snapshot.completesAt()));
-    }
-
-    private void scheduleSettlement(UUID playerId, UUID accountId, UUID sessionId, long delayTicks) {
+    private void scheduleSettlement(UUID playerId, UUID accountId, UUID sessionId) {
         Bukkit.getScheduler().runTaskLater(plugin, () -> client.settleSeclusion(
                         accountId,
                         sessionId,
@@ -175,17 +166,13 @@ public final class SeclusionInventoryController implements Listener, AutoCloseab
                     }
                     SeclusionSettlementDecision decision = SeclusionSettlementDecision.from(settled);
                     if (player != null) {
-                        player.sendMessage(decision.playerMessage());
+                        decision.playerMessage().ifPresent(player::sendMessage);
                     }
                     refresh.accept(playerId);
                     if (decision.retry()) {
-                        scheduleSettlement(
-                                playerId,
-                                accountId,
-                                settled.sessionId(),
-                                CultivationSchedule.ACTIVE_SECLUSION_RETRY_TICKS);
+                        scheduleSettlement(playerId, accountId, settled.sessionId());
                     }
-                })), delayTicks);
+                })), CultivationSchedule.ORDINARY_SECLUSION_CYCLE_TICKS);
     }
 
     private static ItemStack item(TechniqueSnapshot t, boolean selected) {

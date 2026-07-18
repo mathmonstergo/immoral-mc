@@ -29,7 +29,9 @@ public final class SeclusionSelection {
         }
         if (!selected.isEmpty()) {
             TechniqueSnapshot first = techniques.get(selected.iterator().next());
-            if (!first.majorRealm().equals(technique.majorRealm())) {
+            if (!first.groupCode().equals(technique.groupCode())
+                    || first.maxInvestment() != technique.maxInvestment()
+                    || !first.majorRealm().equals(technique.majorRealm())) {
                 return false;
             }
         }

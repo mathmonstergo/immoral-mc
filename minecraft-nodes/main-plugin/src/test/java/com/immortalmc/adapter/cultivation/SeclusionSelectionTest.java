@@ -3,6 +3,7 @@ package com.immortalmc.adapter.cultivation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.immortalmc.adapter.client.TechniqueSnapshot;
 import java.util.List;
@@ -10,6 +11,15 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class SeclusionSelectionTest {
+    @Test
+    void zeroLayerActiveTechniqueRemainsSelectable() {
+        TechniqueSnapshot technique = technique("练气", "active", 0, 10, 0);
+        SeclusionSelection selection = new SeclusionSelection(List.of(technique));
+
+        assertTrue(selection.toggle(technique.lifeTechniqueId()));
+        assertEquals(List.of(technique.lifeTechniqueId()), selection.confirmedIds());
+    }
+
     @Test
     void submissionIsStableAndIndependentOfClickOrder() {
         TechniqueSnapshot a = technique("筑基", "active", 2, 10);
@@ -42,9 +52,44 @@ class SeclusionSelectionTest {
         assertThrows(IllegalStateException.class, () -> new SeclusionSelection(List.of()).confirmedIds());
     }
 
+    @Test
+    void rejectsDifferentGroupsWithinTheSameMajorRealm() {
+        TechniqueSnapshot first = technique("level:14", "筑基", "active", 1, 10);
+        TechniqueSnapshot second = technique("level:15", "筑基", "active", 1, 10);
+        SeclusionSelection selection = new SeclusionSelection(List.of(first, second));
+
+        assertTrue(selection.toggle(first.lifeTechniqueId()));
+        assertFalse(selection.toggle(second.lifeTechniqueId()));
+    }
+
+    @Test
+    void rejectsDifferentCapacitiesWithinTheSameGroup() {
+        TechniqueSnapshot first = technique("level:14", "筑基", "active", 1, 10);
+        TechniqueSnapshot second = technique("level:14", "筑基", "active", 1, 11);
+        SeclusionSelection selection = new SeclusionSelection(List.of(first, second));
+
+        assertTrue(selection.toggle(first.lifeTechniqueId()));
+        assertFalse(selection.toggle(second.lifeTechniqueId()));
+    }
+
     private static TechniqueSnapshot technique(String realm, String status, long invested, long max) {
-        return new TechniqueSnapshot(1, UUID.randomUUID(), "test", "测试功法", 1, "group", realm,
+        return technique(realm, status, invested, max, 1);
+    }
+
+    private static TechniqueSnapshot technique(
+            String realm, String status, long invested, long max, int currentLayer) {
+        return technique("group", realm, status, invested, max, currentLayer);
+    }
+
+    private static TechniqueSnapshot technique(
+            String group, String realm, String status, long invested, long max) {
+        return technique(group, realm, status, invested, max, 1);
+    }
+
+    private static TechniqueSnapshot technique(
+            String group, String realm, String status, long invested, long max, int currentLayer) {
+        return new TechniqueSnapshot(1, UUID.randomUUID(), "test", "测试功法", 1, group, realm,
                 List.of("water"),
-                invested, max, 1, status);
+                invested, max, currentLayer, status);
     }
 }

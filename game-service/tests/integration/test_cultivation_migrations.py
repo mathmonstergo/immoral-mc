@@ -59,6 +59,7 @@ async def test_fresh_schema_contains_complete_cultivation_persistence(
         "cumulative_retained",
     } <= columns["cultivation_sessions"]
     assert "selection_order" not in columns["cultivation_session_techniques"]
+    assert "frozen_full_mastery_seconds" not in columns["cultivation_session_techniques"]
 
 
 @pytest.mark.asyncio

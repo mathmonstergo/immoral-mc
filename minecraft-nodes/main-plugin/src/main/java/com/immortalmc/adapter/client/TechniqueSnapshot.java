@@ -35,7 +35,7 @@ public record TechniqueSnapshot(
         if (investedAmount < 0 || maxInvestment <= 0 || investedAmount > maxInvestment) {
             throw new IllegalArgumentException("Technique investment is outside supported bounds");
         }
-        if (currentLayer < 1 || currentLayer > 13) {
+        if (currentLayer < 0 || currentLayer > 13) {
             throw new IllegalArgumentException("currentLayer is outside supported bounds");
         }
     }

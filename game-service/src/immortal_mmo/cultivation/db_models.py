@@ -224,7 +224,7 @@ class LifeTechniqueRow(Base):
             name=conv("ck_life_technique_investment"),
         ),
         CheckConstraint(
-            "current_layer BETWEEN 1 AND 13",
+            "current_layer BETWEEN 0 AND 13",
             name=conv("ck_life_technique_layer"),
         ),
         CheckConstraint(
@@ -258,7 +258,7 @@ class LifeTechniqueRow(Base):
     )
     max_investment: Mapped[int] = mapped_column(BigInteger, nullable=False)
     current_layer: Mapped[int] = mapped_column(
-        SmallInteger, nullable=False, server_default=text("1")
+        SmallInteger, nullable=False, server_default=text("0")
     )
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'active'"))
     learned_at: Mapped[datetime] = mapped_column(
@@ -485,10 +485,6 @@ class CultivationSessionTechniqueRow(Base):
             "frozen_capacity > 0 AND frozen_invested BETWEEN 0 AND frozen_capacity",
             name=conv("ck_session_technique_frozen_amounts"),
         ),
-        CheckConstraint(
-            "frozen_full_mastery_seconds > 0",
-            name=conv("ck_session_technique_mastery_seconds"),
-        ),
     )
 
     session_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True))
@@ -499,7 +495,6 @@ class CultivationSessionTechniqueRow(Base):
     major_realm: Mapped[str] = mapped_column(String(32), nullable=False)
     frozen_capacity: Mapped[int] = mapped_column(BigInteger, nullable=False)
     frozen_invested: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    frozen_full_mastery_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
 
 class TechniqueInvestmentEntryRow(Base):

@@ -15,7 +15,7 @@ class SeclusionSettlementDecisionTest {
         SeclusionSettlementDecision decision = SeclusionSettlementDecision.from(snapshot("active"));
 
         assertTrue(decision.retry());
-        assertEquals("本次闭关已结算，仍可继续炼化，稍后将自动再次结算。", decision.playerMessage());
+        assertTrue(decision.playerMessage().isEmpty());
     }
 
     @Test
@@ -23,7 +23,7 @@ class SeclusionSettlementDecisionTest {
         SeclusionSettlementDecision decision = SeclusionSettlementDecision.from(snapshot("completed"));
 
         assertFalse(decision.retry());
-        assertEquals("闭关完成，修为已炼化。", decision.playerMessage());
+        assertEquals("闭关完成，修为已炼化。", decision.playerMessage().orElseThrow());
     }
 
     private static SeclusionSnapshot snapshot(String status) {
@@ -33,7 +33,7 @@ class SeclusionSettlementDecisionTest {
                 UUID.randomUUID(),
                 status,
                 startedAt,
-                startedAt.plusSeconds(60),
+                startedAt.plusSeconds(10),
                 10,
                 5,
                 5);

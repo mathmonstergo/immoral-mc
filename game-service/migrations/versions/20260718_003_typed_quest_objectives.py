@@ -18,7 +18,6 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    _backfill_current_layers()
     op.create_table(
         "quest_objective_progress",
         sa.Column("life_id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -187,93 +186,3 @@ def downgrade() -> None:
         table_name="quest_objective_progress",
     )
     op.drop_table("quest_objective_progress")
-
-
-def _backfill_current_layers() -> None:
-    connection = op.get_bind()
-    rows = connection.execute(
-        sa.text(
-            """
-            SELECT life_technique_id, invested_amount, max_investment,
-                   major_realm, current_layer
-            FROM life_techniques
-            """
-        )
-    ).mappings()
-    for row in rows:
-        current_layer = _layer_for_major_realm(
-            int(row["invested_amount"]),
-            int(row["max_investment"]),
-            str(row["major_realm"]),
-        )
-        if current_layer == row["current_layer"]:
-            continue
-        connection.execute(
-            sa.text(
-                """
-                UPDATE life_techniques
-                SET current_layer = :current_layer, updated_at = now()
-                WHERE life_technique_id = :life_technique_id
-                """
-            ),
-            {
-                "current_layer": current_layer,
-                "life_technique_id": row["life_technique_id"],
-            },
-        )
-
-
-# This is intentionally a frozen copy of the curve used when revision 003 was
-# authored. Historical migrations must not import mutable domain code: a later
-# balance change must never change the result of an old backfill.
-_TRANSITION_COUNT = 12
-_TECHNIQUE_GROWTH_RATIOS = {
-    "练气": (3, 2),
-    "筑基": (17, 10),
-    "结丹": (9, 5),
-    "元婴": (2, 1),
-}
-
-
-def _layer_for_major_realm(
-    invested_amount: int,
-    capacity: int,
-    major_realm: str,
-) -> int:
-    for value, label in (
-        (invested_amount, "invested_amount"),
-        (capacity, "capacity"),
-    ):
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ValueError(f"{label} must be an integer")
-    if invested_amount < 0 or invested_amount > capacity:
-        raise ValueError("invested_amount must be within technique capacity")
-    if capacity < _TRANSITION_COUNT:
-        raise ValueError("capacity must allow twelve positive transition costs")
-    try:
-        p, q = _TECHNIQUE_GROWTH_RATIOS[major_realm]
-    except KeyError as error:
-        raise ValueError(f"Unknown technique major realm: {major_realm}") from error
-    weights = tuple(
-        p**index * q ** (_TRANSITION_COUNT - 1 - index)
-        for index in range(_TRANSITION_COUNT)
-    )
-    total_weight = sum(weights)
-    costs = [capacity * weight // total_weight for weight in weights]
-    points_left = capacity - sum(costs)
-    remainder_order = sorted(
-        range(_TRANSITION_COUNT),
-        key=lambda index: (-(capacity * weights[index] % total_weight), index),
-    )
-    for index in remainder_order[:points_left]:
-        costs[index] += 1
-    if any(cost == 0 for cost in costs):
-        raise ValueError("capacity and ratio must produce positive transition costs")
-    cumulative = 0
-    layer = 1
-    for cost in costs:
-        cumulative += cost
-        if invested_amount < cumulative:
-            break
-        layer += 1
-    return min(layer, _TRANSITION_COUNT + 1)

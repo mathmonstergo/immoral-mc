@@ -96,8 +96,8 @@ async def test_start_seclusion_persists_unordered_authoritative_selection(
                         group_code="qi",
                         major_realm="练气",
                         invested_amount=0,
-                        max_investment=108,
-                        current_layer=1,
+                        max_investment=109,
+                        current_layer=0,
                         status="active",
                     )
                 )
@@ -117,6 +117,7 @@ async def test_start_seclusion_persists_unordered_authoritative_selection(
         session_count = await session.scalar(
             select(func.count()).select_from(CultivationSessionRow)
         )
+        stored_session = await session.scalar(select(CultivationSessionRow))
         selections = (
             await session.scalars(
                 select(CultivationSessionTechniqueRow.life_technique_id).order_by(
@@ -125,6 +126,23 @@ async def test_start_seclusion_persists_unordered_authoritative_selection(
             )
         ).all()
     assert session_count == 1
+    assert stored_session is not None
+    assert stored_session.completes_at - stored_session.started_at == timedelta(seconds=10)
+    assert stored_session.frozen_snapshot == {
+        "area_version": 1,
+        "cycle_seconds": 10,
+        "technique_group": "qi",
+        "technique_capacity": 109,
+        "full_mastery_seconds": 36_000,
+        "base_cultivation_per_cycle": 1,
+        "player_major_realm": "练气",
+        "player_speed_weight": 1,
+        "technique_major_realm": "练气",
+        "technique_speed_weight": 1,
+        "speed_basis_points": 10_000,
+        "yield_basis_points": 10_000,
+        "cultivation_per_cycle": 1,
+    }
     assert tuple(selections) == tuple(sorted(technique_ids))
 
 
@@ -164,8 +182,8 @@ async def test_abandonment_api_replays_across_app_restart_without_double_debit(
                         group_code="qi",
                         major_realm="练气",
                         invested_amount=invested,
-                        max_investment=108,
-                        current_layer=1,
+                        max_investment=109,
+                        current_layer=12 if invested else 0,
                         status="active",
                     )
                 )
@@ -270,8 +288,8 @@ async def test_transfer_api_applies_profile_fraction_and_target_capacity(
                         group_code="qi",
                         major_realm="练气",
                         invested_amount=101,
-                        max_investment=200,
-                        current_layer=1,
+                        max_investment=201,
+                        current_layer=11,
                         status="active",
                     ),
                     LifeTechniqueRow(
@@ -282,8 +300,8 @@ async def test_transfer_api_applies_profile_fraction_and_target_capacity(
                         group_code="qi",
                         major_realm="练气",
                         invested_amount=78,
-                        max_investment=108,
-                        current_layer=1,
+                        max_investment=109,
+                        current_layer=12,
                         status="active",
                     ),
                 ]
@@ -301,9 +319,9 @@ async def test_transfer_api_applies_profile_fraction_and_target_capacity(
 
     assert response.status_code == 200
     assert response.json()["removed_amount"] == 101
-    assert response.json()["transferred_amount"] == 30
-    assert response.json()["destroyed_amount"] == 71
-    assert response.json()["cultivation"]["realized_total"] == 108
+    assert response.json()["transferred_amount"] == 31
+    assert response.json()["destroyed_amount"] == 70
+    assert response.json()["cultivation"]["realized_total"] == 109
     assert response.json()["cultivation"]["unrefined_reserve"] == 55
 
 
@@ -344,8 +362,8 @@ async def test_regression_reentry_appends_a_new_postgres_branch(
                         group_code="qi",
                         major_realm="练气",
                         invested_amount=100,
-                        max_investment=108,
-                        current_layer=1,
+                        max_investment=109,
+                        current_layer=12,
                         status="active",
                     ),
                     LifeTechniqueRow(
@@ -356,8 +374,8 @@ async def test_regression_reentry_appends_a_new_postgres_branch(
                         group_code="qi",
                         major_realm="练气",
                         invested_amount=150,
-                        max_investment=250,
-                        current_layer=1,
+                        max_investment=251,
+                        current_layer=11,
                         status="active",
                     ),
                     LifeRealmEntryRow(

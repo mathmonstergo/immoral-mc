@@ -68,6 +68,13 @@ def test_effect_projection_is_typed_and_layer_aware(catalog: TechniqueCatalog) -
     assert attack.status is None
 
 
+def test_zero_layer_has_no_projected_effects(catalog: TechniqueCatalog) -> None:
+    assert catalog.technique("Gongfa_68726c").project_effects(0) == ()
+
+    with pytest.raises(ValueError, match="0 through 13"):
+        catalog.technique("Gongfa_68726c").project_effects(-1)
+
+
 def test_technique_models_and_views_are_immutable(catalog: TechniqueCatalog) -> None:
     assert TechniqueDefinition.__dataclass_params__.frozen is True
     assert TechniquePrerequisite.__dataclass_params__.frozen is True

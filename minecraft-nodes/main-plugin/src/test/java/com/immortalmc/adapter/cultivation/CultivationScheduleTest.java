@@ -7,7 +7,12 @@ import org.junit.jupiter.api.Test;
 
 class CultivationScheduleTest {
     @Test
-    void schedulesAfterTheAuthoritativeCompletionInstant() {
+    void ordinarySeclusionUsesOneTenSecondCycle() {
+        assertEquals(200, CultivationSchedule.ORDINARY_SECLUSION_CYCLE_TICKS);
+    }
+
+    @Test
+    void breakthroughSchedulesAfterTheAuthoritativeCompletionInstant() {
         Instant now = Instant.parse("2026-07-16T10:00:00Z");
 
         assertEquals(1, CultivationSchedule.delayTicks(now, now.minusMillis(1)));

@@ -95,7 +95,6 @@ class SessionTechnique:
     major_realm: str
     frozen_capacity: int
     frozen_invested: int
-    frozen_full_mastery_seconds: int
 
 
 @dataclass(frozen=True, slots=True)

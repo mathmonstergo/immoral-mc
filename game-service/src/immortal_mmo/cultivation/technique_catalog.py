@@ -8,22 +8,24 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from immortal_mmo.cultivation.seclusion import MAJOR_REALM_SPEED_WEIGHTS
+
 
 class TechniqueCatalogError(ValueError):
     """Raised when committed technique content does not satisfy its schema."""
 
 
 _GROUP_REALMS = {
-    "qi": ("练气", 1),
-    "level:14": ("筑基", 2),
-    "level:15": ("筑基", 2),
-    "level:16": ("筑基", 2),
-    "level:17": ("结丹", 5),
-    "level:18": ("结丹", 5),
-    "level:19": ("结丹", 5),
-    "level:20": ("元婴", 10),
-    "level:21": ("元婴", 10),
-    "level:22": ("元婴", 10),
+    "qi": "练气",
+    "level:14": "筑基",
+    "level:15": "筑基",
+    "level:16": "筑基",
+    "level:17": "结丹",
+    "level:18": "结丹",
+    "level:19": "结丹",
+    "level:20": "元婴",
+    "level:21": "元婴",
+    "level:22": "元婴",
 }
 _CANONICAL_ELEMENTS = frozenset({"metal", "wood", "water", "fire", "earth", "ice", "wind"})
 _EFFECT_FIELDS = {
@@ -115,9 +117,11 @@ class TechniqueDefinition:
         if (
             isinstance(layer, bool)
             or not isinstance(layer, int)
-            or not 1 <= layer <= self.max_layer
+            or not 0 <= layer <= self.max_layer
         ):
-            raise ValueError("Technique effect layer must be an integer from 1 through 13")
+            raise ValueError("Technique effect layer must be an integer from 0 through 13")
+        if layer == 0:
+            return ()
         result: list[TechniqueEffect] = []
         for effect in self.effects:
             if layer < effect.layer_start or layer > effect.layer_end:
@@ -183,7 +187,8 @@ class TechniqueCatalog:
                 raise TechniqueCatalogError(f"Technique {field} must not be empty")
         if technique.group not in _GROUP_REALMS:
             raise TechniqueCatalogError(f"Unsupported technique group: {technique.group}")
-        expected_realm, expected_weight = _GROUP_REALMS[technique.group]
+        expected_realm = _GROUP_REALMS[technique.group]
+        expected_weight = MAJOR_REALM_SPEED_WEIGHTS[expected_realm]
         if technique.major_realm != expected_realm:
             raise TechniqueCatalogError("Technique group and major_realm are inconsistent")
         if isinstance(technique.time_weight, bool) or not isinstance(

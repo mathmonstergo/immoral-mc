@@ -15,8 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 from tests.support.postgres import (
     MigratedPostgres,
     check_migration_metadata,
-    downgrade_postgres,
-    migrate_postgres,
     rollback_postgres_session,
 )
 
@@ -195,7 +193,6 @@ EXPECTED_CONSTRAINTS = {
         "fk_session_techniques_technique",
         "ck_session_technique_definition_version",
         "ck_session_technique_frozen_amounts",
-        "ck_session_technique_mastery_seconds",
     },
     "technique_investment_entries": {
         "pk_technique_investment_entries",
@@ -847,75 +844,6 @@ async def test_postgres_fixture_uses_requested_major_version(
 ) -> None:
     assert migrated_postgres.url.startswith("postgresql+asyncpg://")
     assert migrated_postgres.server_version.startswith("17.")
-
-
-@pytest.mark.asyncio
-async def test_typed_objective_upgrade_backfills_existing_technique_layers(
-    migrated_postgres: MigratedPostgres,
-    clean_postgres_data: None,
-) -> None:
-    del clean_postgres_data
-    account_id = uuid4()
-    life_id = uuid4()
-    life_technique_id = uuid4()
-    await asyncio.to_thread(
-        downgrade_postgres,
-        migrated_postgres.url,
-        "20260715_002",
-    )
-    try:
-        async with migrated_postgres.engine.begin() as connection:
-            await connection.execute(
-                text(
-                    """
-                    INSERT INTO accounts (
-                        account_id, minecraft_uuid, last_known_name
-                    ) VALUES (:account_id, :minecraft_uuid, 'Migrator')
-                    """
-                ),
-                {"account_id": account_id, "minecraft_uuid": uuid4()},
-            )
-            await connection.execute(
-                text(
-                    """
-                    INSERT INTO lives (
-                        life_id, account_id, generation_no, status
-                    ) VALUES (:life_id, :account_id, 1, 'alive')
-                    """
-                ),
-                {"life_id": life_id, "account_id": account_id},
-            )
-            await connection.execute(
-                text(
-                    """
-                    INSERT INTO life_techniques (
-                        life_technique_id, life_id, technique_id,
-                        definition_version, group_code, major_realm,
-                        invested_amount, max_investment, current_layer, status
-                    ) VALUES (
-                        :life_technique_id, :life_id, 'GF_Migration',
-                        1, 'qi', '练气', 1000, 3765, 1, 'active'
-                    )
-                    """
-                ),
-                {
-                    "life_technique_id": life_technique_id,
-                    "life_id": life_id,
-                },
-            )
-
-        await asyncio.to_thread(migrate_postgres, migrated_postgres.url, "head")
-        async with migrated_postgres.engine.connect() as connection:
-            current_layer = await connection.scalar(
-                text(
-                    "SELECT current_layer FROM life_techniques "
-                    "WHERE life_technique_id = :life_technique_id"
-                ),
-                {"life_technique_id": life_technique_id},
-            )
-        assert current_layer == 9
-    finally:
-        await asyncio.to_thread(migrate_postgres, migrated_postgres.url, "head")
 
 
 @pytest.mark.asyncio

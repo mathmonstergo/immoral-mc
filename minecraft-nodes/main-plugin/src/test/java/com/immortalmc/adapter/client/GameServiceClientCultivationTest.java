@@ -47,8 +47,8 @@ class GameServiceClientCultivationTest {
                               "display_name":"风裂遁刃诀","definition_version":1,
                               "group_code":"level:22","major_realm":"元婴",
                               "attribute_codes":["wind"],
-                              "invested_amount":500,"max_investment":1000,
-                              "current_layer":7,"status":"active"}]
+                              "invested_amount":0,"max_investment":1000,
+                              "current_layer":0,"status":"active"}]
                             """));
         },
                 uri -> {
@@ -70,8 +70,14 @@ class GameServiceClientCultivationTest {
                     assertEquals(1, techniques.size());
                     assertEquals("风裂遁刃诀", techniques.getFirst().displayName());
                     assertEquals(List.of("wind"), techniques.getFirst().attributeCodes());
-                    assertEquals(7, techniques.getFirst().currentLayer());
+                    assertEquals(0, techniques.getFirst().currentLayer());
                 });
+    }
+
+    @Test
+    void techniqueSnapshotsRejectLayersOutsideZeroToThirteen() {
+        assertThrows(IllegalArgumentException.class, () -> techniqueAtLayer(-1));
+        assertThrows(IllegalArgumentException.class, () -> techniqueAtLayer(14));
     }
 
     @Test
@@ -112,6 +118,7 @@ class GameServiceClientCultivationTest {
                     .get(2, TimeUnit.SECONDS);
 
             assertEquals(SESSION_ID, started.sessionId());
+            assertEquals(Instant.parse("2026-07-16T12:00:10Z"), started.completesAt());
             assertEquals("active", status.status());
             assertEquals("completed", settled.status());
             assertEquals(OPERATION_ID.toString(), startHeader.get());
@@ -244,6 +251,22 @@ class GameServiceClientCultivationTest {
         return new GameServiceClient(uri, HttpClient.newHttpClient());
     }
 
+    private static TechniqueSnapshot techniqueAtLayer(int currentLayer) {
+        return new TechniqueSnapshot(
+                1,
+                TECHNIQUE_ID,
+                "wind_split_escape_blade",
+                "风裂遁刃诀",
+                1,
+                "level:22",
+                "元婴",
+                List.of("wind"),
+                0,
+                1000,
+                currentLayer,
+                "active");
+    }
+
     private static String cultivationJson() {
         return """
                 {"contract_version":1,"current_level":22,"realm_name":"元婴后期",
@@ -257,7 +280,7 @@ class GameServiceClientCultivationTest {
         return """
                 {"contract_version":1,"session_id":"22222222-2222-4222-8222-222222222222",
                  "status":"%s","started_at":"2026-07-16T12:00:00Z",
-                 "completes_at":"2026-07-16T13:00:00Z","cumulative_generated":120,
+                 "completes_at":"2026-07-16T12:00:10Z","cumulative_generated":120,
                  "cumulative_reserve_consumed":100,"cumulative_retained":100}
                 """.formatted(status);
     }

@@ -85,8 +85,8 @@ async def test_state_objectives_use_current_authoritative_targets() -> None:
         1,
         "qi",
         "练气",
-        500,
-        3_765,
+        208,
+        3_780,
         6,
         "active",
     )
@@ -97,8 +97,8 @@ async def test_state_objectives_use_current_authoritative_targets() -> None:
         1,
         "qi",
         "练气",
-        3_765,
-        3_765,
+        3_780,
+        3_780,
         13,
         "active",
     )
@@ -106,7 +106,7 @@ async def test_state_objectives_use_current_authoritative_targets() -> None:
         life_id,
         14,
         0,
-        500,
+        208,
         None,
         1,
     )
@@ -156,8 +156,8 @@ async def test_technique_objective_tracks_layer_gain_and_loss_from_investment() 
         "qi",
         "练气",
         0,
-        3_765,
-        1,
+        3_780,
+        0,
         "active",
     )
     factory.store._state.cultivation_states[life_id] = CultivationState(
@@ -183,7 +183,7 @@ async def test_technique_objective_tracks_layer_gain_and_loss_from_investment() 
             changes=(
                 TechniqueInvestmentChange(
                     technique_instance,
-                    15,
+                    30,
                     "seclusion_realization",
                 ),
             ),
@@ -347,8 +347,8 @@ async def test_mixed_objectives_require_every_type() -> None:
         1,
         "qi",
         "练气",
-        100,
-        3_765,
+        30,
+        3_780,
         2,
         "active",
     )
@@ -356,7 +356,7 @@ async def test_mixed_objectives_require_every_type() -> None:
         life_id,
         2,
         0,
-        100,
+        30,
         None,
         1,
     )

@@ -279,7 +279,6 @@ class PostgresCultivationRepository:
                     major_realm=item.major_realm,
                     frozen_capacity=item.frozen_capacity,
                     frozen_invested=item.frozen_invested,
-                    frozen_full_mastery_seconds=item.frozen_full_mastery_seconds,
                 )
                 for item in techniques
             ]
@@ -728,7 +727,6 @@ def _session_technique(row: CultivationSessionTechniqueRow) -> SessionTechnique:
         major_realm=row.major_realm,
         frozen_capacity=row.frozen_capacity,
         frozen_invested=row.frozen_invested,
-        frozen_full_mastery_seconds=row.frozen_full_mastery_seconds,
     )
 
 

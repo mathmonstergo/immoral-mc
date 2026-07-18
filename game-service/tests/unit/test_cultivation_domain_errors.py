@@ -70,7 +70,7 @@ def add_technique(
         major_realm=major_realm,
         invested_amount=invested_amount,
         max_investment=max_investment,
-        current_layer=1,
+        current_layer=0 if invested_amount == 0 else 1,
         status=status,
     )
 
@@ -343,7 +343,7 @@ async def test_settle_seclusion_rejects_too_early_settlement_as_conflict() -> No
         technique_ids=(technique_id,),
         idempotency_key=UUID(int=20_902),
     )
-    clock.now += timedelta(seconds=1)
+    clock.now += timedelta(seconds=9)
 
     await assert_domain_error(
         service.settle_seclusion(account_id=account_id, session_id=started.session_id),

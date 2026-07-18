@@ -86,7 +86,7 @@ def test_qi_cumulative_capacity_uses_three_five_seven_nine_techniques(
         23_440,
         32_860,
     ]
-    assert [ceil(totals[level] / 3_765) for level in (10, 11, 12, 13)] == [3, 5, 7, 9]
+    assert [ceil(totals[level] / 3_780) for level in (10, 11, 12, 13)] == [3, 5, 7, 9]
 
 
 def _level(

@@ -9,6 +9,27 @@ import org.junit.jupiter.api.Test;
 
 class TechniquePresentationTest {
     @Test
+    void rendersZeroLayerAsNotYetCultivated() {
+        TechniqueSnapshot technique = new TechniqueSnapshot(
+                1,
+                UUID.randomUUID(),
+                "Gongfa_68726c",
+                "冰冻术",
+                1,
+                "qi",
+                "练气",
+                List.of("water", "ice"),
+                0,
+                100,
+                0,
+                "active");
+
+        assertEquals("层数: 0/13", TechniquePresentation.loreLines(technique).get(3));
+        assertEquals("修为: 0/100", TechniquePresentation.loreLines(technique).get(4));
+        assertEquals("状态: active", TechniquePresentation.loreLines(technique).get(5));
+    }
+
+    @Test
     void rendersAuthoritativeAttributesAndEligibility() {
         TechniqueSnapshot technique = new TechniqueSnapshot(
                 1,

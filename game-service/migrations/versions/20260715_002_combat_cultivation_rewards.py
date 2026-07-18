@@ -82,7 +82,7 @@ def upgrade() -> None:
         sa.Column("major_realm", sa.String(length=32), nullable=False),
         sa.Column("invested_amount", sa.BigInteger(), server_default="0", nullable=False),
         sa.Column("max_investment", sa.BigInteger(), nullable=False),
-        sa.Column("current_layer", sa.SmallInteger(), server_default="1", nullable=False),
+        sa.Column("current_layer", sa.SmallInteger(), server_default="0", nullable=False),
         sa.Column("status", sa.String(length=16), server_default="active", nullable=False),
         sa.Column(
             "learned_at",
@@ -122,7 +122,7 @@ def upgrade() -> None:
             name=op.f("ck_life_technique_investment"),
         ),
         sa.CheckConstraint(
-            "current_layer BETWEEN 1 AND 13",
+            "current_layer BETWEEN 0 AND 13",
             name=op.f("ck_life_technique_layer"),
         ),
         sa.CheckConstraint(
@@ -326,7 +326,6 @@ def upgrade() -> None:
         sa.Column("major_realm", sa.String(length=32), nullable=False),
         sa.Column("frozen_capacity", sa.BigInteger(), nullable=False),
         sa.Column("frozen_invested", sa.BigInteger(), nullable=False),
-        sa.Column("frozen_full_mastery_seconds", sa.BigInteger(), nullable=False),
         sa.PrimaryKeyConstraint(
             "session_id", "life_technique_id", name="pk_cultivation_session_techniques"
         ),
@@ -348,10 +347,6 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "frozen_capacity > 0 AND frozen_invested BETWEEN 0 AND frozen_capacity",
             name=op.f("ck_session_technique_frozen_amounts"),
-        ),
-        sa.CheckConstraint(
-            "frozen_full_mastery_seconds > 0",
-            name=op.f("ck_session_technique_mastery_seconds"),
         ),
     )
     op.create_table(
