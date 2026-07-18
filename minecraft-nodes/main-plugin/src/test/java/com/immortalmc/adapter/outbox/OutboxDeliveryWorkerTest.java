@@ -177,6 +177,39 @@ class OutboxDeliveryWorkerTest {
         }
     }
 
+    @Test
+    void acceptedAndDuplicateResultsRefreshEachAffectedPlayerOnce() throws Exception {
+        UUID secondEventId = UUID.fromString("77777777-7777-4777-8777-777777777777");
+        List<UUID> refreshed = new ArrayList<>();
+        try (SqliteKillOutbox outbox = outbox();
+                OutboxDeliveryWorker worker = worker(
+                        outbox,
+                        requests -> CompletableFuture.completedFuture(acceptedResponseReversed(requests)),
+                        (request, result) -> {},
+                        Runnable::run,
+                        new RecordingAdapterLogger(),
+                        refreshed::add)) {
+            outbox.append(request()).get(2, TimeUnit.SECONDS);
+            outbox.append(request(secondEventId)).get(2, TimeUnit.SECONDS);
+            worker.runOnce(20.0).get(2, TimeUnit.SECONDS);
+        }
+        assertEquals(1, refreshed.size());
+
+        refreshed.clear();
+        try (SqliteKillOutbox outbox = outbox(tempDir.resolve("duplicate-refresh.sqlite3"));
+                OutboxDeliveryWorker worker = worker(
+                        outbox,
+                        requests -> CompletableFuture.completedFuture(duplicateResponse(requests)),
+                        (request, result) -> {},
+                        Runnable::run,
+                        new RecordingAdapterLogger(),
+                        refreshed::add)) {
+            outbox.append(request()).get(2, TimeUnit.SECONDS);
+            worker.runOnce(20.0).get(2, TimeUnit.SECONDS);
+        }
+        assertEquals(1, refreshed.size());
+    }
+
     private OutboxDeliveryWorker worker(SqliteKillOutbox outbox, CombatBatchSender sender) {
         return worker(
                 outbox,
@@ -200,6 +233,24 @@ class OutboxDeliveryWorkerTest {
                 logger,
                 presenter,
                 dispatcher);
+    }
+
+    private OutboxDeliveryWorker worker(
+            SqliteKillOutbox outbox,
+            CombatBatchSender sender,
+            CultivationRewardPresenter presenter,
+            java.util.function.Consumer<Runnable> dispatcher,
+            RecordingAdapterLogger logger,
+            java.util.function.Consumer<UUID> questRefresher) {
+        return new OutboxDeliveryWorker(
+                outbox,
+                sender,
+                policy(),
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                logger,
+                presenter,
+                dispatcher,
+                questRefresher);
     }
 
     private static OutboxDeliveryPolicy policy() {

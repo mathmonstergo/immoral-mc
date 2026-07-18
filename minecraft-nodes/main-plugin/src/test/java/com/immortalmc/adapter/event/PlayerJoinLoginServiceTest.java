@@ -13,6 +13,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class PlayerJoinLoginServiceTest {
@@ -70,6 +72,63 @@ class PlayerJoinLoginServiceTest {
                         "player_login_failure player_name=Downstream minecraft_uuid=00000000-0000-0000-0000-000000000011 reason=Game Service login failed with HTTP 503"),
                 logger.messagesAt("warn"));
         assertEquals(List.of(), messages);
+    }
+
+    @Test
+    void invalidatedAttemptCannotPublishAfterTheSamePlayerRejoins() {
+        UUID minecraftUuid = UUID.fromString("00000000-0000-0000-0000-000000000012");
+        CompletableFuture<PlayerLoginResult> oldLogin = new CompletableFuture<>();
+        CompletableFuture<PlayerLoginResult> newLogin = new CompletableFuture<>();
+        AtomicInteger calls = new AtomicInteger();
+        PlayerSessionCache sessionCache = new PlayerSessionCache();
+        RecordingDispatcher dispatcher = new RecordingDispatcher();
+        List<String> successes = new ArrayList<>();
+        PlayerJoinLoginService service = new PlayerJoinLoginService(
+                (uuid, name) -> calls.getAndIncrement() == 0 ? oldLogin : newLogin,
+                sessionCache,
+                new RecordingAdapterLogger(),
+                dispatcher::dispatch,
+                result -> successes.add(result.account().playerName()),
+                ignored -> true);
+
+        service.loginOnJoin(minecraftUuid, "OldJoin", ignored -> {});
+        service.invalidate(minecraftUuid);
+        service.loginOnJoin(minecraftUuid, "NewJoin", ignored -> {});
+        newLogin.complete(loginResult(minecraftUuid, "NewJoin"));
+        dispatcher.runAll();
+        oldLogin.complete(loginResult(minecraftUuid, "OldJoin"));
+        dispatcher.runAll();
+
+        assertEquals("NewJoin", sessionCache.findByMinecraftUuid(minecraftUuid)
+                .orElseThrow()
+                .account()
+                .playerName());
+        assertEquals(List.of("NewJoin"), successes);
+    }
+
+    @Test
+    void successfulResponseForOfflinePlayerIsDiscardedBeforeCachingOrCallbacks() {
+        UUID minecraftUuid = UUID.fromString("00000000-0000-0000-0000-000000000013");
+        CompletableFuture<PlayerLoginResult> loginFuture = new CompletableFuture<>();
+        AtomicBoolean online = new AtomicBoolean(true);
+        PlayerSessionCache sessionCache = new PlayerSessionCache();
+        RecordingDispatcher dispatcher = new RecordingDispatcher();
+        List<PlayerLoginResult> successes = new ArrayList<>();
+        PlayerJoinLoginService service = new PlayerJoinLoginService(
+                (uuid, name) -> loginFuture,
+                sessionCache,
+                new RecordingAdapterLogger(),
+                dispatcher::dispatch,
+                successes::add,
+                ignored -> online.get());
+
+        service.loginOnJoin(minecraftUuid, "Disconnected", ignored -> {});
+        online.set(false);
+        loginFuture.complete(loginResult(minecraftUuid, "Disconnected"));
+        dispatcher.runAll();
+
+        assertTrue(sessionCache.findByMinecraftUuid(minecraftUuid).isEmpty());
+        assertTrue(successes.isEmpty());
     }
 
     private static PlayerLoginResult loginResult(UUID minecraftUuid, String playerName) {

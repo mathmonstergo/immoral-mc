@@ -81,6 +81,7 @@ public final class CultivationCommandRunner {
                             return;
                         }
                         player.sendMessage("突破已开始，预计完成时间：" + snapshot.completesAt());
+                        refresh.accept(player.getUniqueId());
                         scheduleBreakthrough(player.getUniqueId(), session.account().accountId(), snapshot);
                     }));
         } catch (IllegalArgumentException error) {
@@ -132,9 +133,14 @@ public final class CultivationCommandRunner {
                             session.account().accountId(),
                             new ItemAdjustmentRequest(itemCode, count),
                             UUID.randomUUID())
-                    .whenComplete((result, error) -> sync(() -> sender.sendMessage(error == null
-                            ? "已发放 " + result.itemCode() + " x" + result.deltaQuantity() + "，余额 " + result.balanceAfter()
-                            : "发放失败：" + message(error))));
+                    .whenComplete((result, error) -> sync(() -> {
+                        sender.sendMessage(error == null
+                                ? "已发放 " + result.itemCode() + " x" + result.deltaQuantity() + "，余额 " + result.balanceAfter()
+                                : "发放失败：" + message(error));
+                        if (error == null) {
+                            refresh.accept(target.getUniqueId());
+                        }
+                    }));
         } catch (IllegalArgumentException error) {
             sender.sendMessage(error.getMessage());
         }

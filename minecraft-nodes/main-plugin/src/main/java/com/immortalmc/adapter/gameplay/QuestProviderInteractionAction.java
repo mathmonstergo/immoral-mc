@@ -6,7 +6,7 @@ import com.immortalmc.adapter.client.ProviderQuestSnapshot;
 import com.immortalmc.adapter.client.QuestInteractionState;
 import com.immortalmc.adapter.client.QuestMutationResult;
 import com.immortalmc.adapter.client.QuestProviderSnapshot;
-import com.immortalmc.adapter.client.TrackedQuestSnapshot;
+import com.immortalmc.adapter.client.GameServiceException;
 import com.immortalmc.adapter.content.EntityInteractionDefinition;
 import com.immortalmc.adapter.dialogue.NpcDialogueAudience;
 import com.immortalmc.adapter.dialogue.NpcDialoguePresenter;
@@ -40,7 +40,7 @@ public final class QuestProviderInteractionAction implements EntityInteractionAc
     private final NpcDialoguePresenter dialoguePresenter;
     private final QuestOfferSessionStore offerSessions;
     private final QuestOfferLabelPresenter labelPresenter;
-    private final BiConsumer<UUID, TrackedQuestSnapshot> scoreboardRenderer;
+    private final BiConsumer<UUID, QuestInteractionState> statePublisher;
     private final AdapterLogger logger;
     private final Function<Player, NpcDialogueAudience> audienceFactory;
     private final Clock clock;
@@ -52,7 +52,7 @@ public final class QuestProviderInteractionAction implements EntityInteractionAc
             NpcDialoguePresenter dialoguePresenter,
             QuestOfferSessionStore offerSessions,
             QuestOfferLabelPresenter labelPresenter,
-            BiConsumer<UUID, TrackedQuestSnapshot> scoreboardRenderer,
+            BiConsumer<UUID, QuestInteractionState> statePublisher,
             AdapterLogger logger,
             Function<Player, NpcDialogueAudience> audienceFactory,
             Clock clock) {
@@ -62,7 +62,7 @@ public final class QuestProviderInteractionAction implements EntityInteractionAc
         this.dialoguePresenter = Objects.requireNonNull(dialoguePresenter, "dialoguePresenter");
         this.offerSessions = Objects.requireNonNull(offerSessions, "offerSessions");
         this.labelPresenter = Objects.requireNonNull(labelPresenter, "labelPresenter");
-        this.scoreboardRenderer = Objects.requireNonNull(scoreboardRenderer, "scoreboardRenderer");
+        this.statePublisher = Objects.requireNonNull(statePublisher, "statePublisher");
         this.logger = Objects.requireNonNull(logger, "logger");
         this.audienceFactory = Objects.requireNonNull(audienceFactory, "audienceFactory");
         this.clock = Objects.requireNonNull(clock, "clock");
@@ -105,6 +105,7 @@ public final class QuestProviderInteractionAction implements EntityInteractionAc
                         logFailure("quest_provider_refresh_failure", player, providerId, error);
                         return;
                     }
+                    statePublisher.accept(player.getUniqueId(), state);
                     handleState(definition, context, session, providerId, state);
                 });
     }
@@ -194,7 +195,7 @@ public final class QuestProviderInteractionAction implements EntityInteractionAc
                         return;
                     }
                     offerSessions.cancel(offer.token());
-                    scoreboardRenderer.accept(player.getUniqueId(), result.interactionState().trackedQuest());
+                    statePublisher.accept(player.getUniqueId(), result.interactionState());
                     player.sendMessage("§a已接取任务：§f" + result.quest().title());
                 });
     }
@@ -213,11 +214,11 @@ public final class QuestProviderInteractionAction implements EntityInteractionAc
                         UUID.randomUUID())
                 .whenComplete((result, error) -> {
                     if (error != null) {
-                        player.sendMessage("§c任务交付失败，请稍后重试。");
+                        player.sendMessage(turnInFailureMessage(error));
                         logFailure("quest_turn_in_failure", player, providerId, error);
                         return;
                     }
-                    scoreboardRenderer.accept(player.getUniqueId(), result.interactionState().trackedQuest());
+                    statePublisher.accept(player.getUniqueId(), result.interactionState());
                     playDialogue(player, result.quest().dialogueKey());
                 });
     }
@@ -246,5 +247,14 @@ public final class QuestProviderInteractionAction implements EntityInteractionAc
             return error.getCause();
         }
         return error;
+    }
+
+    private static String turnInFailureMessage(Throwable error) {
+        Throwable cause = unwrap(error);
+        if (cause instanceof GameServiceException serviceError
+                && "quest.not_ready".equals(serviceError.code())) {
+            return "§e任务目标尚未完成，或交付物品数量不足。";
+        }
+        return "§c任务交付失败，请稍后重试。";
     }
 }

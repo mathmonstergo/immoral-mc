@@ -68,6 +68,7 @@ import com.immortalmc.adapter.quest.QuestOfferSessionStore;
 import com.immortalmc.adapter.quest.QuestPlayerPosition;
 import com.immortalmc.adapter.quest.QuestProviderCatalogCache;
 import com.immortalmc.adapter.quest.QuestRequestCoordinator;
+import com.immortalmc.adapter.quest.TrackedQuestRefreshCoordinator;
 import com.immortalmc.adapter.session.PlayerSessionCache;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
@@ -81,6 +82,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Consumer;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Registry;
 import org.bukkit.Sound;
@@ -92,9 +94,11 @@ import org.bukkit.scheduler.BukkitTask;
 
 public final class ImmortalMainPlugin extends JavaPlugin {
     private PlayerSessionCache sessionCache;
+    private PlayerJoinLoginService playerJoinLogins;
     private QuestRequestCoordinator questRequests;
     private QuestNpcCoordinator questNpcCoordinator;
     private QuestScoreboardRenderer questScoreboards;
+    private TrackedQuestRefreshCoordinator trackedQuestRefreshes;
     private BukkitTask questCoordinatorTask;
     private BukkitCombatAttributionListener combatAttributionListener;
     private SqliteKillOutbox combatOutbox;
@@ -122,6 +126,19 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 new GameServiceClient(settings.gameServiceBaseUri(), HttpClient.newHttpClient());
         QuestProviderCatalogCache questProviderCatalog = new QuestProviderCatalogCache();
         sessionCache = new PlayerSessionCache();
+        QuestInteractionCache questCache = new QuestInteractionCache();
+        questRequests = new QuestRequestCoordinator(
+                gameServiceClient,
+                questCache,
+                task -> getServer().getScheduler().runTask(this, task));
+        questScoreboards = new QuestScoreboardRenderer(playerId -> new BukkitQuestScoreboardView(
+                Objects.requireNonNull(getServer().getPlayer(playerId), "Quest scoreboard player is offline")));
+        trackedQuestRefreshes = new TrackedQuestRefreshCoordinator(
+                gameServiceClient,
+                sessionCache,
+                task -> getServer().getScheduler().runTask(this, task),
+                questScoreboards::render,
+                adapterLogger);
         cultivationProjections = new CultivationProjectionStore();
         cultivationHud = BetterHudCultivationIntegration.create(this, cultivationProjections, adapterLogger);
         cultivationHud.start();
@@ -129,13 +146,17 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 this,
                 playerId -> refreshCultivation(playerId, gameServiceClient, adapterLogger),
                 adapterLogger);
+        Consumer<UUID> cultivationAndQuestRefresh = playerId -> {
+            refreshCultivation(playerId, gameServiceClient, adapterLogger);
+            trackedQuestRefreshes.refresh(playerId);
+        };
         CultivationAreaResolver cultivationAreas = CultivationAreaResolver.from(getConfig());
         seclusionInventory = new SeclusionInventoryController(
                 this, gameServiceClient, sessionCache, cultivationAreas,
-                playerId -> refreshCultivation(playerId, gameServiceClient, adapterLogger));
+                cultivationAndQuestRefresh);
         CultivationCommandRunner cultivationCommands = new CultivationCommandRunner(
                 this, gameServiceClient, sessionCache, seclusionInventory,
-                playerId -> refreshCultivation(playerId, gameServiceClient, adapterLogger));
+                cultivationAndQuestRefresh);
         CombatAttributionTracker combatTracker = new CombatAttributionTracker(
                 combatSettings.maxSourceAge(),
                 combatSettings.maxActiveTargets());
@@ -162,7 +183,8 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 Clock.systemUTC(),
                 adapterLogger,
                 cultivationRewardPresenter,
-                task -> getServer().getScheduler().runTask(this, task));
+                task -> getServer().getScheduler().runTask(this, task),
+                trackedQuestRefreshes::refresh);
         combatAttributionListener = new BukkitCombatAttributionListener(
                 combatTracker,
                 sessionCache,
@@ -176,14 +198,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 snapshot -> combatOutbox.append(CombatKillEventRequest.fromSnapshot(snapshot)),
                 adapterLogger,
                 Clock.systemUTC());
-        QuestInteractionCache questCache = new QuestInteractionCache();
-        questRequests = new QuestRequestCoordinator(
-                gameServiceClient,
-                questCache,
-                task -> getServer().getScheduler().runTask(this, task));
         QuestOfferSessionStore questOfferSessions = new QuestOfferSessionStore();
-        questScoreboards = new QuestScoreboardRenderer(playerId -> new BukkitQuestScoreboardView(
-                Objects.requireNonNull(getServer().getPlayer(playerId), "Quest scoreboard player is offline")));
 
         EntityInteractionRegistry entityInteractionRegistry = new EntityInteractionRegistry(
                 new BukkitConfigEntityInteractionRepository(this));
@@ -219,7 +234,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 npcDialogueRegistry,
                 new NpcDialogueAdminMessages(),
                 adapterLogger);
-        PlayerJoinLoginService playerJoinLoginService = new PlayerJoinLoginService(
+        playerJoinLogins = new PlayerJoinLoginService(
                 gameServiceClient::loginPlayer,
                 sessionCache,
                 adapterLogger,
@@ -228,11 +243,15 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                     cultivationProjections.beginLife(
                             result.account().minecraftUuid(),
                             result.currentLife().lifeId());
-                    refreshLoginQuest(result, adapterLogger);
+                    trackedQuestRefreshes.refresh(result.account().minecraftUuid());
                     refreshCultivation(
                             result.account().minecraftUuid(),
                             gameServiceClient,
                             adapterLogger);
+                },
+                playerId -> {
+                    Player player = getServer().getPlayer(playerId);
+                    return player != null && player.isOnline();
                 });
         BukkitSpiritRootParticlePresenter spiritRootParticlePresenter =
                 new BukkitSpiritRootParticlePresenter(new SpiritRootParticlePlanner());
@@ -248,9 +267,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                                 spiritRootDetectionUseCase,
                                 spiritRootParticlePresenter,
                                 spiritRootTitlePresenter,
-                                sessionCache,
-                                questRequests,
-                                questScoreboards::render),
+                                trackedQuestRefreshes::refresh),
                         QuestProviderInteractionAction.ACTION,
                         new QuestProviderInteractionAction(
                                 sessionCache,
@@ -259,7 +276,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                                 npcDialoguePresenter,
                                 questOfferSessions,
                                 questOfferLabelPresenter,
-                                questScoreboards::render,
+                                trackedQuestRefreshes::publish,
                                 adapterLogger,
                                 this::dialogueAudience,
                                 Clock.systemUTC()),
@@ -330,7 +347,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         immortalCommand.setTabCompleter(commandExecutor);
         refreshQuestProviderCatalog(gameServiceClient, questProviderCatalog, adapterLogger);
 
-        getServer().getPluginManager().registerEvents(new ImmortalPlayerJoinListener(playerJoinLoginService), this);
+        getServer().getPluginManager().registerEvents(new ImmortalPlayerJoinListener(playerJoinLogins), this);
         getServer().getPluginManager().registerEvents(cultivationRewardPresenter, this);
         getServer().getPluginManager().registerEvents(seclusionInventory, this);
         getServer().getPluginManager().registerEvents(
@@ -396,8 +413,16 @@ public final class ImmortalMainPlugin extends JavaPlugin {
             questCoordinatorTask.cancel();
             questCoordinatorTask = null;
         }
+        if (playerJoinLogins != null) {
+            playerJoinLogins.clear();
+            playerJoinLogins = null;
+        }
         if (questRequests != null) {
             questRequests.clear();
+        }
+        if (trackedQuestRefreshes != null) {
+            trackedQuestRefreshes.clear();
+            trackedQuestRefreshes = null;
         }
         if (questNpcCoordinator != null) {
             questNpcCoordinator.clear();
@@ -411,25 +436,6 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         if (cultivationProjections != null) {
             cultivationProjections.clear();
         }
-    }
-
-    private void refreshLoginQuest(PlayerLoginResult result, AdapterLogger logger) {
-        questRequests
-                .refresh(
-                        result.account().minecraftUuid(),
-                        result.account().accountId(),
-                        result.currentLife().lifeId(),
-                        "old-man")
-                .whenComplete((state, error) -> {
-                    if (error != null) {
-                        logger.warn("quest_login_refresh_failure minecraft_uuid="
-                                + result.account().minecraftUuid()
-                                + " reason="
-                                + error.getMessage());
-                        return;
-                    }
-                    questScoreboards.render(result.account().minecraftUuid(), state.trackedQuest());
-                });
     }
 
     private void refreshCultivation(
@@ -483,10 +489,14 @@ public final class ImmortalMainPlugin extends JavaPlugin {
     }
 
     private void cleanupPlayer(UUID playerId) {
+        if (playerJoinLogins != null) {
+            playerJoinLogins.invalidate(playerId);
+        }
         cultivationHud.remove(playerId);
         cultivationProjections.remove(playerId);
         sessionCache.remove(playerId);
         questRequests.clearPlayer(playerId);
+        trackedQuestRefreshes.clearPlayer(playerId);
         questNpcCoordinator.clearPlayer(playerId);
         questScoreboards.clearPlayer(playerId);
     }

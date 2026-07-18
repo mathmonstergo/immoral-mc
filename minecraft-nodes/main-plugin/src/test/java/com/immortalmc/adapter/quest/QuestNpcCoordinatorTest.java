@@ -207,7 +207,7 @@ class QuestNpcCoordinatorTest {
                 1,
                 ACCOUNT_ID,
                 LIFE_ID,
-                new QuestRevisionVector(1, 1, "sha256:definitions"),
+                new QuestRevisionVector(1, 1, 0, "sha256:definitions"),
                 List.of(provider),
                 null,
                 2000);

@@ -117,7 +117,7 @@ class QuestInteractionCacheTest {
                 1,
                 UUID.fromString("10000000-0000-0000-0000-000000000001"),
                 lifeId,
-                new QuestRevisionVector(playerRevision, questRevision, "sha256:definitions"),
+                new QuestRevisionVector(playerRevision, questRevision, 0, "sha256:definitions"),
                 List.of(provider),
                 null,
                 2000);

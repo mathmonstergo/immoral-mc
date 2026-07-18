@@ -1,10 +1,19 @@
 package com.immortalmc.adapter.presentation;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.papermc.paper.scoreboard.numbers.NumberFormat;
 import java.lang.reflect.Proxy;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.IntStream;
 import org.bukkit.entity.Player;
 import org.bukkit.scoreboard.Objective;
 import org.bukkit.scoreboard.Score;
@@ -43,6 +52,69 @@ class BukkitQuestScoreboardViewTest {
         new BukkitQuestScoreboardView(player, manager, blank);
 
         assertSame(blank, applied.get());
+    }
+
+    @Test
+    void rendersTwelveUniqueRowsAndRemovesStaleObjectiveTeams() {
+        Map<String, Integer> scores = new HashMap<>();
+        List<String> resetEntries = new ArrayList<>();
+        Set<String> unregisteredTeams = new HashSet<>();
+        Objective objective = proxy(Objective.class, (method, args) -> {
+            if (method.equals("getScore")) {
+                String entry = (String) args[0];
+                return proxy(Score.class, (scoreMethod, scoreArgs) -> {
+                    if (scoreMethod.equals("setScore")) {
+                        scores.put(entry, (Integer) scoreArgs[0]);
+                    }
+                    return null;
+                });
+            }
+            return null;
+        });
+        Scoreboard previous = proxy(Scoreboard.class, (method, args) -> null);
+        Scoreboard scoreboard = proxy(Scoreboard.class, (method, args) -> {
+            if (method.equals("registerNewObjective")) {
+                return objective;
+            }
+            if (method.equals("registerNewTeam")) {
+                String name = (String) args[0];
+                return proxy(Team.class, (teamMethod, teamArgs) -> {
+                    if (teamMethod.equals("unregister")) {
+                        unregisteredTeams.add(name);
+                    }
+                    return null;
+                });
+            }
+            if (method.equals("resetScores")) {
+                resetEntries.add((String) args[0]);
+            }
+            return null;
+        });
+        ScoreboardManager manager = proxy(
+                ScoreboardManager.class,
+                (method, args) -> method.equals("getNewScoreboard") ? scoreboard : previous);
+        Player player = proxy(
+                Player.class,
+                (method, args) -> method.equals("getScoreboard") ? previous : null);
+        BukkitQuestScoreboardView view = new BukkitQuestScoreboardView(
+                player,
+                manager,
+                proxy(NumberFormat.class, (method, args) -> null));
+
+        view.setObjectives(IntStream.rangeClosed(1, 12).mapToObj(index -> "目标" + index).toList());
+
+        assertEquals(14, scores.size());
+        assertEquals(
+                IntStream.rangeClosed(1, 14).boxed().collect(java.util.stream.Collectors.toSet()),
+                new HashSet<>(scores.values()));
+        view.setObjectives(List.of("保留目标"));
+        assertEquals(11, resetEntries.size());
+        assertEquals(11, unregisteredTeams.size());
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> view.setObjectives(IntStream.rangeClosed(1, 13)
+                        .mapToObj(index -> "超限" + index)
+                        .toList()));
     }
 
     @SuppressWarnings("unchecked")

@@ -2,25 +2,28 @@ package com.immortalmc.adapter.presentation;
 
 import com.immortalmc.adapter.client.QuestObjectiveSnapshot;
 import com.immortalmc.adapter.client.TrackedQuestSnapshot;
+import java.util.List;
 import java.util.Objects;
 
-public record QuestScoreboardModel(String questTitle, String objective, String hint) {
+public record QuestScoreboardModel(String questTitle, List<String> objectives, String hint) {
     public QuestScoreboardModel {
         Objects.requireNonNull(questTitle, "questTitle");
-        Objects.requireNonNull(objective, "objective");
+        objectives = List.copyOf(objectives);
         Objects.requireNonNull(hint, "hint");
     }
 
     public static QuestScoreboardModel from(TrackedQuestSnapshot trackedQuest) {
         Objects.requireNonNull(trackedQuest, "trackedQuest");
-        String objective = "";
-        if (!trackedQuest.objectives().isEmpty()) {
-            QuestObjectiveSnapshot first = trackedQuest.objectives().getFirst();
-            objective = first.title() + "  " + first.current() + "/" + first.required();
-        }
+        List<String> objectives = trackedQuest.objectives().stream()
+                .map(QuestScoreboardModel::formatObjective)
+                .toList();
         return new QuestScoreboardModel(
                 trackedQuest.title(),
-                objective,
+                objectives,
                 trackedQuest.nextActionHint());
+    }
+
+    private static String formatObjective(QuestObjectiveSnapshot objective) {
+        return objective.title() + "  " + objective.current() + "/" + objective.required();
     }
 }

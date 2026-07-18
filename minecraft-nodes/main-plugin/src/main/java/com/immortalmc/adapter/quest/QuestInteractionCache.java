@@ -99,7 +99,9 @@ public final class QuestInteractionCache {
     }
 
     private static boolean isRevisionOlder(QuestRevisionVector candidate, QuestRevisionVector current) {
-        return candidate.player() < current.player() || candidate.quest() < current.quest();
+        return candidate.player() < current.player()
+                || candidate.quest() < current.quest()
+                || candidate.objectives() < current.objectives();
     }
 
     public record Entry(QuestInteractionState state, Instant fetchedAt, Generation generation) {

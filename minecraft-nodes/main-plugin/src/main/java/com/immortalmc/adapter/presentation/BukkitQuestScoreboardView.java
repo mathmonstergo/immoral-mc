@@ -1,6 +1,8 @@
 package com.immortalmc.adapter.presentation;
 
 import io.papermc.paper.scoreboard.numbers.NumberFormat;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -14,14 +16,19 @@ import org.bukkit.scoreboard.Team;
 
 public final class BukkitQuestScoreboardView implements QuestScoreboardView {
     private static final String QUEST_ENTRY = "§0";
-    private static final String OBJECTIVE_ENTRY = "§1";
-    private static final String HINT_ENTRY = "§2";
+    private static final String HINT_ENTRY = "§f";
+    private static final int MAX_OBJECTIVES = 12;
+    private static final String[] OBJECTIVE_ENTRIES = {
+        "§1", "§2", "§3", "§4", "§5", "§6",
+        "§7", "§8", "§9", "§a", "§b", "§c"
+    };
 
     private final Player player;
     private final Scoreboard previous;
     private final Scoreboard scoreboard;
     private final Team questTeam;
-    private final Team objectiveTeam;
+    private final Objective sidebar;
+    private final List<Team> objectiveTeams = new ArrayList<>();
     private final Team hintTeam;
     private boolean hidden;
 
@@ -35,15 +42,14 @@ public final class BukkitQuestScoreboardView implements QuestScoreboardView {
         Objects.requireNonNull(numberFormat, "numberFormat");
         previous = player.getScoreboard();
         scoreboard = manager.getNewScoreboard();
-        Objective objective = scoreboard.registerNewObjective(
+        sidebar = scoreboard.registerNewObjective(
                 "immortal_quest",
                 "dummy",
                 Component.text("修仙纪事", NamedTextColor.GOLD));
-        objective.numberFormat(numberFormat);
-        objective.setDisplaySlot(DisplaySlot.SIDEBAR);
-        questTeam = registerLine("quest_title", QUEST_ENTRY, 3, objective);
-        objectiveTeam = registerLine("quest_objective", OBJECTIVE_ENTRY, 2, objective);
-        hintTeam = registerLine("quest_hint", HINT_ENTRY, 1, objective);
+        sidebar.numberFormat(numberFormat);
+        sidebar.setDisplaySlot(DisplaySlot.SIDEBAR);
+        questTeam = registerLine("quest_title", QUEST_ENTRY, MAX_OBJECTIVES + 2, sidebar);
+        hintTeam = registerLine("quest_hint", HINT_ENTRY, 1, sidebar);
         player.setScoreboard(scoreboard);
     }
 
@@ -53,8 +59,31 @@ public final class BukkitQuestScoreboardView implements QuestScoreboardView {
     }
 
     @Override
-    public void setObjective(String value) {
-        objectiveTeam.prefix(Component.text(value, NamedTextColor.WHITE));
+    public void setObjectives(List<String> values) {
+        List<String> objectiveLines = List.copyOf(values);
+        if (objectiveLines.size() > MAX_OBJECTIVES) {
+            throw new IllegalArgumentException("Quest scoreboard supports at most 12 objectives");
+        }
+        for (int index = 0; index < objectiveLines.size(); index++) {
+            Team team;
+            if (index < objectiveTeams.size()) {
+                team = objectiveTeams.get(index);
+            } else {
+                team = registerLine(
+                        "quest_objective_" + index,
+                        OBJECTIVE_ENTRIES[index],
+                        MAX_OBJECTIVES + 1 - index,
+                        sidebar);
+                objectiveTeams.add(team);
+            }
+            team.prefix(Component.text(objectiveLines.get(index), NamedTextColor.WHITE));
+        }
+        while (objectiveTeams.size() > objectiveLines.size()) {
+            int last = objectiveTeams.size() - 1;
+            Team removed = objectiveTeams.remove(last);
+            scoreboard.resetScores(OBJECTIVE_ENTRIES[last]);
+            removed.unregister();
+        }
     }
 
     @Override

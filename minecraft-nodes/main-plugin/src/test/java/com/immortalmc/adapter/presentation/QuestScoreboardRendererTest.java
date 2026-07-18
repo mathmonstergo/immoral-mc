@@ -1,6 +1,7 @@
 package com.immortalmc.adapter.presentation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.immortalmc.adapter.client.QuestObjectiveSnapshot;
 import com.immortalmc.adapter.client.TrackedQuestSnapshot;
@@ -24,9 +25,9 @@ class QuestScoreboardRendererTest {
         assertEquals(
                 List.of(
                         "quest:初入凡尘",
-                        "objective:灵根检测  0/1",
+                        "objectives:[灵根检测  0/1]",
                         "hint:前往鉴灵师处",
-                        "objective:灵根检测  1/1",
+                        "objectives:[灵根检测  1/1]",
                         "hint:返回老村民处"),
                 factory.view.writes);
     }
@@ -41,6 +42,35 @@ class QuestScoreboardRendererTest {
         renderer.clearPlayer(PLAYER_ID);
 
         assertEquals(1, factory.view.hides);
+    }
+
+    @Test
+    void rendersAllObjectivesAndRemovesRowsWhenTheListShrinks() {
+        RecordingFactory factory = new RecordingFactory();
+        QuestScoreboardRenderer renderer = new QuestScoreboardRenderer(factory);
+        TrackedQuestSnapshot fourObjectives = new TrackedQuestSnapshot(
+                "mixed",
+                "试炼",
+                "active",
+                List.of(
+                        new QuestObjectiveSnapshot("item", "交付", 1, 2, false),
+                        new QuestObjectiveSnapshot("kill", "击杀", 3, 5, false),
+                        new QuestObjectiveSnapshot("technique", "功法", 6, 7, false),
+                        new QuestObjectiveSnapshot("realm", "境界", 13, 14, false)),
+                "继续修炼");
+        TrackedQuestSnapshot oneObjective = new TrackedQuestSnapshot(
+                "mixed",
+                "试炼",
+                "active",
+                List.of(new QuestObjectiveSnapshot("realm", "境界", 14, 14, true)),
+                "返回执事处");
+
+        renderer.render(PLAYER_ID, fourObjectives);
+        renderer.render(PLAYER_ID, oneObjective);
+
+        assertTrue(factory.view.writes.contains(
+                "objectives:[交付  1/2, 击杀  3/5, 功法  6/7, 境界  13/14]"));
+        assertTrue(factory.view.writes.contains("objectives:[境界  14/14]"));
     }
 
     private static TrackedQuestSnapshot tracked(int current, String hint) {
@@ -71,8 +101,8 @@ class QuestScoreboardRendererTest {
         }
 
         @Override
-        public void setObjective(String value) {
-            writes.add("objective:" + value);
+        public void setObjectives(List<String> values) {
+            writes.add("objectives:" + values);
         }
 
         @Override

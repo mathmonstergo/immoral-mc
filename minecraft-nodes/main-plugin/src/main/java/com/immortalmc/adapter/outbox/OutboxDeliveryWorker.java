@@ -13,9 +13,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -34,6 +36,7 @@ public final class OutboxDeliveryWorker implements AutoCloseable {
     private final AdapterLogger logger;
     private final CultivationRewardPresenter rewardPresenter;
     private final Consumer<Runnable> mainThreadDispatcher;
+    private final Consumer<UUID> questRefresher;
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean inFlight = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -48,6 +51,26 @@ public final class OutboxDeliveryWorker implements AutoCloseable {
             AdapterLogger logger,
             CultivationRewardPresenter rewardPresenter,
             Consumer<Runnable> mainThreadDispatcher) {
+        this(
+                outbox,
+                sender,
+                policy,
+                clock,
+                logger,
+                rewardPresenter,
+                mainThreadDispatcher,
+                playerId -> {});
+    }
+
+    public OutboxDeliveryWorker(
+            SqliteKillOutbox outbox,
+            CombatBatchSender sender,
+            OutboxDeliveryPolicy policy,
+            Clock clock,
+            AdapterLogger logger,
+            CultivationRewardPresenter rewardPresenter,
+            Consumer<Runnable> mainThreadDispatcher,
+            Consumer<UUID> questRefresher) {
         this.outbox = Objects.requireNonNull(outbox, "outbox");
         this.sender = Objects.requireNonNull(sender, "sender");
         this.policy = Objects.requireNonNull(policy, "policy");
@@ -55,6 +78,7 @@ public final class OutboxDeliveryWorker implements AutoCloseable {
         this.logger = Objects.requireNonNull(logger, "logger");
         this.rewardPresenter = Objects.requireNonNull(rewardPresenter, "rewardPresenter");
         this.mainThreadDispatcher = Objects.requireNonNull(mainThreadDispatcher, "mainThreadDispatcher");
+        this.questRefresher = Objects.requireNonNull(questRefresher, "questRefresher");
         this.scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "immortalmc-combat-outbox-delivery");
             thread.setDaemon(true);
@@ -79,6 +103,7 @@ public final class OutboxDeliveryWorker implements AutoCloseable {
                     return sender.send(requests)
                             .thenCompose(response -> {
                                 dispatchAcceptedPresentations(rows, response);
+                                refreshAffectedQuests(rows, response);
                                 return acknowledge(rows);
                             })
                             .exceptionallyCompose(error -> handleFailure(rows, unwrap(error)));
@@ -159,6 +184,32 @@ public final class OutboxDeliveryWorker implements AutoCloseable {
                 logger.warn(
                         "combat_reward_presentation_dispatch_failed event_id=" + result.eventId(),
                         error);
+            }
+        }
+    }
+
+    private void refreshAffectedQuests(
+            List<KillOutboxRow> rows,
+            CombatKillBatchResponse response) {
+        Map<UUID, KillOutboxRow> rowsByEventId = new HashMap<>();
+        for (KillOutboxRow row : rows) {
+            rowsByEventId.put(row.request().eventId(), row);
+        }
+        Set<UUID> affectedPlayers = new HashSet<>();
+        for (CombatKillResult result : response.results()) {
+            if (!"accepted".equals(result.outcome()) && !"duplicate".equals(result.outcome())) {
+                continue;
+            }
+            KillOutboxRow row = Objects.requireNonNull(
+                    rowsByEventId.get(result.eventId()),
+                    "Validated combat response contains an unknown event ID");
+            affectedPlayers.add(row.request().killerUuid());
+        }
+        for (UUID playerId : affectedPlayers) {
+            try {
+                questRefresher.accept(playerId);
+            } catch (RuntimeException error) {
+                logger.warn("combat_quest_refresh_failed minecraft_uuid=" + playerId, error);
             }
         }
     }

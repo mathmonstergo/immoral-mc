@@ -38,7 +38,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiConsumer;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Entity;
@@ -74,7 +73,7 @@ class QuestProviderInteractionActionTest {
         dialogues.reload();
         QuestOfferSessionStore offerSessions = new QuestOfferSessionStore();
         RecordingLabel label = new RecordingLabel();
-        AtomicReference<TrackedQuestSnapshot> rendered = new AtomicReference<>();
+        AtomicReference<QuestInteractionState> published = new AtomicReference<>();
         QuestProviderInteractionAction action = new QuestProviderInteractionAction(
                 playerSessions,
                 quests,
@@ -82,7 +81,7 @@ class QuestProviderInteractionActionTest {
                 new NpcDialoguePresenter(scheduler),
                 offerSessions,
                 (player, npc) -> label,
-                (playerId, tracked) -> rendered.set(tracked),
+                (playerId, state) -> published.set(state),
                 new RecordingAdapterLogger(),
                 ignored -> new RecordingAudience(),
                 Clock.fixed(Instant.parse("2026-07-13T12:00:00Z"), ZoneOffset.UTC));
@@ -104,7 +103,7 @@ class QuestProviderInteractionActionTest {
         assertEquals(1, quests.acceptCalls.get());
         assertTrue(offerSessions.find(PLAYER_ID).isEmpty());
         assertEquals(1, label.removals.get());
-        assertEquals("first-steps", rendered.get().questId());
+        assertEquals("first-steps", published.get().trackedQuest().questId());
     }
 
     private static EntityInteractionDefinition definition() {
@@ -213,7 +212,11 @@ class QuestProviderInteractionActionTest {
                     1,
                     ACCOUNT_ID,
                     LIFE_ID,
-                    new QuestRevisionVector(1, questState.equals("available") ? 0 : 1, "sha256:definitions"),
+                    new QuestRevisionVector(
+                            1,
+                            questState.equals("available") ? 0 : 1,
+                            0,
+                            "sha256:definitions"),
                     List.of(provider),
                     tracked,
                     2000);

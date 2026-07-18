@@ -86,6 +86,7 @@ class GameServiceClientQuestTest {
                     assertEquals(LIFE_ID, result.lifeId());
                     assertEquals(2, result.revision().player());
                     assertEquals(3, result.revision().quest());
+                    assertEquals(4, result.revision().objectives());
                     assertEquals("sha256:definitions", result.revision().definitions());
                     assertEquals(2000, result.cacheTtlMs());
                     assertEquals("first-steps:ready_to_turn_in", result.providers().getFirst().stateKey());
@@ -215,7 +216,7 @@ class GameServiceClientQuestTest {
                   "contract_version":1,
                   "account_id":"%s",
                   "life_id":"%s",
-                  "revision":{"player":2,"quest":3,"definitions":"sha256:definitions"},
+                  "revision":{"player":2,"quest":3,"objectives":4,"definitions":"sha256:definitions"},
                   "providers":[{
                     "provider_id":"old-man",
                     "state_key":"first-steps:%s",

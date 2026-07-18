@@ -30,8 +30,8 @@ public final class QuestScoreboardRenderer {
         if (previous == null || !previous.questTitle().equals(next.questTitle())) {
             state.view.setQuestTitle(next.questTitle());
         }
-        if (previous == null || !previous.objective().equals(next.objective())) {
-            state.view.setObjective(next.objective());
+        if (previous == null || !previous.objectives().equals(next.objectives())) {
+            state.view.setObjectives(next.objectives());
         }
         if (previous == null || !previous.hint().equals(next.hint())) {
             state.view.setHint(next.hint());

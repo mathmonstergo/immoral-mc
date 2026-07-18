@@ -453,7 +453,7 @@ class QuestRequestCoordinatorTest {
                 1,
                 ACCOUNT_ID,
                 lifeId,
-                new QuestRevisionVector(playerRevision, questRevision, "sha256:definitions"),
+                new QuestRevisionVector(playerRevision, questRevision, 0, "sha256:definitions"),
                 List.of(provider),
                 null,
                 2000);
