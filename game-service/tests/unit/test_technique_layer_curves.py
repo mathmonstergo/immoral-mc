@@ -3,6 +3,7 @@ import pytest
 from immortal_mmo.cultivation.layer_curves import (
     build_transition_costs,
     layer_for_investment,
+    layer_for_major_realm,
 )
 
 
@@ -44,6 +45,14 @@ def test_layer_is_derived_from_authoritative_total_investment() -> None:
     assert layer_for_investment(costs[0] - 1, 3_765, 3, 2) == 1
     assert layer_for_investment(costs[0], 3_765, 3, 2) == 2
     assert layer_for_investment(3_765, 3_765, 3, 2) == 13
+
+
+def test_major_realm_layer_uses_the_shared_curve() -> None:
+    assert layer_for_major_realm(0, 3_765, "练气") == 1
+    assert layer_for_major_realm(3_765, 3_765, "练气") == 13
+
+    with pytest.raises(ValueError, match="Unknown technique major realm"):
+        layer_for_major_realm(0, 3_765, "unknown")
 
 
 @pytest.mark.parametrize(

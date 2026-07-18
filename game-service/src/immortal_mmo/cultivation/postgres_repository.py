@@ -18,6 +18,7 @@ from immortal_mmo.cultivation.db_models import (
     LifeTechniqueRow,
     TechniqueInvestmentEntryRow,
 )
+from immortal_mmo.cultivation.layer_curves import layer_for_major_realm
 from immortal_mmo.cultivation.models import (
     BreakthroughTechniqueDebit,
     CombatCultivationCredit,
@@ -478,7 +479,7 @@ class PostgresCultivationRepository:
         if len(techniques) != len(changes):
             raise KeyError("Unknown life technique")
         changes_by_id = {change.life_technique_id: change for change in changes}
-        planned: list[tuple[LifeTechnique, TechniqueInvestmentChange, int]] = []
+        planned: list[tuple[LifeTechnique, TechniqueInvestmentChange, int, int]] = []
         for technique in techniques:
             change = changes_by_id[technique.life_technique_id]
             if change.delta_amount == 0:
@@ -486,20 +487,29 @@ class PostgresCultivationRepository:
             balance_after = technique.invested_amount + change.delta_amount
             if not 0 <= balance_after <= technique.max_investment:
                 raise ValueError("Technique investment exceeds its bounds")
-            planned.append((technique, change, balance_after))
-        total_delta = sum(change.delta_amount for _, change, _ in planned)
+            layer_after = layer_for_major_realm(
+                balance_after,
+                technique.max_investment,
+                technique.major_realm,
+            )
+            planned.append((technique, change, balance_after, layer_after))
+        total_delta = sum(change.delta_amount for _, change, _, _ in planned)
         realized_after = state.realized_cultivation + total_delta
         if realized_after < 0:
             raise ValueError("Realized cultivation cannot become negative")
 
-        for technique, change, balance_after in planned:
+        for technique, change, balance_after, layer_after in planned:
             await self._session.execute(
                 update(LifeTechniqueRow)
                 .where(
                     LifeTechniqueRow.life_id == life_id,
                     LifeTechniqueRow.life_technique_id == technique.life_technique_id,
                 )
-                .values(invested_amount=balance_after, updated_at=func.now())
+                .values(
+                    invested_amount=balance_after,
+                    current_layer=layer_after,
+                    updated_at=func.now(),
+                )
             )
             self._session.add(
                 TechniqueInvestmentEntryRow(

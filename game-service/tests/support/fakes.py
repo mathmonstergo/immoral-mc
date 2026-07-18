@@ -7,6 +7,7 @@ from types import TracebackType
 from uuid import UUID, uuid4
 
 from immortal_mmo.combat.models import CombatKillEvent
+from immortal_mmo.cultivation.layer_curves import layer_for_major_realm
 from immortal_mmo.cultivation.models import (
     BreakthroughTechniqueDebit,
     CombatCultivationCredit,
@@ -20,11 +21,15 @@ from immortal_mmo.cultivation.models import (
 from immortal_mmo.cultivation.repository import ActiveCultivationSessionExists
 from immortal_mmo.item.models import (
     InsufficientItemQuantity,
+    ItemConsumptionRequest,
+    ItemConsumptionType,
+    ItemOperationConflict,
     ItemResourceEntry,
     ItemStack,
 )
 from immortal_mmo.player.models import Account, CurrentLifeQuestFacts, Life, SpiritRoot
 from immortal_mmo.quest.repository import (
+    QuestObjectiveProgress,
     QuestOperationCommand,
     QuestOperationState,
     QuestProgress,
@@ -42,6 +47,9 @@ class _FakeState:
     operations: dict[UUID, StoredQuestOperation] = field(default_factory=dict)
     quest_revisions: dict[UUID, int] = field(default_factory=dict)
     progresses: dict[tuple[UUID, str], QuestProgress] = field(default_factory=dict)
+    objective_progresses: dict[tuple[UUID, str, str], QuestObjectiveProgress] = field(
+        default_factory=dict
+    )
     combat_events: dict[UUID, CombatKillEvent] = field(default_factory=dict)
     mob_kill_counters: dict[tuple[UUID, str], int] = field(default_factory=dict)
     cultivation_balances: dict[UUID, int] = field(default_factory=dict)
@@ -243,6 +251,21 @@ class FakeQuestRepository:
             if (progress := self._state.progresses.get((life_id, quest_id))) is not None
         }
 
+    async def get_objective_progresses(
+        self,
+        life_id: UUID,
+        quest_ids: Collection[str],
+    ) -> dict[tuple[str, str], QuestObjectiveProgress]:
+        self._ensure_active()
+        selected = set(quest_ids)
+        return {
+            (quest_id, objective_id): progress
+            for (stored_life_id, quest_id, objective_id), progress in (
+                self._state.objective_progresses.items()
+            )
+            if stored_life_id == life_id and quest_id in selected
+        }
+
     async def insert_progress_if_absent(self, progress: QuestProgress) -> bool:
         self._ensure_active()
         key = (progress.life_id, progress.quest_id)
@@ -250,6 +273,66 @@ class FakeQuestRepository:
             return False
         self._state.progresses[key] = progress
         return True
+
+    async def insert_objective_progresses(
+        self,
+        progresses: Collection[QuestObjectiveProgress],
+    ) -> None:
+        self._ensure_active()
+        for progress in progresses:
+            key = (progress.life_id, progress.quest_id, progress.objective_id)
+            if key in self._state.objective_progresses:
+                raise RuntimeError("Quest objective progress already exists")
+            self._state.objective_progresses[key] = progress
+
+    async def increment_objective_progress(
+        self,
+        *,
+        life_id: UUID,
+        quest_id: str,
+        objective_id: str,
+        required_value: int,
+        updated_at: datetime,
+    ) -> int | None:
+        self._ensure_active()
+        key = (life_id, quest_id, objective_id)
+        progress = self._state.objective_progresses.get(key)
+        if (
+            progress is None
+            or progress.required_value != required_value
+            or progress.current_value >= required_value
+        ):
+            return None
+        current_value = min(progress.current_value + 1, required_value)
+        self._state.objective_progresses[key] = replace(
+            progress,
+            current_value=current_value,
+            updated_at=updated_at,
+        )
+        return current_value
+
+    async def increment_objective_progresses(
+        self,
+        *,
+        life_id: UUID,
+        objectives: Collection[tuple[str, str]],
+        updated_at: datetime,
+    ) -> dict[tuple[str, str], int]:
+        self._ensure_active()
+        updated: dict[tuple[str, str], int] = {}
+        for quest_id, objective_id in sorted(set(objectives)):
+            key = (life_id, quest_id, objective_id)
+            progress = self._state.objective_progresses.get(key)
+            if progress is None or progress.current_value >= progress.required_value:
+                continue
+            current_value = min(progress.current_value + 1, progress.required_value)
+            self._state.objective_progresses[key] = replace(
+                progress,
+                current_value=current_value,
+                updated_at=updated_at,
+            )
+            updated[(quest_id, objective_id)] = current_value
+        return updated
 
     async def complete_progress_if_active(
         self,
@@ -331,8 +414,45 @@ class NoOpQuestRepository:
         del life_id, quest_ids
         self._unexpected()
 
+    async def get_objective_progresses(
+        self,
+        life_id: UUID,
+        quest_ids: Collection[str],
+    ) -> dict[tuple[str, str], QuestObjectiveProgress]:
+        del life_id, quest_ids
+        self._unexpected()
+
     async def insert_progress_if_absent(self, progress: QuestProgress) -> bool:
         del progress
+        self._unexpected()
+
+    async def insert_objective_progresses(
+        self,
+        progresses: Collection[QuestObjectiveProgress],
+    ) -> None:
+        del progresses
+        self._unexpected()
+
+    async def increment_objective_progress(
+        self,
+        *,
+        life_id: UUID,
+        quest_id: str,
+        objective_id: str,
+        required_value: int,
+        updated_at: datetime,
+    ) -> int | None:
+        del life_id, quest_id, objective_id, required_value, updated_at
+        self._unexpected()
+
+    async def increment_objective_progresses(
+        self,
+        *,
+        life_id: UUID,
+        objectives: Collection[tuple[str, str]],
+        updated_at: datetime,
+    ) -> dict[tuple[str, str], int]:
+        del life_id, objectives, updated_at
         self._unexpected()
 
     async def complete_progress_if_active(
@@ -692,7 +812,13 @@ class FakeCultivationRepository:
             if not 0 <= balance_after <= technique.max_investment:
                 raise ValueError("Technique investment exceeds its bounds")
             self._state.life_techniques[change.life_technique_id] = replace(
-                technique, invested_amount=balance_after
+                technique,
+                invested_amount=balance_after,
+                current_layer=layer_for_major_realm(
+                    balance_after,
+                    technique.max_investment,
+                    technique.major_realm,
+                ),
             )
             total_delta += change.delta_amount
         updated = replace(
@@ -764,6 +890,23 @@ class FakeItemRepository:
         key = (life_id, item_code)
         return self._state.item_stacks.setdefault(key, ItemStack(life_id, item_code, 0, 1))
 
+    async def get_stacks(
+        self,
+        life_id: UUID,
+        item_codes: Collection[str],
+        *,
+        for_update: bool,
+    ) -> dict[str, ItemStack]:
+        self._ensure_active()
+        del for_update
+        return {
+            item_code: self._state.item_stacks.get(
+                (life_id, item_code),
+                ItemStack(life_id, item_code, 0, 1),
+            )
+            for item_code in sorted(set(item_codes))
+        }
+
     async def adjust(
         self,
         *,
@@ -776,6 +919,13 @@ class FakeItemRepository:
         self._ensure_active()
         replay = self._state.item_entries.get((operation_id, item_code))
         if replay is not None:
+            if (
+                replay.life_id != life_id
+                or replay.session_id is not None
+                or replay.entry_type != "administrative_adjustment"
+                or replay.delta_quantity != delta_quantity
+            ):
+                raise ItemOperationConflict
             return replay
         stack = await self.get_stack(life_id, item_code, for_update=True)
         balance_after = stack.quantity + delta_quantity
@@ -805,33 +955,109 @@ class FakeItemRepository:
         item_code: str,
         quantity: int,
         operation_id: UUID,
+        entry_type: ItemConsumptionType,
         session_id: UUID | None,
         occurred_at: datetime,
     ) -> ItemResourceEntry:
+        entries = await self.consume_many(
+            life_id=life_id,
+            consumptions=(
+                ItemConsumptionRequest(
+                    item_code=item_code,
+                    quantity=quantity,
+                    operation_id=operation_id,
+                    entry_type=entry_type,
+                    session_id=session_id,
+                    occurred_at=occurred_at,
+                ),
+            ),
+        )
+        return entries[0]
+
+    async def consume_many(
+        self,
+        *,
+        life_id: UUID,
+        consumptions: Collection[ItemConsumptionRequest],
+    ) -> tuple[ItemResourceEntry, ...]:
         self._ensure_active()
-        replay = self._state.item_entries.get((operation_id, item_code))
-        if replay is not None:
-            return replay
-        stack = await self.get_stack(life_id, item_code, for_update=True)
-        if stack.quantity < quantity:
-            raise InsufficientItemQuantity(item_code)
-        balance_after = stack.quantity - quantity
-        self._state.item_stacks[(life_id, item_code)] = replace(
-            stack, quantity=balance_after, revision=stack.revision + 1
+        requests = tuple(consumptions)
+        if not requests:
+            return ()
+        if len({request.item_code for request in requests}) != len(requests):
+            raise ValueError("Item consumption item codes must be unique")
+        for request in requests:
+            _validate_fake_consumption_request(request)
+        replays: dict[tuple[UUID, str], ItemResourceEntry] = {}
+        for request in requests:
+            replay = self._state.item_entries.get((request.operation_id, request.item_code))
+            if replay is not None:
+                _validate_fake_replay(life_id, request, replay)
+                replays[(request.operation_id, request.item_code)] = replay
+        new_requests = tuple(
+            request
+            for request in requests
+            if (request.operation_id, request.item_code) not in replays
         )
-        entry = ItemResourceEntry(
-            uuid4(),
-            life_id,
-            item_code,
-            operation_id,
-            session_id,
-            "breakthrough_consumption",
-            -quantity,
-            balance_after,
-            occurred_at,
+        stacks = {
+            request.item_code: await self.get_stack(
+                life_id, request.item_code, for_update=True
+            )
+            for request in new_requests
+        }
+        for request in new_requests:
+            if stacks[request.item_code].quantity < request.quantity:
+                raise InsufficientItemQuantity(request.item_code)
+        for request in new_requests:
+            stack = stacks[request.item_code]
+            balance_after = stack.quantity - request.quantity
+            updated_stack = replace(stack, quantity=balance_after, revision=stack.revision + 1)
+            self._state.item_stacks[(life_id, request.item_code)] = updated_stack
+            entry = ItemResourceEntry(
+                uuid4(),
+                life_id,
+                request.item_code,
+                request.operation_id,
+                request.session_id,
+                request.entry_type.value,
+                -request.quantity,
+                balance_after,
+                request.occurred_at,
+            )
+            self._state.item_entries[(request.operation_id, request.item_code)] = entry
+            replays[(request.operation_id, request.item_code)] = entry
+        return tuple(
+            replays[(request.operation_id, request.item_code)] for request in requests
         )
-        self._state.item_entries[(operation_id, item_code)] = entry
-        return entry
+
+
+def _validate_fake_consumption_request(request: ItemConsumptionRequest) -> None:
+    if request.quantity <= 0:
+        raise ValueError("Consumed item quantity must be positive")
+    if (
+        request.entry_type is ItemConsumptionType.BREAKTHROUGH
+        and request.session_id is None
+    ):
+        raise ValueError("Breakthrough consumption requires a session ID")
+    if (
+        request.entry_type is ItemConsumptionType.QUEST_DELIVERY
+        and request.session_id is not None
+    ):
+        raise ValueError("Quest delivery must not have a cultivation session ID")
+
+
+def _validate_fake_replay(
+    life_id: UUID,
+    request: ItemConsumptionRequest,
+    replay: ItemResourceEntry,
+) -> None:
+    if (
+        replay.life_id != life_id
+        or replay.session_id != request.session_id
+        or replay.entry_type != request.entry_type.value
+        or replay.delta_quantity != -request.quantity
+    ):
+        raise ItemOperationConflict
 
 
 class FakeUnitOfWork:

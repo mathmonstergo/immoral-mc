@@ -13,6 +13,7 @@ from immortal_mmo.core.errors import ConflictError
 from immortal_mmo.core.uow import UnitOfWork, UnitOfWorkFactory
 from immortal_mmo.cultivation.realm_catalog import RealmCatalog, load_realm_catalog
 from immortal_mmo.player.models import Account, Life
+from immortal_mmo.quest.progression import QuestEventProgressionService
 
 
 class CombatIdempotencyConflictError(ConflictError):
@@ -26,12 +27,14 @@ class CombatRewardService:
         uow_factory: UnitOfWorkFactory,
         catalog: CombatRewardCatalog,
         realm_catalog: RealmCatalog | None = None,
+        quest_progression: QuestEventProgressionService | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._catalog = catalog
         self._realm_catalog = realm_catalog or load_realm_catalog(
             Path(__file__).resolve().parents[1] / "cultivation" / "realm_catalog.json"
         )
+        self._quest_progression = quest_progression or QuestEventProgressionService()
 
     async def process_batch(
         self,
@@ -67,8 +70,10 @@ class CombatRewardService:
                 return await self._insert_terminal(uow, request, event)
 
             life = await uow.players.get_current_life(account.account_id, for_update=True)
-            if life is None or (
-                request.source_life_id is not None and request.source_life_id != life.life_id
+            if (
+                life is None
+                or request.source_life_id is None
+                or request.source_life_id != life.life_id
             ):
                 event = self._build_event(
                     request,
@@ -90,6 +95,12 @@ class CombatRewardService:
             if not inserted:
                 existing = await self._require_existing(uow, request.event_id)
                 return await self._duplicate_result(uow, request, existing)
+            await self._quest_progression.record_mythicmob_kill(
+                uow,
+                life_id=life.life_id,
+                mob_internal_name=request.mob_internal_name,
+                occurred_at=request.occurred_at,
+            )
             await uow.combat.increment_mob_counter(
                 life.life_id,
                 request.mob_internal_name,

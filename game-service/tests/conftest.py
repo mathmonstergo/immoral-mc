@@ -53,6 +53,7 @@ async def clean_postgres_data(postgres_engine: AsyncEngine) -> AsyncIterator[Non
             life_mob_kill_counters,
             combat_kill_events,
             quest_operations,
+            quest_objective_progress,
             quest_progress,
             life_quest_states,
             life_spirit_roots,

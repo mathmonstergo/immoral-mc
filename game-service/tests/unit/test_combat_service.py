@@ -1,3 +1,5 @@
+from dataclasses import replace
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -18,6 +20,10 @@ from immortal_mmo.combat.schemas import CombatKillBatchRequest, CombatKillEventR
 from immortal_mmo.combat.service import CombatIdempotencyConflictError, CombatRewardService
 from immortal_mmo.cultivation.models import CultivationState
 from immortal_mmo.player.service import PlayerService
+from immortal_mmo.quest.definitions import QUEST_CATALOG, QuestDefinitionCatalog
+from immortal_mmo.quest.models import MythicMobKillObjectiveDefinition
+from immortal_mmo.quest.progression import QuestEventProgressionService
+from immortal_mmo.quest.service import QuestService
 
 KILLER_ID = UUID("33333333-3333-4333-8333-333333333333")
 
@@ -89,6 +95,16 @@ async def logged_in_factory() -> tuple[FakeUnitOfWorkFactory, UUID]:
     return factory, login.current_life.life_id
 
 
+def kill_quest_catalog() -> QuestDefinitionCatalog:
+    quest = replace(
+        QUEST_CATALOG.get_quest("first-steps"),
+        objectives=(
+            MythicMobKillObjectiveDefinition("hunt-wolves", "击杀苍狼", "AzureWolf", 2),
+        ),
+    )
+    return QuestDefinitionCatalog(quests=(quest,), providers=QUEST_CATALOG.providers)
+
+
 @pytest.mark.asyncio
 async def test_reward_service_credits_current_life_once_and_replays_duplicate() -> None:
     factory, life_id = await logged_in_factory()
@@ -116,6 +132,36 @@ async def test_reward_service_credits_current_life_once_and_replays_duplicate() 
         assert stored.attribution_kind == "damage_over_time"
         assert stored.technique_id == "venom_mist"
         assert stored.cast_id == request_event.cast_id
+
+
+@pytest.mark.asyncio
+async def test_new_combat_fact_advances_kill_quest_but_duplicate_does_not() -> None:
+    factory = FakeUnitOfWorkFactory(FakeStore())
+    login = await PlayerService(factory).login(KILLER_ID, "Combatant")
+    quest_catalog = kill_quest_catalog()
+    await QuestService(
+        factory,
+        quest_catalog,
+        clock=lambda: datetime(2026, 7, 14, tzinfo=UTC),
+    ).accept(login.account.account_id, "first-steps", "old-man", UUID(int=33_001))
+    service = CombatRewardService(
+        factory,
+        catalog(),
+        quest_progression=QuestEventProgressionService(quest_catalog),
+    )
+    request_event = event(source_life_id=login.current_life.life_id)
+    batch = CombatKillBatchRequest(events=[request_event])
+
+    first = await service.process_batch(batch)
+    replay = await service.process_batch(batch)
+
+    assert first.results[0].outcome == "accepted"
+    assert replay.results[0].outcome == "duplicate"
+    stored = factory.store._state.objective_progresses[
+        (login.current_life.life_id, "first-steps", "hunt-wolves")
+    ]
+    assert stored.current_value == 1
+    assert factory.store._state.quest_revisions[login.current_life.life_id] == 2
 
 
 @pytest.mark.asyncio
@@ -206,6 +252,21 @@ async def test_stale_source_life_cannot_credit_current_life() -> None:
     assert result.results[0].outcome == "current_life_unavailable"
     async with factory() as uow:
         assert await uow.cultivation.get_unrefined_balance(current_life_id) == 0
+
+
+@pytest.mark.asyncio
+async def test_missing_source_life_cannot_credit_or_advance_current_life() -> None:
+    factory, current_life_id = await logged_in_factory()
+    service = CombatRewardService(factory, catalog())
+
+    result = await service.process_batch(
+        CombatKillBatchRequest(events=[event(source_life_id=None)])
+    )
+
+    assert result.results[0].outcome == "current_life_unavailable"
+    async with factory() as uow:
+        assert await uow.cultivation.get_unrefined_balance(current_life_id) == 0
+        assert await uow.combat.get_mob_counter(current_life_id, "AzureWolf") == 0
 
 
 @pytest.mark.asyncio

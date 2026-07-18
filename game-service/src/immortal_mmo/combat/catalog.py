@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import ROUND_FLOOR, Decimal, InvalidOperation
 from pathlib import Path
@@ -53,6 +54,10 @@ class CombatRewardCatalog:
         )
         self.schema_version = schema_version
         self._validate()
+
+    @property
+    def mobs(self) -> Mapping[str, MobRewardDefinition]:
+        return self._mobs
 
     def resolve(self, internal_name: str, level: Decimal) -> RewardDecision | None:
         mob = self._mobs.get(internal_name)

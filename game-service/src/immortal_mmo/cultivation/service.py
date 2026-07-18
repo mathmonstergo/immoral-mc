@@ -21,7 +21,6 @@ from immortal_mmo.cultivation.errors import (
     CultivationSeclusionNotFoundError,
     CultivationSeclusionRuleError,
 )
-from immortal_mmo.cultivation.layer_curves import layer_for_investment
 from immortal_mmo.cultivation.models import (
     BreakthroughTechniqueDebit,
     CultivationSession,
@@ -57,7 +56,11 @@ from immortal_mmo.cultivation.technique_catalog import (
     load_technique_catalog,
 )
 from immortal_mmo.item.errors import ItemInsufficientQuantityError
-from immortal_mmo.item.models import InsufficientItemQuantity
+from immortal_mmo.item.models import (
+    InsufficientItemQuantity,
+    ItemConsumptionType,
+    ItemOperationConflict,
+)
 from immortal_mmo.player.service import PlayerAccountNotFoundError, PlayerLifecycleError
 
 FULL_MASTERY_SECONDS = {"练气": 36_000, "筑基": 72_000, "结丹": 180_000, "元婴": 360_000}
@@ -67,12 +70,6 @@ DEFAULT_TRANSFER_PROFILES = {
 }
 TECHNIQUE_MUTATION_CONTENT_VERSION = "technique-mutation:v1"
 BREAKTHROUGH_CONTENT_VERSION = "breakthrough:v1"
-TECHNIQUE_GROWTH_RATIOS = {
-    "练气": (3, 2),
-    "筑基": (17, 10),
-    "结丹": (9, 5),
-    "元婴": (2, 1),
-}
 
 
 class CultivationMutationConflictError(ConflictError):
@@ -183,17 +180,6 @@ class CultivationService:
             definition = self._technique_catalog.techniques.get(
                 technique.technique_id
             )
-            ratio = TECHNIQUE_GROWTH_RATIOS.get(technique.major_realm)
-            current_layer = technique.current_layer
-            if ratio is not None:
-                try:
-                    current_layer = layer_for_investment(
-                        technique.invested_amount,
-                        technique.max_investment,
-                        *ratio,
-                    )
-                except ValueError:
-                    current_layer = technique.current_layer
             snapshots.append(
                 TechniqueSnapshotResponse(
                     life_technique_id=technique.life_technique_id,
@@ -211,7 +197,7 @@ class CultivationService:
                     ),
                     invested_amount=technique.invested_amount,
                     max_investment=technique.max_investment,
-                    current_layer=current_layer,
+                    current_layer=technique.current_layer,
                     status=technique.status,
                 )
             )
@@ -465,13 +451,18 @@ class CultivationService:
             life = await uow.players.get_current_life(account_id, for_update=True)
             if life is None:
                 raise PlayerLifecycleError()
-            entry = await uow.items.adjust(
-                life_id=life.life_id,
-                item_code=item_code,
-                delta_quantity=delta_quantity,
-                operation_id=idempotency_key,
-                occurred_at=self._clock(),
-            )
+            try:
+                entry = await uow.items.adjust(
+                    life_id=life.life_id,
+                    item_code=item_code,
+                    delta_quantity=delta_quantity,
+                    operation_id=idempotency_key,
+                    occurred_at=self._clock(),
+                )
+            except ItemOperationConflict as error:
+                raise CultivationMutationConflictError(
+                    "Item adjustment idempotency key was reused"
+                ) from error
             if entry.delta_quantity != delta_quantity:
                 raise CultivationMutationConflictError(
                     "Item adjustment idempotency key was reused"
@@ -666,11 +657,16 @@ class CultivationService:
                     item_code=rule.required_item_id,
                     quantity=pill_count,
                     operation_id=session_id,
+                    entry_type=ItemConsumptionType.BREAKTHROUGH,
                     session_id=session_id,
                     occurred_at=now,
                 )
             except InsufficientItemQuantity as error:
                 raise ItemInsufficientQuantityError() from error
+            except ItemOperationConflict as error:
+                raise CultivationBreakthroughConflictError(
+                    "Breakthrough item operation identity conflicts with existing history"
+                ) from error
             await uow.commit()
         return _breakthrough_snapshot(session)
 

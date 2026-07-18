@@ -207,7 +207,7 @@ async def test_technique_ledger_and_realized_aggregate_update_atomically(
                 group_code="qi",
                 major_realm="练气",
                 invested_amount=0,
-                max_investment=100,
+                max_investment=3_765,
                 current_layer=1,
                 status="active",
             )
@@ -217,26 +217,100 @@ async def test_technique_ledger_and_realized_aggregate_update_atomically(
             life_id=life_id,
             operation_id=operation_id,
             session_id=None,
-            changes=(TechniqueInvestmentChange(technique_id, 15, "seclusion_realization"),),
+            changes=(
+                TechniqueInvestmentChange(technique_id, 3_765, "seclusion_realization"),
+            ),
             occurred_at=now,
         )
         await session.commit()
 
     async with postgres_sessions() as session:
-        technique_balance = await session.scalar(
-            select(LifeTechniqueRow.invested_amount).where(
-                LifeTechniqueRow.life_technique_id == technique_id
+        technique_values = (
+            await session.execute(
+                select(
+                    LifeTechniqueRow.invested_amount,
+                    LifeTechniqueRow.current_layer,
+                ).where(LifeTechniqueRow.life_technique_id == technique_id)
             )
-        )
+        ).one()
         investment_count = len((await session.scalars(select(TechniqueInvestmentEntryRow))).all())
         resource_count = len((await session.scalars(select(CultivationResourceEntryRow))).all())
         stored_state = await session.get(LifeCultivationStateRow, life_id)
 
-    assert state.realized_cultivation == 15
-    assert technique_balance == 15
-    assert stored_state is not None and stored_state.realized_cultivation == 15
+    assert state.realized_cultivation == 3_765
+    assert technique_values.invested_amount == 3_765
+    assert technique_values.current_layer == 13
+    assert stored_state is not None and stored_state.realized_cultivation == 3_765
     assert investment_count == 1
     assert resource_count == 1
+
+
+@pytest.mark.asyncio
+async def test_negative_investment_persists_reduced_current_layer(
+    postgres_sessions: async_sessionmaker[AsyncSession],
+    clean_postgres_data: None,
+) -> None:
+    del clean_postgres_data
+    life_id = await create_life(postgres_sessions)
+    technique_id = uuid4()
+    now = datetime(2026, 7, 16, 8, tzinfo=UTC)
+    async with postgres_sessions() as session:
+        repository = PostgresCultivationRepository(session)
+        await repository.get_or_create_state(life_id, for_update=True)
+        session.add(
+            LifeTechniqueRow(
+                life_technique_id=technique_id,
+                life_id=life_id,
+                technique_id="GF_Fire_01",
+                definition_version=1,
+                group_code="qi",
+                major_realm="练气",
+                invested_amount=0,
+                max_investment=3_765,
+                current_layer=1,
+                status="active",
+            )
+        )
+        await session.flush()
+        await repository.apply_technique_investments(
+            life_id=life_id,
+            operation_id=uuid4(),
+            session_id=None,
+            changes=(
+                TechniqueInvestmentChange(technique_id, 3_765, "seclusion_realization"),
+            ),
+            occurred_at=now,
+        )
+        await session.commit()
+
+    async with postgres_sessions() as session:
+        repository = PostgresCultivationRepository(session)
+        state = await repository.apply_technique_investments(
+            life_id=life_id,
+            operation_id=uuid4(),
+            session_id=None,
+            changes=(TechniqueInvestmentChange(technique_id, -3_765, "abandonment"),),
+            occurred_at=now + timedelta(seconds=1),
+        )
+        await session.commit()
+
+    async with postgres_sessions() as session:
+        technique_values = (
+            await session.execute(
+                select(
+                    LifeTechniqueRow.invested_amount,
+                    LifeTechniqueRow.current_layer,
+                ).where(LifeTechniqueRow.life_technique_id == technique_id)
+            )
+        ).one()
+        investment_count = len((await session.scalars(select(TechniqueInvestmentEntryRow))).all())
+        stored_state = await session.get(LifeCultivationStateRow, life_id)
+
+    assert state.realized_cultivation == 0
+    assert technique_values.invested_amount == 0
+    assert technique_values.current_layer == 1
+    assert stored_state is not None and stored_state.realized_cultivation == 0
+    assert investment_count == 2
 
 
 @pytest.mark.asyncio
@@ -264,7 +338,7 @@ async def test_invalid_investment_batch_leaves_every_balance_unchanged(
                     group_code="qi",
                     major_realm="练气",
                     invested_amount=0,
-                    max_investment=100,
+                    max_investment=3_765,
                     current_layer=1,
                     status="active",
                 )
@@ -277,7 +351,7 @@ async def test_invalid_investment_batch_leaves_every_balance_unchanged(
                 session_id=None,
                 changes=(
                     TechniqueInvestmentChange(first_id, 10, "seclusion_realization"),
-                    TechniqueInvestmentChange(second_id, 101, "seclusion_realization"),
+                    TechniqueInvestmentChange(second_id, 3_766, "seclusion_realization"),
                 ),
                 occurred_at=now,
             )

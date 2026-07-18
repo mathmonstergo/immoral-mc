@@ -4,14 +4,18 @@ import pytest
 
 from immortal_mmo.quest.definitions import QUEST_CATALOG, QuestDefinitionCatalog
 from immortal_mmo.quest.models import (
+    CurrentLifeSpiritRootObjectiveDefinition,
+    ItemDeliveryObjectiveDefinition,
+    MythicMobKillObjectiveDefinition,
     QuestCategory,
     QuestDefinition,
     QuestDialogueKeys,
-    QuestObjectiveDefinition,
     QuestObjectiveType,
     QuestPresentationHints,
     QuestProviderDefinition,
     QuestRepeatability,
+    RealmLevelObjectiveDefinition,
+    TechniqueLayerObjectiveDefinition,
 )
 
 
@@ -24,11 +28,9 @@ def quest(quest_id: str, category: QuestCategory = QuestCategory.MAIN) -> QuestD
         repeatability=QuestRepeatability.ONCE_PER_LIFE,
         prerequisites=(),
         objectives=(
-            QuestObjectiveDefinition(
+            CurrentLifeSpiritRootObjectiveDefinition(
                 objective_id="detect-spirit-root",
-                objective_type=QuestObjectiveType.CURRENT_LIFE_SPIRIT_ROOT_PRESENT,
                 label="灵根检测",
-                required=1,
             ),
         ),
         provider_ids=("provider",),
@@ -138,3 +140,125 @@ def test_provider_preserves_ordered_main_and_side_quests() -> None:
         "main-a",
         "side",
     )
+
+
+def test_typed_objectives_expose_validated_projection_targets() -> None:
+    objectives = (
+        ItemDeliveryObjectiveDefinition("deliver", "交付筑基丹", "foundation_pill", 3),
+        MythicMobKillObjectiveDefinition("hunt", "击杀苍狼", "AzureWolf", 5),
+        TechniqueLayerObjectiveDefinition("train", "修炼功法", "Gongfa_68726c", 7),
+        RealmLevelObjectiveDefinition("realm", "提升境界", 14),
+    )
+
+    assert tuple(objective.required for objective in objectives) == (3, 5, 7, 14)
+    assert tuple(objective.objective_type for objective in objectives) == (
+        QuestObjectiveType.ITEM_DELIVERY,
+        QuestObjectiveType.MYTHICMOB_KILL_COUNT,
+        QuestObjectiveType.TECHNIQUE_LAYER_REACHED,
+        QuestObjectiveType.REALM_LEVEL_REACHED,
+    )
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda: ItemDeliveryObjectiveDefinition("item", "Item", "bad item", 1),
+        lambda: MythicMobKillObjectiveDefinition("kill", "Kill", "AzureWolf", 0),
+        lambda: TechniqueLayerObjectiveDefinition("technique", "Technique", "GF_01", 14),
+        lambda: RealmLevelObjectiveDefinition("realm", "Realm", 23),
+    ],
+)
+def test_typed_objectives_reject_invalid_targets(factory) -> None:
+    with pytest.raises(ValueError):
+        factory()
+
+
+def test_catalog_rejects_duplicate_objective_targets() -> None:
+    duplicate = replace(
+        quest("duplicate-objective"),
+        objectives=(
+            ItemDeliveryObjectiveDefinition("first", "First", "foundation_pill", 1),
+            ItemDeliveryObjectiveDefinition("second", "Second", "foundation_pill", 2),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Duplicate objective target"):
+        QuestDefinitionCatalog(
+            quests=(duplicate,),
+            providers=(provider("duplicate-objective"),),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("provider_ids", (), "at least one provider"),
+        ("turn_in_provider_ids", (), "at least one turn-in provider"),
+        ("provider_ids", ("provider", "provider"), "Duplicate provider ID"),
+        (
+            "turn_in_provider_ids",
+            ("provider", "provider"),
+            "Duplicate turn-in provider ID",
+        ),
+    ],
+)
+def test_catalog_rejects_invalid_quest_provider_relationships(
+    field: str,
+    value: tuple[str, ...],
+    message: str,
+) -> None:
+    invalid = replace(quest("invalid-provider-relationship"), **{field: value})
+
+    with pytest.raises(ValueError, match=message):
+        QuestDefinitionCatalog(
+            quests=(invalid,),
+            providers=(provider(invalid.quest_id),),
+        )
+
+
+def test_catalog_rejects_quest_missing_from_declared_provider() -> None:
+    first = quest("first")
+    missing = quest("missing")
+
+    with pytest.raises(ValueError, match="Quest missing is missing from provider provider"):
+        QuestDefinitionCatalog(
+            quests=(first, missing),
+            providers=(provider("first"),),
+        )
+
+
+def test_catalog_rejects_provider_without_matching_quest_relationship() -> None:
+    definition = quest("listed-by-extra-provider")
+    extra = QuestProviderDefinition(
+        provider_id="extra",
+        display_name="Extra",
+        main_quest_ids=(definition.quest_id,),
+        side_quest_ids=(),
+    )
+
+    with pytest.raises(ValueError, match="without a matching quest relationship"):
+        QuestDefinitionCatalog(
+            quests=(definition,),
+            providers=(provider(definition.quest_id), extra),
+        )
+
+
+def test_catalog_rejects_more_objectives_than_the_sidebar_can_render() -> None:
+    oversized = replace(
+        quest("oversized"),
+        objectives=tuple(
+            ItemDeliveryObjectiveDefinition(
+                f"item-{index}",
+                f"Item {index}",
+                f"item_{index}",
+                1,
+            )
+            for index in range(13)
+        ),
+    )
+
+    with pytest.raises(ValueError, match="at most 12 objectives"):
+        QuestDefinitionCatalog(
+            quests=(oversized,),
+            providers=(provider("oversized"),),
+        )

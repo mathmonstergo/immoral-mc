@@ -1,4 +1,10 @@
 TRANSITION_COUNT = 12
+TECHNIQUE_GROWTH_RATIOS = {
+    "练气": (3, 2),
+    "筑基": (17, 10),
+    "结丹": (9, 5),
+    "元婴": (2, 1),
+}
 
 
 def build_transition_costs(capacity: int, p: int, q: int) -> tuple[int, ...]:
@@ -45,3 +51,15 @@ def layer_for_investment(
             break
         layer += 1
     return min(layer, 13)
+
+
+def layer_for_major_realm(
+    invested_amount: int,
+    capacity: int,
+    major_realm: str,
+) -> int:
+    try:
+        ratio = TECHNIQUE_GROWTH_RATIOS[major_realm]
+    except KeyError as error:
+        raise ValueError(f"Unknown technique major realm: {major_realm}") from error
+    return layer_for_investment(invested_amount, capacity, *ratio)

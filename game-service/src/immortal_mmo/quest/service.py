@@ -7,12 +7,29 @@ from uuid import UUID
 from immortal_mmo.core.error_wire import serialize_domain_error
 from immortal_mmo.core.errors import ConflictError, DomainError, NotFoundError, RuleViolationError
 from immortal_mmo.core.uow import UnitOfWork, UnitOfWorkFactory
+from immortal_mmo.item.models import (
+    InsufficientItemQuantity,
+    ItemConsumptionRequest,
+    ItemConsumptionType,
+    ItemOperationConflict,
+)
 from immortal_mmo.player.models import CurrentLifeQuestFacts
 from immortal_mmo.player.service import PlayerAccountNotFoundError, PlayerLifecycleError
 from immortal_mmo.quest.definitions import QUEST_CATALOG, QuestDefinitionCatalog
-from immortal_mmo.quest.models import QuestCategory, QuestDefinition, QuestProviderDefinition
+from immortal_mmo.quest.models import (
+    ItemDeliveryObjectiveDefinition,
+    MythicMobKillObjectiveDefinition,
+    QuestCategory,
+    QuestDefinition,
+    QuestProviderDefinition,
+    RealmLevelObjectiveDefinition,
+    TechniqueLayerObjectiveDefinition,
+)
+from immortal_mmo.quest.objectives import QuestEvaluationContext, evaluate_objective
+from immortal_mmo.quest.progression import QuestObjectiveProgressMismatchError
 from immortal_mmo.quest.repository import (
     FrozenHttpResponse,
+    QuestObjectiveProgress,
     QuestOperationCommand,
     QuestOperationState,
     QuestProgress,
@@ -115,6 +132,17 @@ class QuestService:
             facts = await self._load_player_facts(uow, account_id, for_update=False)
             progresses = await uow.quests.get_progresses(facts.life_id, self._catalog_quest_ids())
             self._validate_progress_versions(progresses)
+            objective_progresses = await uow.quests.get_objective_progresses(
+                facts.life_id,
+                self._catalog_quest_ids(),
+            )
+            self._validate_objective_progresses(progresses, objective_progresses)
+            context = await self._load_evaluation_context(
+                uow,
+                facts,
+                objective_progresses,
+                lock_items=False,
+            )
             quest_revision = await uow.quests.get_quest_revision(
                 facts.life_id,
                 for_update=False,
@@ -122,6 +150,7 @@ class QuestService:
             return self._build_interaction_state(
                 facts,
                 progresses,
+                context,
                 quest_revision,
                 normalized_provider_ids,
             )
@@ -265,14 +294,26 @@ class QuestService:
         quest_revision = await uow.quests.get_quest_revision(facts.life_id, for_update=True)
         progresses = await uow.quests.get_progresses(facts.life_id, self._catalog_quest_ids())
         self._validate_progress_versions(progresses)
+        objective_progresses = await uow.quests.get_objective_progresses(
+            facts.life_id,
+            self._catalog_quest_ids(),
+        )
+        self._validate_objective_progresses(progresses, objective_progresses)
+        context = await self._load_evaluation_context(
+            uow,
+            facts,
+            objective_progresses,
+            lock_items=False,
+        )
         progress = progresses.get(quest.quest_id)
-        current = self._project_quest(quest, facts, progresses)
+        current = self._project_quest(quest, progresses, context)
 
         changed = False
         if operation.command is QuestOperationCommand.ACCEPT:
             if current.state == "unavailable":
                 raise QuestNotAvailableError()
             if progress is None:
+                accepted_at = self._clock()
                 next_revision = quest_revision + 1
                 changed = await uow.quests.insert_progress_if_absent(
                     QuestProgress(
@@ -280,12 +321,19 @@ class QuestService:
                         quest_id=quest.quest_id,
                         definition_version=quest.version,
                         status=QuestProgressStatus.ACTIVE,
-                        accepted_at=self._clock(),
+                        accepted_at=accepted_at,
                         completed_at=None,
                         revision=next_revision,
                     )
                 )
                 if changed:
+                    await uow.quests.insert_objective_progresses(
+                        self._initial_event_progresses(
+                            facts.life_id,
+                            quest,
+                            accepted_at,
+                        )
+                    )
                     quest_revision = await uow.quests.increment_quest_revision(facts.life_id)
         else:
             if progress is None:
@@ -293,21 +341,42 @@ class QuestService:
             if current.state == "active":
                 raise QuestNotReadyError()
             if current.state == "ready_to_turn_in":
+                completed_at = self._clock()
+                await self._consume_delivery_items(
+                    uow,
+                    facts.life_id,
+                    quest,
+                    operation.operation_id,
+                    completed_at,
+                )
                 next_revision = quest_revision + 1
                 changed = await uow.quests.complete_progress_if_active(
                     facts.life_id,
                     quest.quest_id,
-                    completed_at=self._clock(),
+                    completed_at=completed_at,
                     revision=next_revision,
                 )
-                if changed:
-                    quest_revision = await uow.quests.increment_quest_revision(facts.life_id)
+                if not changed:
+                    raise RuntimeError("Quest completion lost its active-state race")
+                quest_revision = await uow.quests.increment_quest_revision(facts.life_id)
 
         progresses = await uow.quests.get_progresses(facts.life_id, self._catalog_quest_ids())
+        objective_progresses = await uow.quests.get_objective_progresses(
+            facts.life_id,
+            self._catalog_quest_ids(),
+        )
+        self._validate_objective_progresses(progresses, objective_progresses)
+        context = await self._load_evaluation_context(
+            uow,
+            facts,
+            objective_progresses,
+            lock_items=False,
+        )
         quest_revision = await uow.quests.get_quest_revision(facts.life_id, for_update=True)
         interaction_state = self._build_interaction_state(
             facts,
             progresses,
+            context,
             quest_revision,
             (operation.provider_id,),
         )
@@ -338,6 +407,161 @@ class QuestService:
         if account is None:
             raise PlayerAccountNotFoundError()
         raise PlayerLifecycleError()
+
+    def _initial_event_progresses(
+        self,
+        life_id: UUID,
+        quest: QuestDefinition,
+        accepted_at: datetime,
+    ) -> tuple[QuestObjectiveProgress, ...]:
+        return tuple(
+            QuestObjectiveProgress(
+                life_id=life_id,
+                quest_id=quest.quest_id,
+                objective_id=objective.objective_id,
+                definition_version=quest.version,
+                objective_type=objective.objective_type.value,
+                target_id=objective.mob_internal_name,
+                required_value=objective.required_count,
+                current_value=0,
+                updated_at=accepted_at,
+            )
+            for objective in quest.objectives
+            if isinstance(objective, MythicMobKillObjectiveDefinition)
+        )
+
+    async def _consume_delivery_items(
+        self,
+        uow: UnitOfWork,
+        life_id: UUID,
+        quest: QuestDefinition,
+        operation_id: UUID,
+        occurred_at: datetime,
+    ) -> None:
+        deliveries = sorted(
+            (
+                objective
+                for objective in quest.objectives
+                if isinstance(objective, ItemDeliveryObjectiveDefinition)
+            ),
+            key=lambda objective: objective.item_code,
+        )
+        try:
+            await uow.items.consume_many(
+                life_id=life_id,
+                consumptions=tuple(
+                    ItemConsumptionRequest(
+                        item_code=objective.item_code,
+                        quantity=objective.required_quantity,
+                        operation_id=operation_id,
+                        entry_type=ItemConsumptionType.QUEST_DELIVERY,
+                        session_id=None,
+                        occurred_at=occurred_at,
+                    )
+                    for objective in deliveries
+                ),
+            )
+        except ItemOperationConflict as error:
+            raise QuestIdempotencyConflictError() from error
+        except InsufficientItemQuantity as error:
+            raise QuestNotReadyError() from error
+
+    async def _load_evaluation_context(
+        self,
+        uow: UnitOfWork,
+        facts: CurrentLifeQuestFacts,
+        objective_progresses: dict[tuple[str, str], QuestObjectiveProgress],
+        *,
+        lock_items: bool,
+    ) -> QuestEvaluationContext:
+        item_codes = {
+            objective.item_code
+            for quest in self._catalog.quests
+            for objective in quest.objectives
+            if isinstance(objective, ItemDeliveryObjectiveDefinition)
+        }
+        item_stacks = await uow.items.get_stacks(
+            facts.life_id,
+            item_codes,
+            for_update=lock_items,
+        )
+
+        has_technique_objectives = any(
+            isinstance(objective, TechniqueLayerObjectiveDefinition)
+            for quest in self._catalog.quests
+            for objective in quest.objectives
+        )
+        techniques = (
+            await uow.cultivation.get_techniques(facts.life_id, for_update=False)
+            if has_technique_objectives
+            else ()
+        )
+        active_technique_layers = {
+            technique.technique_id: technique.current_layer
+            for technique in techniques
+            if technique.status == "active"
+        }
+
+        has_realm_objectives = any(
+            isinstance(objective, RealmLevelObjectiveDefinition)
+            for quest in self._catalog.quests
+            for objective in quest.objectives
+        )
+        current_realm_level = 1
+        cultivation_revision = 0
+        if has_realm_objectives or has_technique_objectives:
+            cultivation_state = await uow.cultivation.get_or_create_state(
+                facts.life_id,
+                for_update=False,
+            )
+            cultivation_revision = cultivation_state.revision
+            if has_realm_objectives:
+                current_realm_level = cultivation_state.current_level
+
+        return QuestEvaluationContext(
+            spirit_root_present=facts.spirit_root is not None,
+            item_quantities={
+                item_code: stack.quantity for item_code, stack in item_stacks.items()
+            },
+            kill_progress={
+                key: progress.current_value
+                for key, progress in objective_progresses.items()
+            },
+            active_technique_layers=active_technique_layers,
+            current_realm_level=current_realm_level,
+            revision=(
+                cultivation_revision
+                + sum(stack.revision for stack in item_stacks.values())
+            ),
+        )
+
+    def _validate_objective_progresses(
+        self,
+        progresses: dict[str, QuestProgress],
+        objective_progresses: dict[tuple[str, str], QuestObjectiveProgress],
+    ) -> None:
+        expected_keys: set[tuple[str, str]] = set()
+        for quest in self._catalog.quests:
+            progress = progresses.get(quest.quest_id)
+            if progress is None:
+                continue
+            for objective in quest.objectives:
+                if not isinstance(objective, MythicMobKillObjectiveDefinition):
+                    continue
+                key = (quest.quest_id, objective.objective_id)
+                expected_keys.add(key)
+                stored = objective_progresses.get(key)
+                if (
+                    stored is None
+                    or stored.life_id != progress.life_id
+                    or stored.definition_version != quest.version
+                    or stored.objective_type != objective.objective_type.value
+                    or stored.target_id != objective.mob_internal_name
+                    or stored.required_value != objective.required_count
+                ):
+                    raise QuestObjectiveProgressMismatchError()
+        if set(objective_progresses) != expected_keys:
+            raise QuestObjectiveProgressMismatchError()
 
     def _replay(
         self,
@@ -419,11 +643,16 @@ class QuestService:
         self,
         facts: CurrentLifeQuestFacts,
         progresses: dict[str, QuestProgress],
+        context: QuestEvaluationContext,
         quest_revision: int,
         provider_ids: Sequence[str],
     ) -> QuestInteractionState:
         providers = [
-            self._project_provider(self._catalog.get_provider(provider_id), facts, progresses)
+            self._project_provider(
+                self._catalog.get_provider(provider_id),
+                progresses,
+                context,
+            )
             for provider_id in provider_ids
         ]
         return QuestInteractionState(
@@ -432,23 +661,29 @@ class QuestService:
             revision=QuestRevisionVector(
                 player=facts.revision,
                 quest=quest_revision,
+                objectives=context.revision,
                 definitions=self._catalog.revision,
             ),
             providers=providers,
-            tracked_quest=self._project_tracked_quest(facts, progresses),
+            tracked_quest=self._project_tracked_quest(progresses, context),
         )
 
     def _project_provider(
         self,
         provider: QuestProviderDefinition,
-        facts: CurrentLifeQuestFacts,
         progresses: dict[str, QuestProgress],
+        context: QuestEvaluationContext,
     ) -> QuestProviderProjection:
         provider_order = {
             quest_id: index for index, quest_id in enumerate(provider.ordered_quest_ids)
         }
         quests = [
-            self._project_quest(self._catalog.get_quest(quest_id), facts, progresses, provider)
+            self._project_quest(
+                self._catalog.get_quest(quest_id),
+                progresses,
+                context,
+                provider,
+            )
             for quest_id in provider.ordered_quest_ids
         ]
         quests.sort(key=lambda item: self._actionable_sort_key(item, provider_order))
@@ -471,21 +706,28 @@ class QuestService:
     def _project_quest(
         self,
         quest: QuestDefinition,
-        facts: CurrentLifeQuestFacts,
         progresses: dict[str, QuestProgress],
+        context: QuestEvaluationContext,
         provider: QuestProviderDefinition | None = None,
     ) -> ProviderQuestState:
-        objectives = [
-            QuestObjectiveProjection(
-                objective_id=objective.objective_id,
-                title=objective.label,
-                current=1 if facts.spirit_root is not None else 0,
-                required=objective.required,
-                completed=facts.spirit_root is not None,
-            )
-            for objective in quest.objectives
-        ]
         progress = progresses.get(quest.quest_id)
+        objectives = []
+        for objective in quest.objectives:
+            evaluation = evaluate_objective(quest.quest_id, objective, context)
+            completed = evaluation.completed
+            current = evaluation.current
+            if progress is not None and progress.status is QuestProgressStatus.COMPLETED:
+                completed = True
+                current = max(current, evaluation.required)
+            objectives.append(
+                QuestObjectiveProjection(
+                    objective_id=objective.objective_id,
+                    title=objective.label,
+                    current=current,
+                    required=evaluation.required,
+                    completed=completed,
+                )
+            )
         if progress is not None and progress.status is QuestProgressStatus.COMPLETED:
             state = "completed"
         elif progress is not None and all(item.completed for item in objectives):
@@ -520,11 +762,11 @@ class QuestService:
 
     def _project_tracked_quest(
         self,
-        facts: CurrentLifeQuestFacts,
         progresses: dict[str, QuestProgress],
+        context: QuestEvaluationContext,
     ) -> TrackedQuest | None:
         candidates = [
-            (index, quest, self._project_quest(quest, facts, progresses))
+            (index, quest, self._project_quest(quest, progresses, context))
             for index, quest in enumerate(self._catalog.quests)
         ]
         candidates = [

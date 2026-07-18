@@ -152,7 +152,7 @@ async def test_quest_read_rejects_stale_prerequisite_progress() -> None:
     provider = QuestProviderDefinition(
         provider_id="old-man",
         display_name="老村民",
-        main_quest_ids=("follow-up",),
+        main_quest_ids=("prior", "follow-up"),
         side_quest_ids=(),
     )
     catalog = QuestDefinitionCatalog(quests=(prior, follow_up), providers=(provider,))
@@ -188,7 +188,7 @@ async def test_accept_freezes_stale_prerequisite_definition_mismatch() -> None:
     provider = QuestProviderDefinition(
         provider_id="old-man",
         display_name="老村民",
-        main_quest_ids=("follow-up",),
+        main_quest_ids=("prior", "follow-up"),
         side_quest_ids=(),
     )
     catalog = QuestDefinitionCatalog(quests=(prior, follow_up), providers=(provider,))

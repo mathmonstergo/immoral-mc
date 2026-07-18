@@ -96,7 +96,7 @@ async def test_start_seclusion_persists_unordered_authoritative_selection(
                         group_code="qi",
                         major_realm="练气",
                         invested_amount=0,
-                        max_investment=100,
+                        max_investment=108,
                         current_layer=1,
                         status="active",
                     )
@@ -164,7 +164,7 @@ async def test_abandonment_api_replays_across_app_restart_without_double_debit(
                         group_code="qi",
                         major_realm="练气",
                         invested_amount=invested,
-                        max_investment=100,
+                        max_investment=108,
                         current_layer=1,
                         status="active",
                     )
@@ -256,7 +256,7 @@ async def test_transfer_api_applies_profile_fraction_and_target_capacity(
                     life_id=life_id,
                     current_level=1,
                     unrefined_cultivation=55,
-                    realized_cultivation=171,
+                    realized_cultivation=179,
                     revision=1,
                 )
             )
@@ -281,8 +281,8 @@ async def test_transfer_api_applies_profile_fraction_and_target_capacity(
                         definition_version=1,
                         group_code="qi",
                         major_realm="练气",
-                        invested_amount=70,
-                        max_investment=100,
+                        invested_amount=78,
+                        max_investment=108,
                         current_layer=1,
                         status="active",
                     ),
@@ -303,7 +303,7 @@ async def test_transfer_api_applies_profile_fraction_and_target_capacity(
     assert response.json()["removed_amount"] == 101
     assert response.json()["transferred_amount"] == 30
     assert response.json()["destroyed_amount"] == 71
-    assert response.json()["cultivation"]["realized_total"] == 100
+    assert response.json()["cultivation"]["realized_total"] == 108
     assert response.json()["cultivation"]["unrefined_reserve"] == 55
 
 
@@ -344,7 +344,7 @@ async def test_regression_reentry_appends_a_new_postgres_branch(
                         group_code="qi",
                         major_realm="练气",
                         invested_amount=100,
-                        max_investment=100,
+                        max_investment=108,
                         current_layer=1,
                         status="active",
                     ),

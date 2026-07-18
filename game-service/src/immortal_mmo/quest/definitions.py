@@ -5,15 +5,17 @@ from types import MappingProxyType
 from typing import Any
 
 from immortal_mmo.quest.models import (
+    CurrentLifeSpiritRootObjectiveDefinition,
     QuestCategory,
     QuestDefinition,
     QuestDialogueKeys,
-    QuestObjectiveDefinition,
-    QuestObjectiveType,
     QuestPresentationHints,
     QuestProviderDefinition,
     QuestRepeatability,
+    objective_target_key,
 )
+
+MAX_OBJECTIVES_PER_QUEST = 12
 
 
 class QuestDefinitionCatalog:
@@ -74,6 +76,31 @@ class QuestDefinitionCatalog:
         known_quest_ids = set(quest_ids)
         known_provider_ids = set(provider_ids)
         for quest in quests:
+            if quest.version <= 0:
+                raise ValueError(f"Quest version must be positive: {quest.quest_id}")
+            if not quest.provider_ids:
+                raise ValueError(f"Quest must have at least one provider: {quest.quest_id}")
+            if not quest.turn_in_provider_ids:
+                raise ValueError(
+                    f"Quest must have at least one turn-in provider: {quest.quest_id}"
+                )
+            if len(quest.provider_ids) != len(set(quest.provider_ids)):
+                raise ValueError(f"Duplicate provider ID in quest {quest.quest_id}")
+            if len(quest.turn_in_provider_ids) != len(set(quest.turn_in_provider_ids)):
+                raise ValueError(f"Duplicate turn-in provider ID in quest {quest.quest_id}")
+            if not quest.objectives:
+                raise ValueError(f"Quest must have at least one objective: {quest.quest_id}")
+            if len(quest.objectives) > MAX_OBJECTIVES_PER_QUEST:
+                raise ValueError(
+                    f"Quest supports at most {MAX_OBJECTIVES_PER_QUEST} objectives: "
+                    f"{quest.quest_id}"
+                )
+            objective_ids = [objective.objective_id for objective in quest.objectives]
+            if len(objective_ids) != len(set(objective_ids)):
+                raise ValueError(f"Duplicate objective ID in quest {quest.quest_id}")
+            target_keys = [objective_target_key(objective) for objective in quest.objectives]
+            if len(target_keys) != len(set(target_keys)):
+                raise ValueError(f"Duplicate objective target in quest {quest.quest_id}")
             unknown_prerequisites = set(quest.prerequisites) - known_quest_ids
             if unknown_prerequisites:
                 raise ValueError(f"Unknown prerequisite quest ID: {unknown_prerequisites}")
@@ -94,6 +121,26 @@ class QuestDefinitionCatalog:
                 raise ValueError(
                     f"Unknown quest ID in provider {provider.provider_id}: {unknown_ids}"
                 )
+
+        quests_by_id = {quest.quest_id: quest for quest in quests}
+        providers_by_id = {provider.provider_id: provider for provider in providers}
+        for quest in quests:
+            for provider_id in set(quest.provider_ids) | set(quest.turn_in_provider_ids):
+                if quest.quest_id not in providers_by_id[provider_id].ordered_quest_ids:
+                    raise ValueError(
+                        f"Quest {quest.quest_id} is missing from provider {provider_id}"
+                    )
+        for provider in providers:
+            for quest_id in provider.ordered_quest_ids:
+                quest = quests_by_id[quest_id]
+                if (
+                    provider.provider_id not in quest.provider_ids
+                    and provider.provider_id not in quest.turn_in_provider_ids
+                ):
+                    raise ValueError(
+                        f"Provider {provider.provider_id} lists quest {quest_id} "
+                        "without a matching quest relationship"
+                    )
 
     @staticmethod
     def _build_revision(
@@ -124,11 +171,9 @@ FIRST_STEPS = QuestDefinition(
     repeatability=QuestRepeatability.ONCE_PER_LIFE,
     prerequisites=(),
     objectives=(
-        QuestObjectiveDefinition(
+        CurrentLifeSpiritRootObjectiveDefinition(
             objective_id="detect-spirit-root",
-            objective_type=QuestObjectiveType.CURRENT_LIFE_SPIRIT_ROOT_PRESENT,
             label="灵根检测",
-            required=1,
         ),
     ),
     provider_ids=("old-man",),

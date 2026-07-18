@@ -115,6 +115,64 @@ class QuestProgressRow(Base):
     )
 
 
+class QuestObjectiveProgressRow(Base):
+    __tablename__ = "quest_objective_progress"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "life_id",
+            "quest_id",
+            "objective_id",
+            name=conv("pk_quest_objective_progress"),
+        ),
+        ForeignKeyConstraint(
+            ["life_id", "quest_id"],
+            ["quest_progress.life_id", "quest_progress.quest_id"],
+            name=conv("fk_quest_objective_progress_quest"),
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "definition_version > 0",
+            name=conv("ck_quest_objective_progress_definition_version_positive"),
+        ),
+        CheckConstraint(
+            "objective_type = 'mythicmob_kill_count'",
+            name=conv("ck_quest_objective_progress_type"),
+        ),
+        CheckConstraint(
+            "required_value > 0",
+            name=conv("ck_quest_objective_progress_required_positive"),
+        ),
+        CheckConstraint(
+            "current_value >= 0 AND current_value <= required_value",
+            name=conv("ck_quest_objective_progress_current_bounds"),
+        ),
+        Index(
+            "ix_quest_objective_progress_target",
+            "life_id",
+            "objective_type",
+            "target_id",
+        ),
+    )
+
+    life_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
+    quest_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    objective_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    definition_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    objective_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    required_value: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    current_value: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("0"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
 class QuestOperationRow(Base):
     __tablename__ = "quest_operations"
     __table_args__ = (

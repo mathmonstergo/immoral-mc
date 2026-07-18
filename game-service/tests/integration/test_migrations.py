@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 from tests.support.postgres import (
     MigratedPostgres,
     check_migration_metadata,
+    downgrade_postgres,
+    migrate_postgres,
     rollback_postgres_session,
 )
 
@@ -25,6 +27,7 @@ GAMEPLAY_TABLES = {
     "life_spirit_roots",
     "life_quest_states",
     "quest_progress",
+    "quest_objective_progress",
     "quest_operations",
     "life_cultivation_states",
     "combat_kill_events",
@@ -86,6 +89,14 @@ EXPECTED_CONSTRAINTS = {
         "ck_quest_progress_status",
         "ck_quest_progress_completion",
         "ck_quest_progress_time_order",
+    },
+    "quest_objective_progress": {
+        "pk_quest_objective_progress",
+        "fk_quest_objective_progress_quest",
+        "ck_quest_objective_progress_definition_version_positive",
+        "ck_quest_objective_progress_type",
+        "ck_quest_objective_progress_required_positive",
+        "ck_quest_objective_progress_current_bounds",
     },
     "quest_operations": {
         "pk_quest_operations",
@@ -224,6 +235,7 @@ EXPECTED_INDEXES = {
     "ux_lives_one_alive_per_account",
     "ix_quest_progress_active_life",
     "ix_quest_progress_revision",
+    "ix_quest_objective_progress_target",
     "ix_quest_operations_account_created",
     "ix_combat_kills_life_time",
     "ix_combat_kills_mob_time",
@@ -241,6 +253,7 @@ EXPECTED_FUNCTIONS = {
     "prevent_life_delete_or_terminal_mutation",
     "prevent_spirit_root_mutation",
     "prevent_quest_progress_reversal_or_delete",
+    "prevent_quest_objective_progress_reversal_or_delete",
     "prevent_quest_operation_rewrite_or_delete",
 }
 
@@ -248,6 +261,7 @@ EXPECTED_TRIGGERS = {
     "trg_lives_prevent_delete_terminal_mutation",
     "trg_spirit_roots_prevent_update_delete",
     "trg_quest_progress_prevent_reversal_delete",
+    "trg_quest_objective_progress_prevent_reversal_delete",
     "trg_quest_operations_prevent_rewrite_delete",
 }
 
@@ -388,7 +402,7 @@ async def test_upgrade_creates_expected_tables_and_head_revision(
 
     assert table_names - {"alembic_version"} == GAMEPLAY_TABLES
     assert "alembic_version" in table_names
-    assert revision == "20260715_002"
+    assert revision == "20260718_003"
 
 
 @pytest.mark.asyncio
@@ -836,6 +850,75 @@ async def test_postgres_fixture_uses_requested_major_version(
 
 
 @pytest.mark.asyncio
+async def test_typed_objective_upgrade_backfills_existing_technique_layers(
+    migrated_postgres: MigratedPostgres,
+    clean_postgres_data: None,
+) -> None:
+    del clean_postgres_data
+    account_id = uuid4()
+    life_id = uuid4()
+    life_technique_id = uuid4()
+    await asyncio.to_thread(
+        downgrade_postgres,
+        migrated_postgres.url,
+        "20260715_002",
+    )
+    try:
+        async with migrated_postgres.engine.begin() as connection:
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO accounts (
+                        account_id, minecraft_uuid, last_known_name
+                    ) VALUES (:account_id, :minecraft_uuid, 'Migrator')
+                    """
+                ),
+                {"account_id": account_id, "minecraft_uuid": uuid4()},
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO lives (
+                        life_id, account_id, generation_no, status
+                    ) VALUES (:life_id, :account_id, 1, 'alive')
+                    """
+                ),
+                {"life_id": life_id, "account_id": account_id},
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO life_techniques (
+                        life_technique_id, life_id, technique_id,
+                        definition_version, group_code, major_realm,
+                        invested_amount, max_investment, current_layer, status
+                    ) VALUES (
+                        :life_technique_id, :life_id, 'GF_Migration',
+                        1, 'qi', '练气', 1000, 3765, 1, 'active'
+                    )
+                    """
+                ),
+                {
+                    "life_technique_id": life_technique_id,
+                    "life_id": life_id,
+                },
+            )
+
+        await asyncio.to_thread(migrate_postgres, migrated_postgres.url, "head")
+        async with migrated_postgres.engine.connect() as connection:
+            current_layer = await connection.scalar(
+                text(
+                    "SELECT current_layer FROM life_techniques "
+                    "WHERE life_technique_id = :life_technique_id"
+                ),
+                {"life_technique_id": life_technique_id},
+            )
+        assert current_layer == 9
+    finally:
+        await asyncio.to_thread(migrate_postgres, migrated_postgres.url, "head")
+
+
+@pytest.mark.asyncio
 async def test_alembic_cli_uses_database_url_from_environment(
     migrated_postgres: MigratedPostgres,
 ) -> None:
@@ -853,7 +936,7 @@ async def test_alembic_cli_uses_database_url_from_environment(
     )
 
     assert result.returncode == 0, result.stderr
-    assert "20260715_002 (head)" in result.stdout
+    assert "20260718_003 (head)" in result.stdout
 
 
 @pytest.mark.asyncio

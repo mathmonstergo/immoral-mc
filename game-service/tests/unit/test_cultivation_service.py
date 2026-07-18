@@ -40,7 +40,7 @@ async def test_start_and_settle_seclusion_consumes_only_retained_reserve() -> No
         group_code="qi",
         major_realm="练气",
         invested_amount=0,
-        max_investment=100,
+        max_investment=3_765,
         current_layer=1,
         status="active",
     )
@@ -60,7 +60,7 @@ async def test_start_and_settle_seclusion_consumes_only_retained_reserve() -> No
         technique_ids=(technique_id,),
         idempotency_key=uuid4(),
     )
-    clock.now += timedelta(hours=1)
+    clock.now += timedelta(seconds=96)
     settled = await service.settle_seclusion(
         account_id=login.account.account_id,
         session_id=started.session_id,
@@ -327,7 +327,7 @@ async def test_learned_technique_snapshot_derives_name_and_layer_from_catalog() 
         "练气",
         3_765,
         3_765,
-        1,
+        13,
         "active",
     )
 

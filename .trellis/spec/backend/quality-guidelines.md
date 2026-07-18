@@ -191,6 +191,9 @@ Adapter.
 
 * Test-server boot must prove Citizens, MythicMobs, and ImmortalMC enable
   without severe errors on the pinned Paper and Java versions.
+* The local pinned BetterHud `2.0.0` artifact requires a Java 25 runtime
+  (class-file version 69); `scripts/start-paper-server.sh` must prefer Java 25
+  or the server will disable BetterHud before ImmortalMC starts.
 * Citizens integration must test that an NPC binding survives a server restart
   and resolves after the backing Bukkit entity is recreated.
 * MythicMobs integration must test that reported combat/kill facts cannot inject
@@ -380,6 +383,8 @@ Before marking backend work complete, verify:
 * Are logs useful for tracing a player state transition without leaking secrets?
 * Are tests present at the right level for the risk?
 * Were docs/specs updated if a new convention was established?
+* If public behavior changed, was the relevant `docs/wiki/` page updated and
+  linked, and did `python3 scripts/check-wiki-links.py` pass?
 
 ## Initial Verification Commands
 
@@ -1453,3 +1458,141 @@ client.fetchCultivation(accountId).thenAccept(this::publishOnMainThread);
 
 The Adapter visualizes authoritative results and refreshes projections; it does
 not become a second progression engine.
+
+## Scenario: Typed Quest Objectives and Cross-Layer Projection
+
+### 1. Scope / Trigger
+
+Trigger: a quest needs item delivery, MythicMobs kill counts, a specified
+technique layer, or a specified realm level, and the result is shown through a
+Citizens/Paper tracked-quest sidebar.
+
+### 2. Signatures
+
+Backend definitions and persistence:
+
+```text
+ItemDeliveryObjectiveDefinition(item_code, required_quantity)
+MythicMobKillObjectiveDefinition(mob_internal_name, required_count)
+TechniqueLayerObjectiveDefinition(technique_id, target_layer)
+RealmLevelObjectiveDefinition(target_level)
+quest_objective_progress(life_id, quest_id, objective_id, definition_version,
+                          objective_type, target_id, required_value,
+                          current_value, updated_at)
+```
+
+Adapter endpoints and refresh:
+
+```http
+POST /api/v1/players/{account_id}/current-life/quest-interaction-state
+PUT  /api/v1/players/{account_id}/current-life/quests/{quest_id}/accept
+PUT  /api/v1/players/{account_id}/current-life/quests/{quest_id}/turn-in
+```
+
+`TrackedQuestRefreshCoordinator.refresh(playerUuid)` calls the state endpoint
+with an empty provider list. `publish` accepts a complete mutation response;
+both paths publish only on the Paper main thread.
+
+### 3. Contracts
+
+* A quest has one to twelve objectives. All objectives use AND semantics.
+* Application composition validates every MythicMob, technique/layer, and
+  realm objective against the exact shared authoritative catalogs before the
+  service starts. Quest/provider relationships are non-empty and bidirectionally
+  consistent. Item targets remain stable IDs until a complete item catalog exists.
+* Item, technique, and realm objectives read current authoritative state at
+  acceptance, projection, and turn-in. Technique reads the active specified
+  `LifeTechnique.current_layer`; realm uses `current_level`.
+* A rewardable combat fact must include the life observed by the Adapter. A
+  missing or stale `source_life_id` is terminal `current_life_unavailable`, so
+  delayed outbox delivery cannot attach an old kill to a newly reincarnated
+  life.
+* Kill rows start at zero on acceptance and advance only for a newly inserted
+  authoritative kill with matching exact mob ID and `occurred_at >= accepted_at`.
+  Historical lifetime counters are not a quest baseline. Progression locks the
+  per-life quest revision before reading accepted state, so an accept/kill race
+  cannot commit the combat event while dropping its objective increment.
+* Cultivation writes `invested_amount` and `current_layer` together through
+  the shared layer curve. Migration `20260718_003` backfills existing rows
+  before services trust direct layer reads.
+* Turn-in acquires sorted transaction advisory locks for item operation keys,
+  then locks all distinct delivery stacks in sorted item-code order, validates
+  every replay identity and balance, consumes all items, and completes the
+  quest in one transaction. Reusing an item operation UUID with different life,
+  quantity, type, or session is a conflict; it must never leak an
+  `IntegrityError`, look like a replay, or leave an earlier item partially debited.
+  The completion update must affect exactly one active row after the debit; an
+  impossible false result aborts the Unit of Work.
+* Migration `20260718_003` uses a frozen copy of the authored cultivation curve
+  for legacy layer backfill so later balance changes cannot rewrite history.
+* The response keeps `current/required/completed` unchanged for all objective
+  types. `revision.objectives` advances with cultivation and item-stack
+  dependencies; Paper rejects component-wise older vectors.
+* Paper renders at most twelve objective rows plus title and hint, and does
+  not calculate or submit progress values.
+* Join-login and tracked-quest refresh attempts use non-reusable monotonic
+  tokens. Quit/kick/disable invalidates them, and a completion must still match
+  the active online join plus account/life before it may cache or render.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Non-positive quantity/count/layer/level, invalid provider relation, or unknown catalog target | Application startup fails visibly |
+| Kill races with quest acceptance | Wait for acceptance commit, then count exactly once |
+| Kill before acceptance, wrong mob, wrong life, or duplicate event | No quest counter increment |
+| Missing `source_life_id` on a rewardable kill | `current_life_unavailable`; no counter or reward |
+| Active technique abandoned or technique/realm regresses | Projection returns `active` again |
+| Any delivery stack is short | `quest.not_ready`; no item debit or completion |
+| Item operation UUID reused with different immutable facts | `quest.idempotency_conflict` (or cultivation conflict); no mutation |
+| Concurrent operation UUID collision | Advisory-lock loser reloads the winner and returns a stable replay/conflict |
+| Older asynchronous account/life/revision response | Drop it without rendering |
+| Player quits and rejoins the same life before an old response completes | Non-reusable token drops the old completion |
+| More than twelve objectives | Catalog validation rejects the quest |
+
+### 5. Good/Base/Bad Cases
+
+* Good: combat event insertion, quest counter update, reward credit, and
+  lifetime counter commit in one Unit of Work; Paper refreshes after accepted
+  or duplicate delivery.
+* Base: current state objectives are batch-loaded for projection and the
+  tracked refresh is coalesced with one trailing request when dirty.
+* Bad: derive kill progress from a lifetime counter, trust a Paper-submitted
+  count/layer, or consume the first item before validating the second.
+
+### 6. Tests Required
+
+* Definition tests assert each type's boundaries, duplicate targets, and the
+  twelve-objective catalog limit.
+* PostgreSQL tests assert acceptance timestamps, bounded batch counter updates,
+  duplicate kill idempotency, atomic multi-item shortage, cross-domain item
+  UUID conflicts (including a later-item conflict), migration metadata and
+  legacy backfill, missing-source-life rejection, and current-layer gain/loss
+  persistence.
+* Concurrency tests hold acceptance and item-operation locks open, assert the
+  competing transaction actually waits, then prove exact progress and stable
+  replay/conflict behavior after the winner commits.
+* Service tests assert mixed-objective AND behavior, current-state credit,
+  regression after readiness, completed projection freezing, and new-life
+  isolation.
+* Java tests assert coalescing, trailing refresh, stale-life/revision drops,
+  clear-and-same-life reconnect ABA protection, late-login invalidation,
+  dispatcher recovery, multi-row scoreboard rendering, and accepted/duplicate
+  outbox refresh deduplication.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+quest turn-in -> consume item A -> discover item B is short -> return failure
+```
+
+#### Correct
+
+```text
+lock all sorted stacks -> validate every balance -> consume all -> complete
+```
+
+The authoritative transaction, not the Paper projection, decides whether the
+quest can complete.

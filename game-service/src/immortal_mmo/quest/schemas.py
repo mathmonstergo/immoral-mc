@@ -34,6 +34,7 @@ class QuestMutationRequest(BaseModel):
 class QuestRevisionVector(BaseModel):
     player: int
     quest: int
+    objectives: int
     definitions: str
 
 

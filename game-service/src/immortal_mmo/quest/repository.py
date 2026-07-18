@@ -34,6 +34,19 @@ class QuestProgress:
 
 
 @dataclass(frozen=True, slots=True)
+class QuestObjectiveProgress:
+    life_id: UUID
+    quest_id: str
+    objective_id: str
+    definition_version: int
+    objective_type: str
+    target_id: str
+    required_value: int
+    current_value: int
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class StoredQuestOperation:
     operation_id: UUID
     account_id: UUID
@@ -88,7 +101,36 @@ class QuestRepository(Protocol):
         quest_ids: Collection[str],
     ) -> dict[str, QuestProgress]: ...
 
+    async def get_objective_progresses(
+        self,
+        life_id: UUID,
+        quest_ids: Collection[str],
+    ) -> dict[tuple[str, str], QuestObjectiveProgress]: ...
+
     async def insert_progress_if_absent(self, progress: QuestProgress) -> bool: ...
+
+    async def insert_objective_progresses(
+        self,
+        progresses: Collection[QuestObjectiveProgress],
+    ) -> None: ...
+
+    async def increment_objective_progress(
+        self,
+        *,
+        life_id: UUID,
+        quest_id: str,
+        objective_id: str,
+        required_value: int,
+        updated_at: datetime,
+    ) -> int | None: ...
+
+    async def increment_objective_progresses(
+        self,
+        *,
+        life_id: UUID,
+        objectives: Collection[tuple[str, str]],
+        updated_at: datetime,
+    ) -> dict[tuple[str, str], int]: ...
 
     async def complete_progress_if_active(
         self,

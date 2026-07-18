@@ -60,6 +60,7 @@ async def test_provider_catalog_and_interaction_read_contract(
     assert state.json()["revision"] == {
         "player": 1,
         "quest": 0,
+        "objectives": 0,
         "definitions": QUEST_CATALOG.revision,
     }
 

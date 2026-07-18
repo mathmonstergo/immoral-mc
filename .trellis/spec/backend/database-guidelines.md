@@ -343,3 +343,102 @@ await cultivation.consume_unrefined(...)  # ordinary seclusion only
 
 Realized progress changes only with retained technique investment, while the
 unrefined reserve keeps its independent mutation boundary.
+
+## Scenario: Quest Objective Progress and Item Delivery Persistence
+
+### 1. Scope / Trigger
+
+Trigger: adding typed quest objectives, durable post-acceptance event counters,
+or atomic item delivery to the PostgreSQL-backed quest flow.
+
+### 2. Signatures
+
+```text
+quest_objective_progress(
+  life_id, quest_id, objective_id, definition_version,
+  objective_type, target_id, required_value, current_value, updated_at
+)
+```
+
+`item_resource_entries.entry_type` includes `quest_delivery`; its session ID
+must be NULL and its delta must be negative. Item operation identity is the
+tuple `(life_id, item_code, operation_id, entry_type, session_id, delta)`, not
+the UUID alone.
+
+### 3. Contracts
+
+* Only MythicMobs event objectives have durable progress rows. Rows are created
+  with zero at quest acceptance and may only increase up to `required_value`.
+* A rewardable combat fact requires a non-null `source_life_id` that matches
+  the locked current life. Missing or stale source-life facts become terminal
+  `current_life_unavailable` events and are never rebound to a new life by a
+  delayed outbox delivery.
+* Combat-to-quest progression locks the per-life quest revision row before it
+  reads accepted progress or objective rows. This serializes a kill with
+  accept/turn-in so a concurrently accepted quest cannot permanently miss the
+  already-committed combat event.
+* A combat transaction inserts the event, advances all matching active rows in
+  one bounded update, updates the lifetime counter/reward, and commits once.
+* Every item mutation acquires a PostgreSQL transaction advisory lock derived
+  from `(operation_id, item_code)` before reading replay history. A batch sorts
+  these physical lock keys, then locks stacks by item code, validates all
+  replay identities and balances, writes every `quest_delivery` debit, and
+  completes the quest in one transaction. Turn-in projection must not pre-lock
+  stacks in the reverse order. A later conflict or shortage leaves no earlier
+  item debited.
+* Migration `20260718_003` recalculates legacy `current_layer` values using a
+  frozen copy of the authored cultivation curve. It refuses downgrade when
+  objective rows or quest-delivery audit rows exist, rather than silently
+  destroying history.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Objective progress identity/definition differs | Stable conflict; transaction rolls back |
+| Counter would exceed required value | Bounded at required value |
+| Kill races with quest acceptance | Wait on the quest revision lock, then count when `occurred_at >= accepted_at` |
+| Rewardable combat fact has no matching source life | `current_life_unavailable`; no reward, lifetime counter, or quest progress |
+| One delivery stack is insufficient | No stack or audit row changes |
+| Reused item operation has different immutable facts | Item operation conflict; caller returns a stable domain conflict |
+| Two transactions race on the same item operation key | Loser waits on the advisory lock, reloads the winner, and returns replay/conflict without `IntegrityError` |
+| A later item in one delivery batch conflicts | No earlier item debit is committed |
+| Downgrade with typed progress or delivery history | Abort before changing constraints |
+
+### 5. Good/Base/Bad Cases
+
+* Good: repositories own only their module tables; the shared Unit of Work
+  coordinates combat, quest, cultivation, and item changes.
+* Base: missing item stacks are initialized and locked in sorted order inside
+  the final batch-consumption boundary.
+* Bad: treat any matching `(operation_id, item_code)` ledger row as a replay,
+  or issue separate commits for each delivered item.
+
+### 6. Tests Required
+
+* Fresh migration metadata checks table fields, constraints, trigger, index,
+  and head revision.
+* PostgreSQL tests cover bounded bulk increments, duplicate/replayed events,
+  item UUID identity conflicts (including a later-item conflict), multi-item
+  shortage rollback, successful delivery audit shape, and restart reads.
+* Real PostgreSQL concurrency tests prove accept-versus-kill serialization and
+  advisory-lock waiting for cross-life/cross-domain item operation collisions.
+* Migration smoke checks legacy technique rows are backfilled and data-bearing
+  downgrade is rejected before partial DDL.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+if existing_entry_for(operation_id, item_code):
+    return existing_entry
+```
+
+#### Correct
+
+```python
+if existing_entry.identity != requested_identity:
+    raise ItemOperationConflict
+return existing_entry
+```

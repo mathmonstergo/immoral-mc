@@ -2,16 +2,18 @@ from collections.abc import Collection
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from immortal_mmo.quest.db_models import (
     LifeQuestStateRow,
+    QuestObjectiveProgressRow,
     QuestOperationRow,
     QuestProgressRow,
 )
 from immortal_mmo.quest.repository import (
+    QuestObjectiveProgress,
     QuestOperationCommand,
     QuestOperationState,
     QuestProgress,
@@ -49,6 +51,20 @@ def _progress_from_row(row: QuestProgressRow) -> QuestProgress:
         accepted_at=row.accepted_at,
         completed_at=row.completed_at,
         revision=row.revision,
+    )
+
+
+def _objective_progress_from_row(row: QuestObjectiveProgressRow) -> QuestObjectiveProgress:
+    return QuestObjectiveProgress(
+        life_id=row.life_id,
+        quest_id=row.quest_id,
+        objective_id=row.objective_id,
+        definition_version=row.definition_version,
+        objective_type=row.objective_type,
+        target_id=row.target_id,
+        required_value=row.required_value,
+        current_value=row.current_value,
+        updated_at=row.updated_at,
     )
 
 
@@ -174,6 +190,26 @@ class PostgresQuestRepository:
         ).all()
         return {row.quest_id: _progress_from_row(row) for row in rows}
 
+    async def get_objective_progresses(
+        self,
+        life_id: UUID,
+        quest_ids: Collection[str],
+    ) -> dict[tuple[str, str], QuestObjectiveProgress]:
+        if not quest_ids:
+            return {}
+        rows = (
+            await self._session.scalars(
+                select(QuestObjectiveProgressRow).where(
+                    QuestObjectiveProgressRow.life_id == life_id,
+                    QuestObjectiveProgressRow.quest_id.in_(quest_ids),
+                )
+            )
+        ).all()
+        return {
+            (row.quest_id, row.objective_id): _objective_progress_from_row(row)
+            for row in rows
+        }
+
     async def insert_progress_if_absent(self, progress: QuestProgress) -> bool:
         inserted = await self._session.scalar(
             insert(QuestProgressRow)
@@ -192,6 +228,98 @@ class PostgresQuestRepository:
             .returning(QuestProgressRow.quest_id)
         )
         return inserted is not None
+
+    async def insert_objective_progresses(
+        self,
+        progresses: Collection[QuestObjectiveProgress],
+    ) -> None:
+        rows = [
+            QuestObjectiveProgressRow(
+                life_id=progress.life_id,
+                quest_id=progress.quest_id,
+                objective_id=progress.objective_id,
+                definition_version=progress.definition_version,
+                objective_type=progress.objective_type,
+                target_id=progress.target_id,
+                required_value=progress.required_value,
+                current_value=progress.current_value,
+                updated_at=progress.updated_at,
+            )
+            for progress in progresses
+        ]
+        if not rows:
+            return
+        self._session.add_all(rows)
+        await self._session.flush()
+
+    async def increment_objective_progress(
+        self,
+        *,
+        life_id: UUID,
+        quest_id: str,
+        objective_id: str,
+        required_value: int,
+        updated_at: datetime,
+    ) -> int | None:
+        return await self._session.scalar(
+            update(QuestObjectiveProgressRow)
+            .where(
+                QuestObjectiveProgressRow.life_id == life_id,
+                QuestObjectiveProgressRow.quest_id == quest_id,
+                QuestObjectiveProgressRow.objective_id == objective_id,
+                QuestObjectiveProgressRow.required_value == required_value,
+                QuestObjectiveProgressRow.current_value < required_value,
+            )
+            .values(
+                current_value=func.least(
+                    QuestObjectiveProgressRow.current_value + 1,
+                    required_value,
+                ),
+                updated_at=updated_at,
+            )
+            .returning(QuestObjectiveProgressRow.current_value)
+        )
+
+    async def increment_objective_progresses(
+        self,
+        *,
+        life_id: UUID,
+        objectives: Collection[tuple[str, str]],
+        updated_at: datetime,
+    ) -> dict[tuple[str, str], int]:
+        keys = tuple(sorted(set(objectives)))
+        if not keys:
+            return {}
+        rows = (
+            await self._session.execute(
+                update(QuestObjectiveProgressRow)
+                .where(
+                    QuestObjectiveProgressRow.life_id == life_id,
+                    tuple_(
+                        QuestObjectiveProgressRow.quest_id,
+                        QuestObjectiveProgressRow.objective_id,
+                    ).in_(keys),
+                    QuestObjectiveProgressRow.current_value
+                    < QuestObjectiveProgressRow.required_value,
+                )
+                .values(
+                    current_value=func.least(
+                        QuestObjectiveProgressRow.current_value + 1,
+                        QuestObjectiveProgressRow.required_value,
+                    ),
+                    updated_at=updated_at,
+                )
+                .returning(
+                    QuestObjectiveProgressRow.quest_id,
+                    QuestObjectiveProgressRow.objective_id,
+                    QuestObjectiveProgressRow.current_value,
+                )
+            )
+        ).all()
+        return {
+            (quest_id, objective_id): current_value
+            for quest_id, objective_id, current_value in rows
+        }
 
     async def complete_progress_if_active(
         self,

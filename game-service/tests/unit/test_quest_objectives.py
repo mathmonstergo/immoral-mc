@@ -1,0 +1,388 @@
+import json
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
+
+import pytest
+from tests.support.fakes import FakeStore, FakeUnitOfWorkFactory
+
+from immortal_mmo.cultivation.models import (
+    CultivationState,
+    LifeTechnique,
+    TechniqueInvestmentChange,
+)
+from immortal_mmo.item.models import ItemStack
+from immortal_mmo.player.service import PlayerService
+from immortal_mmo.quest.definitions import QUEST_CATALOG, QuestDefinitionCatalog
+from immortal_mmo.quest.models import (
+    ItemDeliveryObjectiveDefinition,
+    MythicMobKillObjectiveDefinition,
+    QuestObjectiveDefinition,
+    QuestProviderDefinition,
+    RealmLevelObjectiveDefinition,
+    TechniqueLayerObjectiveDefinition,
+)
+from immortal_mmo.quest.progression import QuestEventProgressionService
+from immortal_mmo.quest.service import QuestService
+
+NOW = datetime(2026, 7, 18, 8, tzinfo=UTC)
+
+
+def typed_catalog(*objectives: QuestObjectiveDefinition) -> QuestDefinitionCatalog:
+    quest = replace(
+        QUEST_CATALOG.get_quest("first-steps"),
+        quest_id="typed-objectives",
+        objectives=tuple(objectives),
+        provider_ids=("objective-master",),
+        turn_in_provider_ids=("objective-master",),
+    )
+    provider = QuestProviderDefinition(
+        provider_id="objective-master",
+        display_name="任务执事",
+        main_quest_ids=(quest.quest_id,),
+        side_quest_ids=(),
+    )
+    return QuestDefinitionCatalog(quests=(quest,), providers=(provider,))
+
+
+async def setup_services(
+    catalog: QuestDefinitionCatalog,
+) -> tuple[QuestService, FakeUnitOfWorkFactory, UUID, UUID]:
+    factory = FakeUnitOfWorkFactory(FakeStore())
+    login = await PlayerService(factory).login(UUID(int=18_001), "ObjectiveTester")
+    return (
+        QuestService(factory, catalog, clock=lambda: NOW),
+        factory,
+        login.account.account_id,
+        login.current_life.life_id,
+    )
+
+
+def response_body(response) -> dict:
+    return json.loads(response.body)
+
+
+@pytest.mark.asyncio
+async def test_state_objectives_use_current_authoritative_targets() -> None:
+    catalog = typed_catalog(
+        ItemDeliveryObjectiveDefinition("deliver", "交付筑基丹", "foundation_pill", 3),
+        TechniqueLayerObjectiveDefinition("technique", "冰冻术七层", "Gongfa_68726c", 7),
+        RealmLevelObjectiveDefinition("realm", "筑基初期", 14),
+    )
+    quests, factory, account_id, life_id = await setup_services(catalog)
+    target_instance = uuid4()
+    other_instance = uuid4()
+    factory.store._state.item_stacks[(life_id, "foundation_pill")] = ItemStack(
+        life_id,
+        "foundation_pill",
+        8,
+        1,
+    )
+    factory.store._state.life_techniques[target_instance] = LifeTechnique(
+        target_instance,
+        life_id,
+        "Gongfa_68726c",
+        1,
+        "qi",
+        "练气",
+        500,
+        3_765,
+        6,
+        "active",
+    )
+    factory.store._state.life_techniques[other_instance] = LifeTechnique(
+        other_instance,
+        life_id,
+        "GF_Other",
+        1,
+        "qi",
+        "练气",
+        3_765,
+        3_765,
+        13,
+        "active",
+    )
+    factory.store._state.cultivation_states[life_id] = CultivationState(
+        life_id,
+        14,
+        0,
+        500,
+        None,
+        1,
+    )
+
+    accepted = await quests.accept(
+        account_id,
+        "typed-objectives",
+        "objective-master",
+        UUID(int=18_002),
+    )
+    objectives = response_body(accepted)["quest"]["objectives"]
+
+    assert [(item["current"], item["required"], item["completed"]) for item in objectives] == [
+        (3, 3, True),
+        (6, 7, False),
+        (14, 14, True),
+    ]
+
+    factory.store._state.life_techniques[target_instance] = replace(
+        factory.store._state.life_techniques[target_instance],
+        current_layer=7,
+    )
+    state = await quests.get_interaction_state(account_id, ["objective-master"])
+    assert state.providers[0].quests[0].state == "ready_to_turn_in"
+
+    factory.store._state.life_techniques[target_instance] = replace(
+        factory.store._state.life_techniques[target_instance],
+        status="abandoned",
+    )
+    state = await quests.get_interaction_state(account_id, ["objective-master"])
+    assert state.providers[0].quests[0].state == "active"
+    assert state.providers[0].quests[0].objectives[1].current == 0
+
+
+@pytest.mark.asyncio
+async def test_technique_objective_tracks_layer_gain_and_loss_from_investment() -> None:
+    catalog = typed_catalog(
+        TechniqueLayerObjectiveDefinition("technique", "冰冻术二层", "Gongfa_68726c", 2)
+    )
+    quests, factory, account_id, life_id = await setup_services(catalog)
+    technique_instance = UUID(int=18_005)
+    factory.store._state.life_techniques[technique_instance] = LifeTechnique(
+        technique_instance,
+        life_id,
+        "Gongfa_68726c",
+        1,
+        "qi",
+        "练气",
+        0,
+        3_765,
+        1,
+        "active",
+    )
+    factory.store._state.cultivation_states[life_id] = CultivationState(
+        life_id,
+        1,
+        0,
+        0,
+        None,
+        1,
+    )
+    await quests.accept(
+        account_id,
+        "typed-objectives",
+        "objective-master",
+        UUID(int=18_006),
+    )
+
+    async with factory() as uow:
+        await uow.cultivation.apply_technique_investments(
+            life_id=life_id,
+            operation_id=UUID(int=18_007),
+            session_id=None,
+            changes=(
+                TechniqueInvestmentChange(
+                    technique_instance,
+                    15,
+                    "seclusion_realization",
+                ),
+            ),
+            occurred_at=NOW,
+        )
+        await uow.commit()
+    state = await quests.get_interaction_state(account_id, ["objective-master"])
+    assert state.providers[0].quests[0].state == "ready_to_turn_in"
+    assert state.providers[0].quests[0].objectives[0].current == 2
+
+    async with factory() as uow:
+        await uow.cultivation.apply_technique_investments(
+            life_id=life_id,
+            operation_id=UUID(int=18_008),
+            session_id=None,
+            changes=(
+                TechniqueInvestmentChange(
+                    technique_instance,
+                    -15,
+                    "breakthrough_penalty",
+                ),
+            ),
+            occurred_at=NOW + timedelta(seconds=1),
+        )
+        await uow.commit()
+    state = await quests.get_interaction_state(account_id, ["objective-master"])
+    assert state.providers[0].quests[0].state == "active"
+    assert state.providers[0].quests[0].objectives[0].current == 1
+
+
+@pytest.mark.asyncio
+async def test_kills_before_acceptance_do_not_advance_persisted_progress() -> None:
+    objective = MythicMobKillObjectiveDefinition("hunt", "击杀苍狼", "AzureWolf", 2)
+    catalog = typed_catalog(objective)
+    quests, factory, account_id, life_id = await setup_services(catalog)
+    progression = QuestEventProgressionService(catalog)
+
+    await quests.accept(
+        account_id,
+        "typed-objectives",
+        "objective-master",
+        UUID(int=18_010),
+    )
+    async with factory() as uow:
+        changed = await progression.record_mythicmob_kill(
+            uow,
+            life_id=life_id,
+            mob_internal_name="AzureWolf",
+            occurred_at=NOW - timedelta(seconds=1),
+        )
+        await uow.commit()
+    assert changed is False
+
+    for offset in (1, 2):
+        async with factory() as uow:
+            changed = await progression.record_mythicmob_kill(
+                uow,
+                life_id=life_id,
+                mob_internal_name="AzureWolf",
+                occurred_at=NOW + timedelta(seconds=offset),
+            )
+            await uow.commit()
+        assert changed is True
+
+    state = await quests.get_interaction_state(account_id, ["objective-master"])
+    projection = state.providers[0].quests[0]
+    assert projection.state == "ready_to_turn_in"
+    assert projection.objectives[0].current == 2
+    assert factory.store._state.quest_revisions[life_id] == 3
+
+
+@pytest.mark.asyncio
+async def test_item_delivery_validates_all_stacks_before_atomic_consumption() -> None:
+    catalog = typed_catalog(
+        ItemDeliveryObjectiveDefinition("pills", "交付筑基丹", "foundation_pill", 2),
+        ItemDeliveryObjectiveDefinition("tokens", "交付令牌", "trial_token", 1),
+    )
+    quests, factory, account_id, life_id = await setup_services(catalog)
+    factory.store._state.item_stacks[(life_id, "foundation_pill")] = ItemStack(
+        life_id,
+        "foundation_pill",
+        2,
+        1,
+    )
+    factory.store._state.item_stacks[(life_id, "trial_token")] = ItemStack(
+        life_id,
+        "trial_token",
+        0,
+        1,
+    )
+    await quests.accept(
+        account_id,
+        "typed-objectives",
+        "objective-master",
+        UUID(int=18_020),
+    )
+
+    rejected = await quests.turn_in(
+        account_id,
+        "typed-objectives",
+        "objective-master",
+        UUID(int=18_021),
+    )
+    assert rejected.status_code == 409
+    assert response_body(rejected)["error"]["code"] == "quest.not_ready"
+    assert factory.store._state.item_stacks[(life_id, "foundation_pill")].quantity == 2
+    assert factory.store._state.item_entries == {}
+
+    factory.store._state.item_stacks[(life_id, "trial_token")] = ItemStack(
+        life_id,
+        "trial_token",
+        1,
+        2,
+    )
+    operation_id = UUID(int=18_022)
+    completed = await quests.turn_in(
+        account_id,
+        "typed-objectives",
+        "objective-master",
+        operation_id,
+    )
+    replayed = await quests.turn_in(
+        account_id,
+        "typed-objectives",
+        "objective-master",
+        operation_id,
+    )
+
+    assert completed == replayed
+    payload = response_body(completed)
+    assert payload["quest"]["state"] == "completed"
+    assert all(item["completed"] for item in payload["quest"]["objectives"])
+    assert factory.store._state.item_stacks[(life_id, "foundation_pill")].quantity == 0
+    assert factory.store._state.item_stacks[(life_id, "trial_token")].quantity == 0
+    assert len(factory.store._state.item_entries) == 2
+    assert {entry.entry_type for entry in factory.store._state.item_entries.values()} == {
+        "quest_delivery"
+    }
+
+
+@pytest.mark.asyncio
+async def test_mixed_objectives_require_every_type() -> None:
+    catalog = typed_catalog(
+        ItemDeliveryObjectiveDefinition("deliver", "交付筑基丹", "foundation_pill", 1),
+        MythicMobKillObjectiveDefinition("hunt", "击杀苍狼", "AzureWolf", 1),
+        TechniqueLayerObjectiveDefinition("technique", "冰冻术二层", "Gongfa_68726c", 2),
+        RealmLevelObjectiveDefinition("realm", "练气二层", 2),
+    )
+    quests, factory, account_id, life_id = await setup_services(catalog)
+    technique_instance = uuid4()
+    factory.store._state.item_stacks[(life_id, "foundation_pill")] = ItemStack(
+        life_id,
+        "foundation_pill",
+        1,
+        1,
+    )
+    factory.store._state.life_techniques[technique_instance] = LifeTechnique(
+        technique_instance,
+        life_id,
+        "Gongfa_68726c",
+        1,
+        "qi",
+        "练气",
+        100,
+        3_765,
+        2,
+        "active",
+    )
+    factory.store._state.cultivation_states[life_id] = CultivationState(
+        life_id,
+        2,
+        0,
+        100,
+        None,
+        1,
+    )
+    await quests.accept(
+        account_id,
+        "typed-objectives",
+        "objective-master",
+        UUID(int=18_030),
+    )
+
+    state = await quests.get_interaction_state(account_id, ["objective-master"])
+    assert state.providers[0].quests[0].state == "active"
+    assert [item.completed for item in state.providers[0].quests[0].objectives] == [
+        True,
+        False,
+        True,
+        True,
+    ]
+
+    async with factory() as uow:
+        await QuestEventProgressionService(catalog).record_mythicmob_kill(
+            uow,
+            life_id=life_id,
+            mob_internal_name="AzureWolf",
+            occurred_at=NOW,
+        )
+        await uow.commit()
+    state = await quests.get_interaction_state(account_id, ["objective-master"])
+    assert state.providers[0].quests[0].state == "ready_to_turn_in"
