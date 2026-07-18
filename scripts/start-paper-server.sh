@@ -3,7 +3,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVER_DIR="$ROOT_DIR/minecraft-nodes/main-server"
-JAVA_BIN="${JAVA_HOME:-}/bin/java"
+JAVA_BIN="$HOME/.local/share/jdks/temurin-25/bin/java"
+
+if [ ! -x "$JAVA_BIN" ]; then
+  JAVA_BIN="$HOME/.local/jdks/jdk-25/bin/java"
+fi
+
+if [ ! -x "$JAVA_BIN" ]; then
+  JAVA_BIN="${JAVA_HOME:-}/bin/java"
+fi
 
 if [ ! -x "$JAVA_BIN" ]; then
   JAVA_BIN="$HOME/.local/jdks/jdk-21/bin/java"
