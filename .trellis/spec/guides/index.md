@@ -23,6 +23,7 @@ These guides help you **ask the right questions before coding**.
 |-------|---------|-------------|
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
+| [Wiki Maintenance Guide](./wiki-maintenance-guide.md) | Keep public feature usage synchronized with code | Every public or operator-visible change |
 
 ---
 
@@ -46,6 +47,14 @@ These guides help you **ask the right questions before coding**.
 - [ ] **You're creating a new utility/helper function** ← Search first!
 
 → Read [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
+
+### When to Update the Public Wiki
+
+- [ ] Commands, permissions, config, dependencies, API, or gameplay changed
+- [ ] Content authoring, installation, upgrade, or troubleshooting changed
+- [ ] A new player/operator-visible feature was added
+
+→ Read [Wiki Maintenance Guide](./wiki-maintenance-guide.md)
 
 ---
 

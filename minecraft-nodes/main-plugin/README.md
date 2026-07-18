@@ -2,6 +2,13 @@
 
 Thin Paper adapter plugin for the ImmortalMC Game Service.
 
+面向服主、玩家和内容作者的中文说明统一维护在
+[ImmortalMC Wiki](../../docs/wiki/index.md)。常用入口：
+[命令与权限](../../docs/wiki/commands-and-permissions.md)、
+[配置说明](../../docs/wiki/configuration.md)和
+[BetterHud 与材质包](../../docs/wiki/betterhud-and-resource-pack.md)。
+本 README 仅保留 Paper 适配器开发细节。
+
 ## Target
 
 - Minecraft / Paper: `1.21.11`

@@ -4,6 +4,13 @@ FastAPI backend service for the Immortal Minecraft MMORPG. PostgreSQL is the
 authoritative store; the local Compose service is disposable development
 infrastructure only.
 
+面向服主、内容作者和接入方的中文说明统一维护在
+[ImmortalMC Wiki](../docs/wiki/index.md)。常用入口：
+[API 参考](../docs/wiki/api-reference.md)、
+[运维与故障排查](../docs/wiki/operations-and-troubleshooting.md)、
+[任务系统](../docs/wiki/quests.md)和[修炼系统](../docs/wiki/cultivation.md)。
+本 README 仅保留 Game Service 开发细节。
+
 ## Local setup
 
 From the repository root:

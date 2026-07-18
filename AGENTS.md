@@ -19,3 +19,28 @@ If you're using Codex or another agent-capable tool, additional project-scoped h
 Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
 
 <!-- TRELLIS:END -->
+
+## Public Wiki Documentation Contract
+
+`docs/wiki/` is the authoritative public usage manual. Any change to a
+player-, server-owner-, content-author-, operator-, or integrator-visible
+feature must update the relevant Wiki page in the same change. This includes
+commands, permissions, configuration, dependencies, API contracts, gameplay
+rules, content schemas, installation, upgrades, and troubleshooting.
+
+New feature modules require a discoverable page linked from
+`docs/wiki/index.md`. Internal `.trellis/spec/` files, task PRDs, tests, and
+dated documents under `docs/superpowers/` do not replace the public Wiki.
+
+Public Wiki prose must be written in Simplified Chinese. Keep commands,
+permissions, configuration keys, API paths, identifiers, and code examples in
+their exact technical form instead of translating them.
+
+Before completing work, run:
+
+```bash
+python3 scripts/check-wiki-links.py
+```
+
+Report either `Docs impact: required - <updated pages>` or a concrete reason
+for `Docs impact: none`.

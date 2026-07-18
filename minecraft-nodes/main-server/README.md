@@ -1,87 +1,90 @@
-# ImmortalMC Local Paper Server
+# ImmortalMC 本地 Paper 服务器
 
-Local Paper `1.21.11` test server for Windows Minecraft client testing.
+此目录是供 Windows Minecraft 客户端联调使用的本地 Paper `1.21.11` 服务器。
+完整安装和排错说明见 [ImmortalMC 中文 Wiki](../../docs/wiki/index.md)，尤其是
+[快速开始](../../docs/wiki/getting-started.md)、
+[BetterHud 与材质包](../../docs/wiki/betterhud-and-resource-pack.md)和
+[运维与故障排查](../../docs/wiki/operations-and-troubleshooting.md)。
 
-## Start Order
+ImmortalMC 适配器以 Java 21 编译，但当前固定的 BetterHud `2.0.0` 运行时使用
+Java 25 编译。本地启动脚本因此优先选择 Java 25，仅在找不到 Java 25 时回退到
+Java 21。
 
-1. Start Game Service:
+## 启动顺序
+
+所有命令均从仓库根目录执行。
+
+1. 启动 Game Service：
 
    ```bash
-   cd /home/adam/projects/immortal_mc
+   set -a
+   source game-service/.env
+   set +a
    ./scripts/start-game-service.sh
    ```
 
-2. Start Paper:
+2. 启动 Paper：
 
    ```bash
-   cd /home/adam/projects/immortal_mc
    tmux new-session -s immortal-paper './scripts/start-paper-server.sh'
    ```
 
-   To attach later:
+   重新进入会话：
 
    ```bash
    tmux attach -t immortal-paper
    ```
 
-   To stop Paper cleanly from outside tmux:
+   从会话外正常停止 Paper：
 
    ```bash
    tmux send-keys -t immortal-paper 'stop' Enter
    ```
 
-3. In Windows Minecraft Java Edition `1.21.11`, connect to the WSL IP and
-   local Paper port:
+3. 在 Windows Minecraft Java Edition `1.21.11` 中查询并连接当前 WSL 地址：
 
-   ```text
-   172.25.217.166:25549
+   ```bash
+   hostname -I
    ```
 
-   The WSL IP can change after restarting WSL. Run `hostname -I` in WSL and use
-   the first IP address with port `25549`. `localhost:25549` can work on some
-   WSL setups, but this machine currently needs the WSL IP.
+   使用客户端可访问的第一个地址和本地 Paper 端口：
 
-## Test Commands
+   ```text
+   <wsl-ip>:25549
+   ```
+
+   WSL 重启后 IP 可能变化。启用了 WSL localhost 转发时也可尝试
+   `localhost:25549`，不要把某次查询得到的 IP 写死到长期文档中。
+
+## 基本检查
 
 ```text
 /immortal health
 /immortal spirit-root
 ```
 
-`/immortal health` is an operator diagnostics command. `/immortal spirit-root`
-is a temporary development test entrypoint; the planned gameplay flow should use
-NPC, block, region, or item interactions instead of player-entered commands.
+`/immortal health` 是管理员诊断命令。`/immortal spirit-root` 是开发测试入口；正式
+玩法通过绑定的鉴灵实体触发。
 
-## Collaborative Testing
-
-When testing from Windows, run the action in game and then inspect the Paper log:
+观察 Paper 日志：
 
 ```bash
-tail -n 80 /home/adam/projects/immortal_mc/minecraft-nodes/main-server/logs/latest.log
+tail -n 120 minecraft-nodes/main-server/logs/latest.log
 ```
 
-Plugin debug/status details belong in Paper logs, not player chat. Player chat
-should only show intentional gameplay feedback.
+调试和状态信息应写入 Paper 日志，玩家聊天中只显示有意设计的玩法反馈。
 
-## MythicMobs free 5.12.1 smoke
+## MythicMobs 联调
 
-Use the official free-distribution jar, not the old Premium snapshot:
-
-```bash
-cp /home/adam/projects/immortal_mc/plugins-new-add/MythicMobs-5.12.1.jar \
-  /home/adam/projects/immortal_mc/minecraft-nodes/main-server/plugins/MythicMobs.jar
-```
-
-The verified jar SHA-256 is:
+将官方免费版 MythicMobs `5.12.1` jar 安装为：
 
 ```text
-3781927033898c75b0c4e21a8eee1756ca822d80160430c3da9de760c9137cd1
+minecraft-nodes/main-server/plugins/MythicMobs.jar
 ```
 
-After Paper starts, confirm `MythicMobs` and `ImmortalMC` enable without
-`SEVERE`/linkage errors. Configure mobs through normal MythicMobs YAML; the
-top-level mob key must match the Game Service reward catalog exactly.
+启动 Paper 后确认 `MythicMobs` 和 `ImmortalMC` 均已启用，日志中没有
+`SEVERE` 或链接错误。怪物使用原生 MythicMobs YAML 配置；顶层怪物键必须与
+Game Service 奖励目录中的 `internal_name` 完全一致。
 
-`online-mode=false`, `enforce-secure-profile=false`, and
-`prevent-proxy-connections=false` are set for local-only testing. Do not use
-this config for a public server.
+本目录的 `online-mode=false`、`enforce-secure-profile=false` 和
+`prevent-proxy-connections=false` 仅用于本地测试，不能直接用于公网服务器。
