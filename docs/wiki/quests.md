@@ -88,8 +88,9 @@ TechniqueLayerObjectiveDefinition(
 ```
 
 `technique_id` 必须与 `game-service/src/immortal_mmo/cultivation/techniques.json`
-一致，`target_layer` 必须为 1 至 13。其他功法不能满足该目标，已放弃的功法也不会计入。
-已有进度会立即计入；交付前层数回退会使目标重新变为未完成。
+一致。功法当前层数可以为 0，但 `target_layer` 仍必须为 1 至 13；0 层不满足第 1 层
+目标，也不能配置成任务目标。其他功法不能满足该目标，已放弃的功法也不会计入。已有
+进度会立即计入；交付前层数回退会使目标重新变为未完成。
 
 ### 目标境界
 

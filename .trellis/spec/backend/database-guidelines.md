@@ -108,6 +108,16 @@ docker compose up -d postgres
 | Target model changes before production | Rewrite the development migration/schema and update tests directly |
 | Durable event is retried | Idempotency returns the stored result; this is correctness, not compatibility |
 
+### Current project decision (development-only schema changes)
+
+ImmortalMC is still in disposable development. When a gameplay model changes,
+the clean target is written directly into the development migration/ORM/tests,
+the local PostgreSQL volume is deleted and recreated, and old rows/sessions are
+not preserved. Do not add compatibility revisions, legacy snapshot readers,
+dual formulas, downgrade guards, or data backfills solely to protect local
+development data. A future production release will establish a separate
+migration policy once real player data exists.
+
 ### 5. Good/Base/Bad Cases
 
 * Good: remove an obsolete column and reset the development database so only
@@ -272,14 +282,54 @@ item_resource_entries
 Mutation APIs require `Idempotency-Key: <UUID>`. Session kinds are
 `ordinary`, `breakthrough`, and `technique_mutation`.
 
+Ordinary sessions freeze this JSON shape in `cultivation_sessions.frozen_snapshot`:
+
+```text
+area_version
+cycle_seconds = 10
+technique_group
+technique_capacity
+full_mastery_seconds
+base_cultivation_per_cycle
+player_major_realm / player_speed_weight
+technique_major_realm / technique_speed_weight
+speed_basis_points / yield_basis_points
+cultivation_per_cycle
+```
+
 ### 3. Contracts
 
 * Active technique investment is the auditable backing for realized
   cultivation; the state aggregate must equal its sum after every transaction.
 * Unrefined cultivation is a separate reserve. Accepted combat rewards add it;
   ordinary seclusion consumes it. Breakthrough and technique loss never do.
-* Ordinary seclusion freezes area content, selected technique versions,
-  capacity, speed/yield basis points, and full-mastery time.
+* Ordinary seclusion selects one to five active, non-mastered techniques with
+  exactly one `group_code` and one capacity. Selection count never increases
+  the session's total speed.
+* A cycle is ten seconds. Base speed is
+  `max(1, floor(capacity * 10 / full_mastery_seconds))`; final speed is
+  `max(1, floor(base * player_speed_weight * speed_basis_points /
+  technique_speed_weight / 10000))` and is frozen at session start.
+* Major-realm speed weights are qi/foundation/core/nascent = `1/2/5/10`.
+  They change elapsed-time speed only. Technique layer-growth ratios such as
+  `3:2` or `17:10` never participate in seclusion speed and capacities/costs
+  are never multiplied by the speed ratio.
+* `completes_at` for an ordinary session is `started_at + 10 seconds`, the
+  first settlement boundary rather than an estimated mastery timestamp.
+  Cumulative generated cultivation is `floor(elapsed_seconds / 10) *
+  cultivation_per_cycle`.
+* Yield conversion and equal technique allocation are calculated from the
+  session's cumulative generated/consumed/retained targets, then only the
+  difference from persisted totals is written. Never round or allocate only
+  the latest increment: split and combined settlement must be identical per
+  technique as well as in aggregate.
+* For cumulative retained cap `C` and yield `Y`, required reserve is
+  `ceil(C * 10000 / Y)`. Consume at most that cumulative amount and clamp
+  `floor(consumed * Y / 10000)` to `C`. Preventing raw retained from crossing
+  `C` instead will permanently strand the last capacity points when `Y > 10000`.
+* A full current-realm progress bar ends a session only when the selected
+  technique group is the current progress group. A high-realm player training
+  a lower-realm technique is not stopped by the unrelated high-realm barrier.
 * At most one pending/active cultivation session exists per life. Lock order is
   account/current life, cultivation state, sorted techniques, then item stack.
 * Realm entries are an immutable history. Regression invalidates an active
@@ -293,8 +343,11 @@ Mutation APIs require `Idempotency-Key: <UUID>`. Session kinds are
 
 | Condition | Expected behavior |
 |---|---|
-| Mixed-major-realm seclusion selection | Reject before session creation |
+| Mixed group, capacity, or major-realm seclusion selection | Reject before session creation |
 | More than five or duplicate selections | Reject |
+| Settlement before the first complete ten-second cycle | Stable `cultivation.seclusion_conflict`; no mutation |
+| Old session snapshot lacks required cycle keys | Fail visibly; do not read an old formula or supply fallback values |
+| High-realm player trains a lower-realm technique while the current bar is full | Keep the session active until the selected techniques master or their own group barrier applies |
 | Mutation while ordinary/breakthrough session is open | Conflict |
 | Concurrent session creation wins after the service precheck | Translate the repository race to the same stable conflict; never leak a raw constraint/runtime error |
 | Same idempotency key, same request | Return frozen response |
@@ -307,15 +360,26 @@ Mutation APIs require `Idempotency-Key: <UUID>`. Session kinds are
 
 * Good: item consumption, session creation, technique ledger changes, realized
   aggregate, realm entry changes, and frozen response share one UoW transaction.
+* Good: recompute cumulative yield and water-fill allocation, then persist only
+  positive deltas for this settlement.
 * Base: HMAC breakthrough debits are persisted before settlement and replayed,
   never rerolled.
+* Bad: multiply technique capacity or layer costs by the player's realm weight.
+* Bad: round yield and call `allocate_equal()` independently for every partial
+  settlement; integer remainders make split results diverge.
 * Bad: store player cultivation independently from technique investment.
 * Bad: reactivate an invalidated realm entry or reset unrefined reserve on loss.
 
 ### 6. Tests Required
 
 * Fresh migration metadata matches ORM with all named constraints/indexes.
-* Partial seclusion settlements equal one combined settlement.
+* Formula tests lock 9/10/25-second boundaries, same-realm `1x`, foundation-to-qi
+  `2x`, nascent-to-foundation `5x`, nascent-to-core `2x`, and area speed.
+* Service tests compare one combined settlement with multiple partial
+  settlements for every selected technique and for non-integral yield such as
+  `15000` basis points.
+* Start tests assert one/five selections freeze the same total speed, mixed
+  group/capacity selections fail, and the complete frozen JSON shape persists.
 * Ledger sum equals active technique balances and realized aggregate.
 * Regression crosses major realms and re-entry uses a new parent/generation.
 * Breakthrough start/settle replays across a new app/service instance.
@@ -343,6 +407,29 @@ await cultivation.consume_unrefined(...)  # ordinary seclusion only
 
 Realized progress changes only with retained technique investment, while the
 unrefined reserve keeps its independent mutation boundary.
+
+#### Wrong
+
+```python
+retained = incremental_consumed * yield_basis_points // 10_000
+allocations = allocate_equal(retained, current_remaining)
+```
+
+#### Correct
+
+```python
+required = ceil(cumulative_retained_cap * 10_000 / yield_basis_points)
+target_cumulative_consumed = min(total_available_reserve, required)
+target_retained = min(
+    target_cumulative_consumed * yield_basis_points // 10_000,
+    cumulative_retained_cap,
+)
+target_allocations = allocate_equal(target_retained, frozen_initial_remaining)
+changes = target_allocations - allocations_already_written_by_this_session
+```
+
+The cumulative target preserves integer remainders and deterministic UUID
+tie-breaking across retries, offline catch-up, and partial settlement.
 
 ## Scenario: Quest Objective Progress and Item Delivery Persistence
 

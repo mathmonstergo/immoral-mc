@@ -1389,8 +1389,11 @@ Administrative commands remain under `immortalmc.command`.
   The submitted ID must exist in the Game Service area catalog; Paper never
   submits speed/yield values.
 * A seclusion settlement response with `status=active` is a partial
-  authoritative settlement. Paper refreshes the HUD and schedules another
-  settlement; only `completed` is presented as closed.
+  authoritative settlement. Ordinary seclusion waits exactly 200 ticks after
+  start and after each active response, refreshes the HUD, and schedules another
+  settlement without repeating a chat message; only `completed` is presented
+  as closed. Breakthrough scheduling continues to use its authoritative
+  `completes_at` independently.
 
 ### 4. Validation & Error Matrix
 
@@ -1402,7 +1405,7 @@ Administrative commands remain under `immortalmc.command`.
 | Old-life response arrives late | Drop it |
 | BetterHud is absent or reload fails | Warn and keep gameplay active |
 | Reserve cap is zero | Render ratio without divide-by-zero or NaN |
-| GUI submits mixed major realms | Paper blocks preflight; Game Service still rejects manipulated requests |
+| GUI submits mixed group codes, capacities, or major realms | Paper blocks preflight; Game Service still rejects manipulated requests |
 | Duplicate/unknown/ineligible technique or unknown area | Structured `cultivation.seclusion_rule_violation` conflict; no session |
 | Existing session or reused key with different request | Structured `cultivation.seclusion_conflict`; no second mutation |
 | Unknown, wrong-life, or wrong-kind seclusion session | Structured `cultivation.seclusion_not_found` |
@@ -1431,8 +1434,9 @@ Administrative commands remain under `immortalmc.command`.
   and snake-case/camel-case mapping.
 * Command/resource tests assert public cultivation permission, retained admin
   permission, and a default area ID present in the Game Service catalog.
-* Settlement tests assert tick rounding never fires before `completes_at` and
-  `active` causes another scheduled attempt.
+* Settlement tests assert ordinary start/active paths use 200 ticks, active is
+  chat-silent, breakthrough time rounding is unchanged, and Game Service locks
+  `completes_at = started_at + 10 seconds`.
 * API tests assert all expected seclusion/breakthrough rule, conflict,
   not-found, and item-shortage paths return stable error envelopes rather than
   HTTP 500.
