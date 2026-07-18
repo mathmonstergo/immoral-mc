@@ -675,3 +675,37 @@ Implemented authoritative typed quest objectives, atomic item delivery and kill 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 20: Technique zero-layer curve and ten-second seclusion
+
+**Date**: 2026-07-19
+**Task**: Technique zero-layer curve and ten-second seclusion
+**Branch**: `feat/cultivation-progression`
+
+### Summary
+
+Added a complete layer 0-13 technique curve, ten-second cumulative seclusion settlement, major-realm speed weights, Paper polling updates, Chinese Wiki documentation, and disposable-development database rules; verified Python, PostgreSQL migrations, Paper build, Wiki, installed jar, and local services.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0cd1059` | (see git log) |
+| `4687864` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
