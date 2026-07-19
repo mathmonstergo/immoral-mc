@@ -5,11 +5,11 @@ BetterHud 是可选的展示集成。HUD 缺失或加载失败绝不会改变 Ga
 ## 运行要求
 
 - BetterHud `2.0.0`
-- 本地 BetterHud 运行环境使用 Java `25`
+- ImmortalMC 构建和本地 Paper 运行均只支持 Java `25`
 - 客户端接受并下载生成的资源包
 
-ImmortalMC 本身使用 Java 21 编译。由于 BetterHud `2.0.0` 使用 class-file 版本 69，
-本地 Paper 启动器会优先使用 Java 25。
+ImmortalMC 和 BetterHud `2.0.0` 都以 Java 25 为本地基线。Paper 启动器会校验真实
+Java 主版本必须为 25，不提供 Java 21 回退。
 
 ## 托管的 HUD 资源
 
@@ -64,7 +64,13 @@ immortal_reserve_ratio
 ImmortalMC 会安装 HUD 源文件并请求 BetterHud 重新加载。它不会配置公开资源包 URL，
 也不会强制客户端下载。当前本地 BetterHud 配置已禁用自托管。
 
-可通过以下方式建立简单的 WSL 测试主机：
+日常一键启动会在 `immortal-resource-pack` tmux 会话中托管现有 `build.zip`：
+
+```bash
+./scripts/start-local-server.sh
+```
+
+需要单独排查资源包服务时，也可手动建立简单的 WSL 测试主机：
 
 ```bash
 cd minecraft-nodes/main-server/plugins/BetterHud

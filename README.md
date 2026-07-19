@@ -5,6 +5,17 @@ FastAPI Game Service 组成。Paper、Citizens、MythicMobs 与 BetterHud 负责
 Minecraft 侧的交互和展示；使用 PostgreSQL 的 Game Service 负责玩家、任务、
 战斗、物品和修炼状态。
 
+## 日常启动
+
+完成首次配置、数据库迁移和插件安装后，在仓库根目录执行：
+
+```bash
+./scripts/start-local-server.sh
+```
+
+该命令启动 PostgreSQL、Game Service、BetterHud 资源包服务和 Paper。首次准备与
+分项排错命令见[快速开始](docs/wiki/getting-started.md)。
+
 ## 中文文档
 
 请从 [ImmortalMC 中文 Wiki](docs/wiki/index.md) 开始。Wiki 包含安装、命令、权限、

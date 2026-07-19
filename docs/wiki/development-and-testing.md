@@ -44,6 +44,7 @@ PostgreSQL 集成测试使用 Docker/Testcontainers。禁用 Ryuk 是本地约�
 ## Paper 检查
 
 ```bash
+export JAVA_HOME="$HOME/.local/share/jdks/temurin-25"
 cd minecraft-nodes/main-plugin
 ./gradlew --no-daemon --max-workers=1 test
 ./gradlew --no-daemon --max-workers=1 build

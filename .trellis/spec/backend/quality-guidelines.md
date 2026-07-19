@@ -191,9 +191,10 @@ Adapter.
 
 * Test-server boot must prove Citizens, MythicMobs, and ImmortalMC enable
   without severe errors on the pinned Paper and Java versions.
-* The local pinned BetterHud `2.0.0` artifact requires a Java 25 runtime
-  (class-file version 69); `scripts/start-paper-server.sh` must prefer Java 25
-  or the server will disable BetterHud before ImmortalMC starts.
+* ImmortalMC and the local pinned BetterHud `2.0.0` artifact require Java 25
+  (class-file version 69). The Gradle toolchain and Paper runtime must both be
+  Java 25; `scripts/start-paper-server.sh` validates the actual major version
+  and must never fall back to Java 21.
 * Citizens integration must test that an NPC binding survives a server restart
   and resolves after the backing Bukkit entity is recreated.
 * MythicMobs integration must test that reported combat/kill facts cannot inject
@@ -1600,3 +1601,103 @@ lock all sorted stacks -> validate every balance -> consume all -> complete
 
 The authoritative transaction, not the Paper projection, decides whether the
 quest can complete.
+
+## Scenario: Unified Local Development Startup
+
+### 1. Scope / Trigger
+
+Trigger: a developer needs to start the complete local test chain from the
+repository root after the one-time environment/database/plugin preparation.
+This is a development orchestrator, not a production process manager.
+
+### 2. Signatures
+
+The public entry point is:
+
+```bash
+./scripts/start-local-server.sh
+```
+
+It owns these fixed local endpoints and tmux sessions:
+
+| Component | Endpoint | Session |
+|---|---|---|
+| PostgreSQL | `127.0.0.1:5432` | Docker Compose `postgres` |
+| Game Service | `http://127.0.0.1:8000` | `immortal-game-service` |
+| Resource pack | `http://127.0.0.1:8164/build.zip` | `immortal-resource-pack` |
+| Paper | `127.0.0.1:25549` | `immortal-paper` |
+
+The independent scripts remain available for diagnosis:
+`scripts/start-game-service.sh` and `scripts/start-paper-server.sh`.
+
+### 3. Contracts
+
+* The launcher requires `docker`, `tmux`, `curl`, `python3`,
+  `game-service/.env`, `game-service/.venv/bin/python`, the existing Paper
+  `server.properties`, the pinned Paper JAR, and BetterHud `build.zip` before
+  starting any component.
+* Startup order is PostgreSQL healthy -> Game Service `/ready` -> resource
+  pack `build.zip` HTTP success -> Paper TCP port open.
+* Existing exact-name sessions are reused and never killed or duplicated.
+* `start-game-service.sh` only executes the prepared virtual environment and
+  Uvicorn; it does not install dependencies or run Alembic.
+* `start-paper-server.sh` only executes the prepared server; it fails when
+  `server.properties` is absent instead of copying runtime configuration.
+* The launcher only serves the existing resource-pack file with Python's
+  standard `http.server`; it does not build the pack, calculate SHA-1, or edit
+  `server.properties`.
+* ImmortalMC's Gradle toolchain and Paper runtime require Java 25 (class-file
+  major version 69). Paper startup validates the actual major version and has
+  no Java 21 fallback. Mockito `5.23.0` / Byte Buddy `1.17.7` are the supported
+  Java 25 test stack.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Missing `.env`, prepared `.venv`, `server.properties`, Paper JAR, or `build.zip` | Fail before starting services with the missing path and setup instruction |
+| PostgreSQL Compose or health check fails | Return non-zero; do not claim the server started |
+| Game Service `/ready` times out or its session exits | Show the tmux output and do not start Paper |
+| Resource pack URL is unavailable or its session exits | Return non-zero and identify port `8164`; do not start Paper |
+| Exact tmux session already exists | Reuse it and continue readiness checks |
+| Port is occupied by an unmanaged Game Service/resource server/Paper process | Fail visibly rather than attach to or kill the unknown process |
+| Java major version is not 25 | Paper script exits before launching the JAR |
+| Startup is run twice | No second process/session is created and no existing process is stopped |
+
+### 5. Good/Base/Bad Cases
+
+* Good: one command starts/reuses PostgreSQL, Game Service, resource pack, and
+  Paper; the operator attaches to the three named sessions for logs.
+* Base: database migration, Gradle build, JAR copy, and resource-pack content
+  generation happen as explicit first-time/update commands before startup.
+* Bad: make daily startup run `alembic upgrade head`, `gradlew build`, `pip
+  install`, copy `server.properties`, or silently fall back to Java 21.
+
+### 6. Tests Required
+
+* Shell syntax checks cover all startup scripts; a cold local run asserts the
+  four endpoints/processes and the exact three tmux sessions.
+* A second run asserts session reuse and no duplicate listeners.
+* Failure checks cover missing prerequisites, Game Service readiness timeout,
+  resource-pack HTTP failure, Paper early exit, and Java 21 rejection.
+* Static review asserts the launcher contains no Alembic, Gradle, dependency
+  installation, configuration-copy, or resource-pack-build command.
+* Wiki link/Chinese-heading validation and Java 25 Gradle `test build` must pass;
+  the Mockito/Byte Buddy versions must support class-file major 69.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+one-click start -> migrate database -> build/copy plugin -> rewrite server.properties -> start Paper
+```
+
+#### Correct
+
+```text
+prepared files/config -> docker postgres -> Game Service -> existing build.zip HTTP -> Paper
+```
+
+Daily startup is orchestration only; initialization and content changes remain
+explicit operator actions.

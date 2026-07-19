@@ -12,7 +12,7 @@ Thin Paper adapter plugin for the ImmortalMC Game Service.
 ## Target
 
 - Minecraft / Paper: `1.21.11`
-- Java: `21`
+- Java: `25`
 - Build tool: Gradle Kotlin DSL, wrapper pinned to `9.6.1`
 - Plugin descriptor: `src/main/resources/plugin.yml`
 
@@ -137,13 +137,15 @@ next authoritative settlement instead of reporting false completion.
 3. Run checks:
 
    ```bash
+   export JAVA_HOME="$HOME/.local/share/jdks/temurin-25"
    ./gradlew --no-daemon --max-workers=1 test
    ./gradlew --no-daemon --max-workers=1 build
    ```
 
-   The first `./gradlew` run downloads Gradle. If WSL networking times out
-   while downloading, install/use a local Gradle `9.6.1` and run the same
-   tasks with `gradle --no-daemon --max-workers=1 test build`.
+   `JAVA_HOME` must point to a Java 25 installation. The first `./gradlew` run
+   downloads Gradle. If WSL networking times out while downloading, install/use
+   a local Gradle `9.6.1` and run the same tasks with
+   `gradle --no-daemon --max-workers=1 test build` under Java 25.
 
 4. Start the FastAPI Game Service.
 5. Put `build/libs/immortal-main-plugin-0.1.0-SNAPSHOT.jar` in a Paper

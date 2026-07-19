@@ -38,10 +38,10 @@ cd ..
 ./scripts/start-game-service.sh
 ```
 
-`start-game-service.sh` installs the editable dev environment when needed,
-requires `DATABASE_URL`, and starts `immortal_mmo.entrypoint:app`. It never
-runs migrations automatically. Run the migration commands explicitly after
-starting a new database or applying a migration.
+`start-game-service.sh` requires the prepared `.venv` and `DATABASE_URL`, then
+starts `immortal_mmo.entrypoint:app`. It does not install dependencies or run
+migrations. Run the setup and migration commands explicitly after creating a
+new database or applying a migration.
 
 Open the API documentation at <http://127.0.0.1:8000/docs>.
 

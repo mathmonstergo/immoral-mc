@@ -26,7 +26,7 @@
 | 组件 | 当前目标 |
 |---|---|
 | Minecraft / Paper | `1.21.11`，本地 Paper 构建号 `132` |
-| ImmortalMC 编译目标 | Java `21` |
+| ImmortalMC 编译与 Paper 运行目标 | Java `25` |
 | BetterHud `2.0.0` 本地运行环境 | Java `25` |
 | Game Service | Python `3.12`、FastAPI |
 | 数据库 | PostgreSQL `17` |

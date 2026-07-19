@@ -1,12 +1,23 @@
 # 运维与故障排查
 
-## 启动顺序
+## 日常启动
 
-1. 确认 PostgreSQL 状态健康。
-2. 将 Alembic 数据库结构升级到代码的最新修订版本。
-3. 确认 Game Service 已就绪。
-4. 使用重新构建的 ImmortalMC jar 和所需的可选集成启动 Paper。
-5. 测试 BetterHud 显示效果时，再启动资源包托管服务。
+完成首次准备后，在仓库根目录执行：
+
+```bash
+./scripts/start-local-server.sh
+```
+
+该命令启动 PostgreSQL、Game Service、现有 BetterHud 资源包的 HTTP 服务和 Paper。
+它不执行数据库迁移、插件/资源包构建或配置改写。
+
+脚本启动失败时，按以下顺序检查：
+
+1. PostgreSQL 是否健康；
+2. Alembic 数据库结构是否已经由独立迁移步骤升级到最新修订；
+3. Game Service 是否通过 `/ready`；
+4. Paper JAR 和已安装插件是否存在；
+5. `immortal-resource-pack` 会话和 `http://127.0.0.1:8164/build.zip` 是否可用。
 
 相关命令见[快速开始](getting-started.md)。
 
