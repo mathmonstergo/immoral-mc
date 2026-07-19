@@ -6,7 +6,7 @@ group = "com.immortalmc"
 version = "0.1.0-SNAPSHOT"
 
 java {
-    toolchain.languageVersion.set(JavaLanguageVersion.of(21))
+    toolchain.languageVersion.set(JavaLanguageVersion.of(25))
 }
 
 dependencies {
@@ -28,7 +28,7 @@ dependencies {
     }
     testImplementation("org.xerial:sqlite-jdbc:3.53.2.0")
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
-    testImplementation("org.mockito:mockito-core:5.15.2")
+    testImplementation("org.mockito:mockito-core:5.23.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.4")
 }
 

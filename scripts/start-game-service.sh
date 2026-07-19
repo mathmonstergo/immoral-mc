@@ -12,8 +12,8 @@ if [[ -z "${DATABASE_URL:-}" ]]; then
 fi
 
 if [ ! -x ".venv/bin/python" ]; then
-  python3 -m venv .venv
+  echo "game-service/.venv is missing; complete the Wiki first-time setup before starting" >&2
+  exit 1
 fi
 
-.venv/bin/python -m pip install -e '.[dev]'
 exec .venv/bin/python -m uvicorn immortal_mmo.entrypoint:app --host 127.0.0.1 --port 8000
