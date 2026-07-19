@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 21
-- **Last Active**: 2026-07-19
+- **Total Sessions**: 22
+- **Last Active**: 2026-07-20
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~745 | Active |
+| `journal-1.md` | ~778 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 22 | 2026-07-20 | Physical rewards and regional storage | `e3f1e25` | `feat/cultivation-progression` |
 | 21 | 2026-07-19 | Unified local startup and Java 25 baseline | `254cbc6`, `85d1736` | `feat/cultivation-progression` |
 | 20 | 2026-07-19 | Technique zero-layer curve and ten-second seclusion | `0cd1059`, `4687864` | `feat/cultivation-progression` |
 | 19 | 2026-07-18 | Typed multi-objective quests and Chinese Wiki | `f979064`, `13bd5dc`, `baffa30`, `8395035`, `ca32eab` | `feat/cultivation-progression` |

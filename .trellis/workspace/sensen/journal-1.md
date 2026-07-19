@@ -743,3 +743,36 @@ Added the one-command local startup orchestrator for PostgreSQL, Game Service, B
 ### Next Steps
 
 - None - task complete
+
+
+## Session 22: Physical rewards and regional storage
+
+**Date**: 2026-07-20
+**Task**: Physical rewards and regional storage
+**Branch**: `feat/cultivation-progression`
+
+### Summary
+
+Implemented strict quest reward and turn-in contracts, generic physical item instances, layer-zero technique manuals, authoritative reconciliation, current-life regional paged storage with revisioned idempotent moves and swaps, Java 25 Paper integration, PostgreSQL concurrency coverage, and synchronized Simplified Chinese Wiki documentation. Validation passed: 343 Python unit tests, Ruff, compileall, Alembic head, Wiki links, Java 25 main/test compilation, and 240 runnable Java tests; Docker and 19 local-socket tests were blocked only by sandbox socket policy.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e3f1e25` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
