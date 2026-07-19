@@ -111,7 +111,13 @@ public final class QuestRequestCoordinator implements QuestInteractionService {
             String providerId,
             UUID operationId) {
         MutationIdentity identity = new MutationIdentity(
-                MutationCommand.ACCEPT, accountId, expectedLifeId, questId, providerId, operationId);
+                MutationCommand.ACCEPT,
+                accountId,
+                expectedLifeId,
+                questId,
+                providerId,
+                operationId,
+                List.of());
         return mutate(playerId, identity, () -> gateway.acceptQuest(accountId, questId, providerId, operationId));
     }
 
@@ -122,10 +128,22 @@ public final class QuestRequestCoordinator implements QuestInteractionService {
             UUID expectedLifeId,
             String questId,
             String providerId,
-            UUID operationId) {
+            UUID operationId,
+            List<UUID> inventoryItemInstanceIds) {
+        List<UUID> itemInstanceIds = List.copyOf(
+                Objects.requireNonNull(inventoryItemInstanceIds, "inventoryItemInstanceIds"));
         MutationIdentity identity = new MutationIdentity(
-                MutationCommand.TURN_IN, accountId, expectedLifeId, questId, providerId, operationId);
-        return mutate(playerId, identity, () -> gateway.turnInQuest(accountId, questId, providerId, operationId));
+                MutationCommand.TURN_IN,
+                accountId,
+                expectedLifeId,
+                questId,
+                providerId,
+                operationId,
+                itemInstanceIds);
+        return mutate(
+                playerId,
+                identity,
+                () -> gateway.turnInQuest(accountId, questId, providerId, operationId, itemInstanceIds));
     }
 
     public void clearPlayer(UUID playerId) {
@@ -371,7 +389,11 @@ public final class QuestRequestCoordinator implements QuestInteractionService {
                 UUID accountId, String questId, String providerId, UUID operationId);
 
         CompletableFuture<QuestMutationResult> turnInQuest(
-                UUID accountId, String questId, String providerId, UUID operationId);
+                UUID accountId,
+                String questId,
+                String providerId,
+                UUID operationId,
+                List<UUID> inventoryItemInstanceIds);
     }
 
     @FunctionalInterface
@@ -457,7 +479,8 @@ public final class QuestRequestCoordinator implements QuestInteractionService {
             UUID expectedLifeId,
             String questId,
             String providerId,
-            UUID operationId) {
+            UUID operationId,
+            List<UUID> inventoryItemInstanceIds) {
         private MutationIdentity {
             Objects.requireNonNull(command, "command");
             Objects.requireNonNull(accountId, "accountId");
@@ -465,6 +488,8 @@ public final class QuestRequestCoordinator implements QuestInteractionService {
             Objects.requireNonNull(questId, "questId");
             Objects.requireNonNull(providerId, "providerId");
             Objects.requireNonNull(operationId, "operationId");
+            inventoryItemInstanceIds = List.copyOf(
+                    Objects.requireNonNull(inventoryItemInstanceIds, "inventoryItemInstanceIds"));
         }
     }
 
@@ -491,8 +516,17 @@ public final class QuestRequestCoordinator implements QuestInteractionService {
 
         @Override
         public CompletableFuture<QuestMutationResult> turnInQuest(
-                UUID accountId, String questId, String providerId, UUID operationId) {
-            return client.turnInQuest(accountId, questId, providerId, operationId);
+                UUID accountId,
+                String questId,
+                String providerId,
+                UUID operationId,
+                List<UUID> inventoryItemInstanceIds) {
+            return client.turnInQuest(
+                    accountId,
+                    questId,
+                    providerId,
+                    operationId,
+                    inventoryItemInstanceIds);
         }
     }
 }

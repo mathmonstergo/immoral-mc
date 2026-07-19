@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from immortal_mmo.cultivation.db_models import CultivationSessionRow
 from immortal_mmo.item.db_models import ItemResourceEntryRow, LifeItemStackRow
 from immortal_mmo.item.models import (
     InsufficientItemQuantity,
@@ -26,6 +27,40 @@ async def create_life(sessions: async_sessionmaker[AsyncSession]) -> UUID:
         life = await players.insert_first_life(account.account_id)
         await session.commit()
         return life.life_id
+
+
+async def create_breakthrough_session(
+    sessions: async_sessionmaker[AsyncSession],
+    life_id: UUID,
+    occurred_at: datetime,
+) -> UUID:
+    session_id = uuid4()
+    async with sessions() as session:
+        session.add(
+            CultivationSessionRow(
+                session_id=session_id,
+                life_id=life_id,
+                session_kind="breakthrough",
+                status="completed",
+                idempotency_key=uuid4(),
+                request_fingerprint="0" * 64,
+                area_id=None,
+                content_version="test",
+                source_level=13,
+                target_level=14,
+                frozen_snapshot={},
+                cumulative_elapsed_seconds=0,
+                cumulative_generated=0,
+                cumulative_reserve_consumed=0,
+                cumulative_retained=0,
+                started_at=occurred_at,
+                completes_at=occurred_at,
+                settled_at=occurred_at,
+                revision=1,
+            )
+        )
+        await session.commit()
+    return session_id
 
 
 async def hold_adjustment_until_released(
@@ -81,6 +116,11 @@ async def test_item_adjustment_and_consumption_are_audited_and_replayable(
     del clean_postgres_data
     life_id = await create_life(postgres_sessions)
     granted_at = datetime(2026, 7, 16, 8, tzinfo=UTC)
+    session_id = await create_breakthrough_session(
+        postgres_sessions,
+        life_id,
+        granted_at,
+    )
     grant_operation = uuid4()
     consume_operation = uuid4()
 
@@ -98,8 +138,8 @@ async def test_item_adjustment_and_consumption_are_audited_and_replayable(
             item_code="foundation_pill",
             quantity=1,
             operation_id=consume_operation,
-            entry_type=ItemConsumptionType.QUEST_DELIVERY,
-            session_id=None,
+            entry_type=ItemConsumptionType.BREAKTHROUGH,
+            session_id=session_id,
             occurred_at=granted_at,
         )
         replay = await repository.consume(
@@ -107,8 +147,8 @@ async def test_item_adjustment_and_consumption_are_audited_and_replayable(
             item_code="foundation_pill",
             quantity=1,
             operation_id=consume_operation,
-            entry_type=ItemConsumptionType.QUEST_DELIVERY,
-            session_id=None,
+            entry_type=ItemConsumptionType.BREAKTHROUGH,
+            session_id=session_id,
             occurred_at=granted_at,
         )
         await session.commit()
@@ -126,6 +166,11 @@ async def test_consume_item_stack_rejects_insufficient_quantity(
     del clean_postgres_data
     life_id = await create_life(postgres_sessions)
     occurred_at = datetime(2026, 7, 16, 8, tzinfo=UTC)
+    session_id = await create_breakthrough_session(
+        postgres_sessions,
+        life_id,
+        occurred_at,
+    )
 
     async with postgres_sessions() as session:
         repository = PostgresItemRepository(session)
@@ -142,8 +187,8 @@ async def test_consume_item_stack_rejects_insufficient_quantity(
                 item_code="foundation_pill",
                 quantity=3,
                 operation_id=uuid4(),
-                entry_type=ItemConsumptionType.QUEST_DELIVERY,
-                session_id=None,
+                entry_type=ItemConsumptionType.BREAKTHROUGH,
+                session_id=session_id,
                 occurred_at=occurred_at,
             )
         await session.rollback()
@@ -157,6 +202,11 @@ async def test_item_operation_replay_rejects_different_immutable_facts(
     del clean_postgres_data
     life_id = await create_life(postgres_sessions)
     occurred_at = datetime(2026, 7, 16, 8, tzinfo=UTC)
+    session_id = await create_breakthrough_session(
+        postgres_sessions,
+        life_id,
+        occurred_at,
+    )
     operation_id = uuid4()
 
     async with postgres_sessions() as session:
@@ -174,8 +224,8 @@ async def test_item_operation_replay_rejects_different_immutable_facts(
                 item_code="foundation_pill",
                 quantity=1,
                 operation_id=operation_id,
-                entry_type=ItemConsumptionType.QUEST_DELIVERY,
-                session_id=None,
+                entry_type=ItemConsumptionType.BREAKTHROUGH,
+                session_id=session_id,
                 occurred_at=occurred_at,
             )
         await session.commit()
@@ -273,7 +323,7 @@ async def test_concurrent_adjustment_across_lives_returns_stable_operation_confl
 
 
 @pytest.mark.asyncio
-async def test_concurrent_adjustment_conflicts_with_atomic_multi_item_delivery(
+async def test_concurrent_adjustment_conflicts_with_atomic_multi_item_consumption(
     postgres_sessions: async_sessionmaker[AsyncSession],
     clean_postgres_data: None,
 ) -> None:
@@ -282,6 +332,11 @@ async def test_concurrent_adjustment_conflicts_with_atomic_multi_item_delivery(
     delivery_life_id = await create_life(postgres_sessions)
     operation_id = uuid4()
     occurred_at = datetime(2026, 7, 18, 8, tzinfo=UTC)
+    session_id = await create_breakthrough_session(
+        postgres_sessions,
+        delivery_life_id,
+        occurred_at,
+    )
     async with postgres_sessions() as session:
         repository = PostgresItemRepository(session)
         for item_code in ("item_alpha", "item_beta"):
@@ -322,16 +377,16 @@ async def test_concurrent_adjustment_conflicts_with_atomic_multi_item_delivery(
                         item_code="item_beta",
                         quantity=1,
                         operation_id=operation_id,
-                        entry_type=ItemConsumptionType.QUEST_DELIVERY,
-                        session_id=None,
+                        entry_type=ItemConsumptionType.BREAKTHROUGH,
+                        session_id=session_id,
                         occurred_at=occurred_at,
                     ),
                     ItemConsumptionRequest(
                         item_code="item_alpha",
                         quantity=1,
                         operation_id=operation_id,
-                        entry_type=ItemConsumptionType.QUEST_DELIVERY,
-                        session_id=None,
+                        entry_type=ItemConsumptionType.BREAKTHROUGH,
+                        session_id=session_id,
                         occurred_at=occurred_at,
                     ),
                 ),
@@ -364,7 +419,7 @@ async def test_concurrent_adjustment_conflicts_with_atomic_multi_item_delivery(
             await session.scalars(
                 select(ItemResourceEntryRow).where(
                     ItemResourceEntryRow.operation_id == operation_id,
-                    ItemResourceEntryRow.entry_type == "quest_delivery",
+                    ItemResourceEntryRow.entry_type == "breakthrough_consumption",
                 )
             )
         ).all()

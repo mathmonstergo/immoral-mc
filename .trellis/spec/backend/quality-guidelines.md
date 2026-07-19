@@ -1518,18 +1518,14 @@ both paths publish only on the Paper main thread.
   per-life quest revision before reading accepted state, so an accept/kill race
   cannot commit the combat event while dropping its objective increment.
 * Cultivation writes `invested_amount` and `current_layer` together through
-  the shared layer curve. Migration `20260718_003` backfills existing rows
-  before services trust direct layer reads.
-* Turn-in acquires sorted transaction advisory locks for item operation keys,
-  then locks all distinct delivery stacks in sorted item-code order, validates
-  every replay identity and balance, consumes all items, and completes the
-  quest in one transaction. Reusing an item operation UUID with different life,
-  quantity, type, or session is a conflict; it must never leak an
-  `IntegrityError`, look like a replay, or leave an earlier item partially debited.
-  The completion update must affect exactly one active row after the debit; an
+  the shared layer curve; direct layer reads are valid only because every
+  mutation maintains both values in the same transaction.
+* Turn-in carries the unique physical item-instance IDs scanned from the Paper
+  inventory. Game Service locks and validates current-life ownership,
+  `status=owned`, `location=inventory`, and exact item codes before consuming
+  every required instance and completing the quest in one transaction. The
+  completion update must affect exactly one active row after consumption; an
   impossible false result aborts the Unit of Work.
-* Migration `20260718_003` uses a frozen copy of the authored cultivation curve
-  for legacy layer backfill so later balance changes cannot rewrite history.
 * The response keeps `current/required/completed` unchanged for all objective
   types. `revision.objectives` advances with cultivation and item-stack
   dependencies; Paper rejects component-wise older vectors.
@@ -1548,9 +1544,8 @@ both paths publish only on the Paper main thread.
 | Kill before acceptance, wrong mob, wrong life, or duplicate event | No quest counter increment |
 | Missing `source_life_id` on a rewardable kill | `current_life_unavailable`; no counter or reward |
 | Active technique abandoned or technique/realm regresses | Projection returns `active` again |
-| Any delivery stack is short | `quest.not_ready`; no item debit or completion |
-| Item operation UUID reused with different immutable facts | `quest.idempotency_conflict` (or cultivation conflict); no mutation |
-| Concurrent operation UUID collision | Advisory-lock loser reloads the winner and returns a stable replay/conflict |
+| Any physical delivery instance is missing/invalid or a required type is short | `quest.not_ready`; no item consumption or completion |
+| Quest operation UUID reused with different physical inventory IDs | `quest.idempotency_conflict`; no mutation |
 | Older asynchronous account/life/revision response | Drop it without rendering |
 | Player quits and rejoins the same life before an old response completes | Non-reusable token drops the old completion |
 | More than twelve objectives | Catalog validation rejects the quest |
@@ -1570,9 +1565,8 @@ both paths publish only on the Paper main thread.
 * Definition tests assert each type's boundaries, duplicate targets, and the
   twelve-objective catalog limit.
 * PostgreSQL tests assert acceptance timestamps, bounded batch counter updates,
-  duplicate kill idempotency, atomic multi-item shortage, cross-domain item
-  UUID conflicts (including a later-item conflict), migration metadata and
-  legacy backfill, missing-source-life rejection, and current-layer gain/loss
+  duplicate kill idempotency, atomic physical-instance shortage, migration
+  metadata, missing-source-life rejection, and current-layer gain/loss
   persistence.
 * Concurrency tests hold acceptance and item-operation locks open, assert the
   competing transaction actually waits, then prove exact progress and stable
@@ -1701,3 +1695,96 @@ prepared files/config -> docker postgres -> Game Service -> existing build.zip H
 
 Daily startup is orchestration only; initialization and content changes remain
 explicit operator actions.
+
+## Scenario: Physical Rewards, Manuals, and Regional Storage Projection
+
+### 1. Scope / Trigger
+
+Trigger: Paper presents or submits quest rewards, physical inventory IDs,
+technique manuals, or regional storage pages owned by Game Service.
+
+### 2. Signatures
+
+```http
+PUT  /api/v1/players/{account_id}/current-life/quests/{quest_id}/turn-in
+GET  /api/v1/players/{account_id}/current-life/items/pending-deliveries
+GET  /api/v1/players/{account_id}/current-life/items/inventory
+PUT  /api/v1/players/{account_id}/current-life/items/{item_instance_id}/delivery-confirmation
+POST /api/v1/players/{account_id}/current-life/cultivation/techniques/learn
+GET  /api/v1/players/{account_id}/current-life/storage/{area_id}?page=<n>
+POST /api/v1/players/{account_id}/current-life/storage/{area_id}/moves
+```
+
+Paper entry points are right-clicking a physical manual and
+`/immortal storage` under `immortalmc.storage`.
+
+### 3. Contracts
+
+* Turn-in and storage requests submit identity and intent, never trusted item
+  state. Turn-in explicitly includes `inventory_item_instance_ids`, including
+  an empty list for quests without item objectives.
+* Accept and turn-in use separate strict request schemas; removed or extra
+  fields fail validation instead of being ignored or defaulted.
+* Paper feature code depends on narrow gateways and inventory/scheduler ports,
+  not directly on a concrete HTTP client or hidden compatibility constructor.
+* Reconciliation removes unexpected/duplicate physical items, restores missing
+  authoritative inventory items, and confirms pending delivery only after the
+  Bukkit inventory accepts the instance.
+* Manual learning derives a stable operation UUID from `item_instance_id`,
+  coalesces concurrent clicks, and reconciles after success, failure, or an
+  invalid response. A success must still match the current account/life.
+* Storage GUI cancels Bukkit movement, projects only confirmed snapshots, and
+  revalidates life, area, and permission before every page read or mutation.
+  Area/world/permission loss closes the GUI.
+* Successful quest turn-in publishes the quest state, reconciles physical
+  inventory, and refreshes cultivation so fixed cultivation rewards reach HUD.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Missing response reward/consumed-ID lists | Adapter rejects the DTO; no default empty compatibility value |
+| Duplicate or invalid physical PDC identity | Cancel use/turn-in and trigger reconciliation |
+| Manual response operation/item ID differs | Treat as invalid response; no success presentation |
+| Storage response contains inventory/consumed item or slot beyond capacity | Reject DTO and refresh/fail closed |
+| Storage timeout, stale revision, or mismatched operation ID | Reconcile items and refetch authoritative page |
+| Player leaves area or changes life while request is in flight | Drop/close the stale presentation |
+| Player inventory is full during withdrawal | Do not submit the withdrawal |
+
+### 5. Good/Base/Bad Cases
+
+* Good: one quest completion creates a manual and cultivation reward, Paper
+  delivers/reconciles the manual, HUD refreshes, and the manual survives a
+  storage round trip before learning at layer zero.
+* Base: a storage move response is lost; the same operation UUID replays and
+  Paper renders the frozen snapshot once.
+* Bad: optional gateway dependency, “feature not ready” branch, nullable new
+  response list, trusted GUI contents, or local reward fallback.
+
+### 6. Tests Required
+
+* Python unit tests cover strict schemas, reward shapes, item delivery,
+  technique learning, storage revision/move/swap, and invariant failure.
+* PostgreSQL tests cover migrations, reward/manual lifecycle, area isolation,
+  restart persistence, and advisory-lock serialization.
+* Java 25 tests cover exact HTTP methods/bodies/headers, DTO validation,
+  reconciliation invalidation, stable manual operation ID, command permission,
+  inventory scanning, post-turn-in refresh, holder identity, and access policy.
+* Wiki validation must pass for the new item/manual and regional storage pages.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```java
+if (storageController == null) {
+    sender.sendMessage("feature not ready");
+}
+```
+
+#### Correct
+
+```java
+this.storageOpener = Objects.requireNonNull(storageOpener, "storageOpener");
+storageOpener.accept(player);
+```

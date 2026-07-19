@@ -25,6 +25,8 @@ class GameServiceClientQuestTest {
     private static final UUID ACCOUNT_ID = UUID.fromString("10000000-0000-0000-0000-000000000001");
     private static final UUID LIFE_ID = UUID.fromString("20000000-0000-0000-0000-000000000001");
     private static final UUID OPERATION_ID = UUID.fromString("30000000-0000-0000-0000-000000000001");
+    private static final UUID ITEM_INSTANCE_ID =
+            UUID.fromString("40000000-0000-0000-0000-000000000001");
 
     @Test
     void fetchQuestProviderCatalogUsesGetAndDecodesAuthoritativeTemplateOrder() throws Exception {
@@ -176,11 +178,22 @@ class GameServiceClientQuestTest {
                     QuestMutationResult result = operation.equals("accept")
                             ? client.acceptQuest(ACCOUNT_ID, "first-steps", "old-man", OPERATION_ID)
                                     .get(2, TimeUnit.SECONDS)
-                            : client.turnInQuest(ACCOUNT_ID, "first-steps", "old-man", OPERATION_ID)
+                            : client.turnInQuest(
+                                            ACCOUNT_ID,
+                                            "first-steps",
+                                            "old-man",
+                                            OPERATION_ID,
+                                            List.of(ITEM_INSTANCE_ID))
                                     .get(2, TimeUnit.SECONDS);
 
                     assertEquals("PUT", method.get());
-                    assertEquals("{\"provider_id\":\"old-man\"}", body.get());
+                    assertEquals(
+                            operation.equals("accept")
+                                    ? "{\"provider_id\":\"old-man\"}"
+                                    : "{\"provider_id\":\"old-man\",\"inventory_item_instance_ids\":[\""
+                                            + ITEM_INSTANCE_ID
+                                            + "\"]}",
+                            body.get());
                     assertEquals(OPERATION_ID.toString(), idempotencyKey.get());
                     assertEquals(OPERATION_ID, result.operationId());
                     assertTrue(result.changed());
@@ -196,7 +209,9 @@ class GameServiceClientQuestTest {
                   "operation_id":"%s",
                   "changed":true,
                   "quest":%s,
-                  "interaction_state":%s
+                  "interaction_state":%s,
+                  "rewards":[],
+                  "consumed_item_instance_ids":[]
                 }
                 """.formatted(OPERATION_ID, questJson(state, state.equals("completed") ? 1 : 0),
                 interactionJson(state, state.equals("completed") ? 1 : 0, state.equals("completed")));

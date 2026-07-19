@@ -11,7 +11,7 @@ from immortal_mmo.cultivation.models import (
     LifeTechnique,
     TechniqueInvestmentChange,
 )
-from immortal_mmo.item.models import ItemStack
+from immortal_mmo.item.models import ItemInstance, ItemInstanceStatus, ItemLocation
 from immortal_mmo.player.service import PlayerService
 from immortal_mmo.quest.definitions import QUEST_CATALOG, QuestDefinitionCatalog
 from immortal_mmo.quest.models import (
@@ -62,6 +62,33 @@ def response_body(response) -> dict:
     return json.loads(response.body)
 
 
+def grant_inventory_items(
+    factory: FakeUnitOfWorkFactory,
+    life_id: UUID,
+    item_code: str,
+    quantity: int,
+    base_id: int,
+) -> tuple[UUID, ...]:
+    identities = tuple(UUID(int=base_id + offset) for offset in range(quantity))
+    for offset, item_id in enumerate(identities):
+        factory.store._state.item_instances[item_id] = ItemInstance(
+            item_instance_id=item_id,
+            life_id=life_id,
+            item_code=item_code,
+            definition_version=1,
+            technique_id=None,
+            issuance_id=UUID(int=base_id + 10_000 + offset),
+            issuance_ordinal=0,
+            quest_reward_grant_id=None,
+            status=ItemInstanceStatus.OWNED,
+            created_at=NOW,
+            delivered_at=NOW,
+            consumed_at=None,
+            location=ItemLocation.INVENTORY,
+        )
+    return identities
+
+
 @pytest.mark.asyncio
 async def test_state_objectives_use_current_authoritative_targets() -> None:
     catalog = typed_catalog(
@@ -72,12 +99,7 @@ async def test_state_objectives_use_current_authoritative_targets() -> None:
     quests, factory, account_id, life_id = await setup_services(catalog)
     target_instance = uuid4()
     other_instance = uuid4()
-    factory.store._state.item_stacks[(life_id, "foundation_pill")] = ItemStack(
-        life_id,
-        "foundation_pill",
-        8,
-        1,
-    )
+    grant_inventory_items(factory, life_id, "foundation_pill", 8, 18_100)
     factory.store._state.life_techniques[target_instance] = LifeTechnique(
         target_instance,
         life_id,
@@ -262,18 +284,7 @@ async def test_item_delivery_validates_all_stacks_before_atomic_consumption() ->
         ItemDeliveryObjectiveDefinition("tokens", "交付令牌", "trial_token", 1),
     )
     quests, factory, account_id, life_id = await setup_services(catalog)
-    factory.store._state.item_stacks[(life_id, "foundation_pill")] = ItemStack(
-        life_id,
-        "foundation_pill",
-        2,
-        1,
-    )
-    factory.store._state.item_stacks[(life_id, "trial_token")] = ItemStack(
-        life_id,
-        "trial_token",
-        0,
-        1,
-    )
+    pill_ids = grant_inventory_items(factory, life_id, "foundation_pill", 2, 18_200)
     await quests.accept(
         account_id,
         "typed-objectives",
@@ -286,42 +297,40 @@ async def test_item_delivery_validates_all_stacks_before_atomic_consumption() ->
         "typed-objectives",
         "objective-master",
         UUID(int=18_021),
+        inventory_item_instance_ids=(),
     )
     assert rejected.status_code == 409
     assert response_body(rejected)["error"]["code"] == "quest.not_ready"
-    assert factory.store._state.item_stacks[(life_id, "foundation_pill")].quantity == 2
-    assert factory.store._state.item_entries == {}
-
-    factory.store._state.item_stacks[(life_id, "trial_token")] = ItemStack(
-        life_id,
-        "trial_token",
-        1,
-        2,
+    assert all(
+        factory.store._state.item_instances[item_id].status is ItemInstanceStatus.OWNED
+        for item_id in pill_ids
     )
+
+    token_ids = grant_inventory_items(factory, life_id, "trial_token", 1, 18_210)
     operation_id = UUID(int=18_022)
     completed = await quests.turn_in(
         account_id,
         "typed-objectives",
         "objective-master",
         operation_id,
+        inventory_item_instance_ids=pill_ids + token_ids,
     )
     replayed = await quests.turn_in(
         account_id,
         "typed-objectives",
         "objective-master",
         operation_id,
+        inventory_item_instance_ids=pill_ids + token_ids,
     )
 
     assert completed == replayed
     payload = response_body(completed)
     assert payload["quest"]["state"] == "completed"
     assert all(item["completed"] for item in payload["quest"]["objectives"])
-    assert factory.store._state.item_stacks[(life_id, "foundation_pill")].quantity == 0
-    assert factory.store._state.item_stacks[(life_id, "trial_token")].quantity == 0
-    assert len(factory.store._state.item_entries) == 2
-    assert {entry.entry_type for entry in factory.store._state.item_entries.values()} == {
-        "quest_delivery"
-    }
+    assert all(
+        factory.store._state.item_instances[item_id].status is ItemInstanceStatus.CONSUMED
+        for item_id in pill_ids + token_ids
+    )
 
 
 @pytest.mark.asyncio
@@ -334,12 +343,7 @@ async def test_mixed_objectives_require_every_type() -> None:
     )
     quests, factory, account_id, life_id = await setup_services(catalog)
     technique_instance = uuid4()
-    factory.store._state.item_stacks[(life_id, "foundation_pill")] = ItemStack(
-        life_id,
-        "foundation_pill",
-        1,
-        1,
-    )
+    grant_inventory_items(factory, life_id, "foundation_pill", 1, 18_300)
     factory.store._state.life_techniques[technique_instance] = LifeTechnique(
         technique_instance,
         life_id,

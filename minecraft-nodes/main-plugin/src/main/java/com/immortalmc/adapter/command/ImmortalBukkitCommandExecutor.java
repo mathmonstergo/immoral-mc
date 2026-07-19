@@ -4,7 +4,6 @@ import com.immortalmc.adapter.citizens.CitizensNpcResolver;
 import com.immortalmc.adapter.citizens.CitizensNpcSelector;
 import com.immortalmc.adapter.content.EntityBinding;
 import com.immortalmc.adapter.content.EntityInteractionEntity;
-import com.immortalmc.adapter.cultivation.CultivationCommandRunner;
 import com.immortalmc.adapter.targeting.EntityTargetCandidate;
 import com.immortalmc.adapter.targeting.EntityTargetSelector;
 import com.immortalmc.adapter.quest.QuestProviderCatalogCache;
@@ -14,6 +13,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 import net.kyori.adventure.text.Component;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -32,6 +32,7 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
     private static final double MAX_TARGET_DISTANCE = 8.0;
     private static final String ADMIN_PERMISSION = "immortalmc.command";
     private static final String CULTIVATION_PERMISSION = "immortalmc.cultivation";
+    private static final String STORAGE_PERMISSION = "immortalmc.storage";
     private static final EntityTargetSelector TARGET_SELECTOR = new EntityTargetSelector(MAX_TARGET_DISTANCE);
     private static final List<String> ROOT_SUBCOMMANDS = List.of(
             "health",
@@ -41,51 +42,29 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
             "quest",
             "seclusion",
             "breakthrough",
-            "cultivation");
+            "cultivation",
+            "storage");
 
     private final ImmortalCommandService commandService;
     private final CitizensNpcResolver citizensNpcResolver;
     private final CitizensNpcSelector citizensNpcSelector;
     private final QuestProviderCatalogCache questProviderCatalog;
-    private final CultivationCommandRunner cultivationCommands;
-
-    public ImmortalBukkitCommandExecutor(ImmortalCommandService commandService) {
-        this(
-                commandService,
-                CitizensNpcResolver.unavailable(),
-                CitizensNpcSelector.unavailable(),
-                new QuestProviderCatalogCache(), null);
-    }
-
-    public ImmortalBukkitCommandExecutor(
-            ImmortalCommandService commandService,
-            CitizensNpcResolver citizensNpcResolver) {
-        this(
-                commandService,
-                citizensNpcResolver,
-                CitizensNpcSelector.unavailable(),
-                new QuestProviderCatalogCache(), null);
-    }
-
-    public ImmortalBukkitCommandExecutor(
-            ImmortalCommandService commandService,
-            CitizensNpcResolver citizensNpcResolver,
-            CitizensNpcSelector citizensNpcSelector,
-            QuestProviderCatalogCache questProviderCatalog) {
-        this(commandService, citizensNpcResolver, citizensNpcSelector, questProviderCatalog, null);
-    }
+    private final CommandBranch cultivationCommands;
+    private final Consumer<Player> storageOpener;
 
     public ImmortalBukkitCommandExecutor(
             ImmortalCommandService commandService,
             CitizensNpcResolver citizensNpcResolver,
             CitizensNpcSelector citizensNpcSelector,
             QuestProviderCatalogCache questProviderCatalog,
-            CultivationCommandRunner cultivationCommands) {
+            CommandBranch cultivationCommands,
+            Consumer<Player> storageOpener) {
         this.commandService = Objects.requireNonNull(commandService, "commandService");
         this.citizensNpcResolver = Objects.requireNonNull(citizensNpcResolver, "citizensNpcResolver");
         this.citizensNpcSelector = Objects.requireNonNull(citizensNpcSelector, "citizensNpcSelector");
         this.questProviderCatalog = Objects.requireNonNull(questProviderCatalog, "questProviderCatalog");
-        this.cultivationCommands = cultivationCommands;
+        this.cultivationCommands = Objects.requireNonNull(cultivationCommands, "cultivationCommands");
+        this.storageOpener = Objects.requireNonNull(storageOpener, "storageOpener");
     }
 
     @Override
@@ -94,6 +73,18 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
             @NotNull Command command,
             @NotNull String label,
             @NotNull String[] args) {
+        if (args.length > 0 && "storage".equalsIgnoreCase(args[0])) {
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage("地区仓库只能由玩家使用。");
+                return true;
+            }
+            if (!sender.hasPermission(STORAGE_PERMISSION)) {
+                sender.sendMessage("你没有使用地区仓库的权限。");
+                return true;
+            }
+            storageOpener.accept(player);
+            return true;
+        }
         if (isPlayerCultivationCommand(args)) {
             if (!sender.hasPermission(CULTIVATION_PERMISSION)) {
                 sender.sendMessage("你没有使用修炼命令的权限。");
@@ -103,7 +94,7 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
             sender.sendMessage("你没有使用管理命令的权限。");
             return true;
         }
-        if (cultivationCommands == null || !cultivationCommands.handle(sender, args)) {
+        if (!cultivationCommands.handle(sender, args)) {
             commandService.execute(args, sourceFor(sender), sender::sendMessage);
         }
         return true;
@@ -246,5 +237,10 @@ public final class ImmortalBukkitCommandExecutor implements CommandExecutor, Tab
         }
         entity.setCollidable(false);
         entity.setRemoveWhenFarAway(false);
+    }
+
+    @FunctionalInterface
+    public interface CommandBranch {
+        boolean handle(CommandSender sender, String[] args);
     }
 }

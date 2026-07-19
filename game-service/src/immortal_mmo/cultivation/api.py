@@ -7,6 +7,9 @@ from immortal_mmo.cultivation.schemas import (
     CultivationSnapshotResponse,
     ItemAdjustmentRequest,
     ItemAdjustmentResponse,
+    LearnTechniqueRequest,
+    LearnTechniqueResponse,
+    PendingQuestRewardResponse,
     SeclusionSnapshotResponse,
     StartBreakthroughRequest,
     StartSeclusionRequest,
@@ -62,6 +65,40 @@ async def abandon_technique(
     return await service.abandon_technique(
         account_id=account_id,
         life_technique_id=life_technique_id,
+        idempotency_key=idempotency_key,
+    )
+
+
+@router.post(
+    "/{account_id}/current-life/cultivation/techniques/learn",
+    response_model=LearnTechniqueResponse,
+)
+async def learn_technique(
+    account_id: UUID,
+    body: LearnTechniqueRequest,
+    idempotency_key: UUID = idempotency_key_header,
+    service: CultivationService = cultivation_service_dependency,
+) -> LearnTechniqueResponse:
+    return await service.learn_technique(
+        account_id=account_id,
+        item_instance_id=body.item_instance_id,
+        idempotency_key=idempotency_key,
+    )
+
+
+@router.post(
+    "/{account_id}/current-life/cultivation/quest-rewards/{grant_id}/claim",
+    response_model=PendingQuestRewardResponse,
+)
+async def claim_pending_quest_reward(
+    account_id: UUID,
+    grant_id: UUID,
+    idempotency_key: UUID = idempotency_key_header,
+    service: CultivationService = cultivation_service_dependency,
+) -> PendingQuestRewardResponse:
+    return await service.claim_pending_quest_reward(
+        account_id=account_id,
+        grant_id=grant_id,
         idempotency_key=idempotency_key,
     )
 

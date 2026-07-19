@@ -18,7 +18,58 @@ class ItemOperationConflict(ItemRepositoryError):
 
 class ItemConsumptionType(StrEnum):
     BREAKTHROUGH = "breakthrough_consumption"
-    QUEST_DELIVERY = "quest_delivery"
+
+
+class ItemInstanceStatus(StrEnum):
+    PENDING_DELIVERY = "pending_delivery"
+    OWNED = "owned"
+    CONSUMED = "consumed"
+
+
+class ItemLocation(StrEnum):
+    INVENTORY = "inventory"
+    STORAGE = "storage"
+
+
+@dataclass(frozen=True, slots=True)
+class ItemInstance:
+    item_instance_id: UUID
+    life_id: UUID
+    item_code: str
+    definition_version: int
+    technique_id: str | None
+    issuance_id: UUID
+    issuance_ordinal: int
+    quest_reward_grant_id: UUID | None
+    status: ItemInstanceStatus
+    created_at: datetime
+    delivered_at: datetime | None
+    consumed_at: datetime | None
+    location: ItemLocation | None = None
+
+    def __post_init__(self) -> None:
+        if self.definition_version <= 0:
+            raise ValueError("Item definition version must be positive")
+        if self.issuance_ordinal < 0:
+            raise ValueError("Item issuance ordinal must be non-negative")
+        if self.status is ItemInstanceStatus.PENDING_DELIVERY:
+            if (
+                self.location is not None
+                or self.delivered_at is not None
+                or self.consumed_at is not None
+            ):
+                raise ValueError("Pending item state is invalid")
+            return
+        if self.status is ItemInstanceStatus.OWNED:
+            if (
+                self.location is None
+                or self.delivered_at is None
+                or self.consumed_at is not None
+            ):
+                raise ValueError("Owned item state is invalid")
+            return
+        if self.location is not None or self.consumed_at is None:
+            raise ValueError("Consumed item state is invalid")
 
 
 @dataclass(frozen=True, slots=True)

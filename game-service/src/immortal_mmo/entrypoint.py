@@ -16,6 +16,7 @@ from immortal_mmo.item.postgres_repository import PostgresItemRepository
 from immortal_mmo.main import create_app
 from immortal_mmo.player.postgres_repository import PostgresPlayerRepository
 from immortal_mmo.quest.postgres_repository import PostgresQuestRepository
+from immortal_mmo.storage.postgres_repository import PostgresStorageRepository
 
 GAME_SERVICE_ROOT = Path(__file__).resolve().parents[2]
 
@@ -29,6 +30,7 @@ uow_factory = SqlAlchemyUnitOfWorkFactory(
     PostgresCombatRepository,
     PostgresCultivationRepository,
     PostgresItemRepository,
+    PostgresStorageRepository,
 )
 alembic_config = Config(str(GAME_SERVICE_ROOT / "alembic.ini"))
 script_directory = ScriptDirectory.from_config(alembic_config)

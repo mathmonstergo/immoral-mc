@@ -19,6 +19,7 @@ import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
 
 class ImmortalBukkitCommandExecutorTest {
     @Test
@@ -91,7 +92,9 @@ class ImmortalBukkitCommandExecutorTest {
                 commandService(),
                 CitizensNpcResolver.unavailable(),
                 CitizensNpcSelector.unavailable(),
-                cache);
+                cache,
+                (sender, args) -> false,
+                player -> {});
 
         assertEquals(List.of("quest"), executor.complete(new String[] {"qu"}));
         assertEquals(
@@ -100,6 +103,30 @@ class ImmortalBukkitCommandExecutorTest {
         assertEquals(
                 List.of("village-chief"),
                 executor.complete(new String[] {"quest", "bind", "v"}));
+    }
+
+    @Test
+    void opensStorageThroughRequiredCommandBoundary() {
+        ImmortalCommandService commandService = mock(ImmortalCommandService.class);
+        Player player = mock(Player.class);
+        @SuppressWarnings("unchecked")
+        java.util.function.Consumer<Player> storageOpener = mock(java.util.function.Consumer.class);
+        when(player.hasPermission("immortalmc.storage")).thenReturn(true);
+        ImmortalBukkitCommandExecutor executor = new ImmortalBukkitCommandExecutor(
+                commandService,
+                CitizensNpcResolver.unavailable(),
+                CitizensNpcSelector.unavailable(),
+                new QuestProviderCatalogCache(),
+                (sender, args) -> false,
+                storageOpener);
+
+        executor.onCommand(player, mock(Command.class), "immortal", new String[] {"storage"});
+
+        verify(storageOpener).accept(player);
+        verify(commandService, never()).execute(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
     }
 
     private static ImmortalCommandService commandService() {
@@ -123,6 +150,7 @@ class ImmortalBukkitCommandExecutorTest {
                 CitizensNpcResolver.unavailable(),
                 CitizensNpcSelector.unavailable(),
                 new QuestProviderCatalogCache(),
-                cultivationCommands);
+                cultivationCommands::handle,
+                player -> {});
     }
 }

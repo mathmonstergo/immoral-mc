@@ -14,6 +14,43 @@ class CombatCultivationCredit:
 
 
 @dataclass(frozen=True, slots=True)
+class QuestCultivationRewardGrant:
+    grant_id: UUID
+    life_id: UUID
+    operation_id: UUID
+    quest_id: str
+    reward_id: str
+    configured_amount: int
+    credited_amount: int
+    pending_amount: int
+    balance_after: int
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
+class QuestCultivationRewardClaim:
+    operation_id: UUID
+    grant_id: UUID
+    life_id: UUID
+    applied_amount: int
+    pending_amount: int
+    balance_after: int
+    response_body: bytes | None
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class TechniqueLearnOperation:
+    operation_id: UUID
+    life_id: UUID
+    item_instance_id: UUID
+    technique_id: str
+    request_fingerprint: str
+    response_body: bytes | None
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class CultivationState:
     life_id: UUID
     current_level: int

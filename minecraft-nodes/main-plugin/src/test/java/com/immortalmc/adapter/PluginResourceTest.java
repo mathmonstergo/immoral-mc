@@ -20,12 +20,13 @@ class PluginResourceTest {
         assertTrue(pluginYml.contains("api-version: '1.21.11'"));
         assertTrue(pluginYml.contains("immortal:"));
         assertTrue(pluginYml.contains(
-                "usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue|quest|seclusion|breakthrough|cultivation>"));
+                "usage: /immortal <health|spirit-root|spirit-root-detector|npc-dialogue|quest|seclusion|breakthrough|cultivation|storage>"));
         assertTrue(pluginYml.contains("com.fasterxml.jackson.core:jackson-databind:2.18.2"));
         assertTrue(pluginYml.contains("org.xerial:sqlite-jdbc:3.53.2.0"));
         assertTrue(pluginYml.contains("- BetterHud"));
         assertTrue(pluginYml.contains("- MythicMobs"));
         assertTrue(pluginYml.contains("immortalmc.cultivation:"));
+        assertTrue(pluginYml.contains("immortalmc.storage:"));
         assertTrue(pluginYml.contains("default: true"));
     }
 

@@ -39,12 +39,19 @@ async def test_accept_and_completed_turn_in_noops_do_not_increment_revision() ->
         UUID(int=12),
     )
     await players.detect_current_life_spirit_root(account_id)
-    completed = await quests.turn_in(account_id, "first-steps", "old-man", UUID(int=13))
+    completed = await quests.turn_in(
+        account_id,
+        "first-steps",
+        "old-man",
+        UUID(int=13),
+        inventory_item_instance_ids=(),
+    )
     repeated_turn_in = await quests.turn_in(
         account_id,
         "first-steps",
         "old-man",
         UUID(int=14),
+        inventory_item_instance_ids=(),
     )
 
     assert body(accepted)["changed"] is True
@@ -73,12 +80,19 @@ async def test_domain_failure_is_frozen_and_replayed_without_raising() -> None:
     _, quests, factory, account_id = await logged_in_services()
     operation_id = UUID(int=21)
 
-    first = await quests.turn_in(account_id, "first-steps", "old-man", operation_id)
+    first = await quests.turn_in(
+        account_id,
+        "first-steps",
+        "old-man",
+        operation_id,
+        inventory_item_instance_ids=(),
+    )
     replayed = await QuestService(factory).turn_in(
         account_id,
         "first-steps",
         "old-man",
         operation_id,
+        inventory_item_instance_ids=(),
     )
 
     assert first.status_code == 409

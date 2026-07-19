@@ -44,6 +44,11 @@ import com.immortalmc.adapter.gameplay.SpiritRootDetectionInteractionAction;
 import com.immortalmc.adapter.gameplay.SpiritRootDetectionUseCase;
 import com.immortalmc.adapter.interaction.BukkitEntityInteractionContext;
 import com.immortalmc.adapter.interaction.EntityInteractionActionRouter;
+import com.immortalmc.adapter.item.PhysicalItemCodec;
+import com.immortalmc.adapter.item.PhysicalItemFactory;
+import com.immortalmc.adapter.item.PhysicalItemReconciler;
+import com.immortalmc.adapter.item.PhysicalPlayerInventory;
+import com.immortalmc.adapter.item.PhysicalTechniqueListener;
 import com.immortalmc.adapter.logging.AdapterLogger;
 import com.immortalmc.adapter.logging.PaperAdapterLogger;
 import com.immortalmc.adapter.mythicmobs.MythicMobsIntegrationHandle;
@@ -70,6 +75,7 @@ import com.immortalmc.adapter.quest.QuestProviderCatalogCache;
 import com.immortalmc.adapter.quest.QuestRequestCoordinator;
 import com.immortalmc.adapter.quest.TrackedQuestRefreshCoordinator;
 import com.immortalmc.adapter.session.PlayerSessionCache;
+import com.immortalmc.adapter.storage.RegionalStorageInventoryController;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -108,6 +114,9 @@ public final class ImmortalMainPlugin extends JavaPlugin {
     private BetterHudCultivationIntegration cultivationHud;
     private BukkitCultivationRewardPresenter cultivationRewardPresenter;
     private SeclusionInventoryController seclusionInventory;
+    private PhysicalItemReconciler physicalItems;
+    private PhysicalTechniqueListener techniqueManuals;
+    private RegionalStorageInventoryController storageInventory;
 
     @Override
     public void onEnable() {
@@ -150,7 +159,35 @@ public final class ImmortalMainPlugin extends JavaPlugin {
             refreshCultivation(playerId, gameServiceClient, adapterLogger);
             trackedQuestRefreshes.refresh(playerId);
         };
+        PhysicalItemCodec physicalItemCodec = new PhysicalItemCodec(this);
+        PhysicalPlayerInventory physicalInventory = new PhysicalPlayerInventory(
+                physicalItemCodec,
+                new PhysicalItemFactory(physicalItemCodec));
+        physicalItems = new PhysicalItemReconciler(
+                gameServiceClient,
+                sessionCache,
+                physicalInventory,
+                getServer()::getPlayer,
+                task -> getServer().getScheduler().runTask(this, task),
+                adapterLogger);
+        techniqueManuals = new PhysicalTechniqueListener(
+                gameServiceClient,
+                sessionCache,
+                physicalInventory,
+                physicalItems::reconcile,
+                cultivationAndQuestRefresh,
+                task -> getServer().getScheduler().runTask(this, task),
+                adapterLogger);
         CultivationAreaResolver cultivationAreas = CultivationAreaResolver.from(getConfig());
+        storageInventory = new RegionalStorageInventoryController(
+                this,
+                gameServiceClient,
+                sessionCache,
+                cultivationAreas,
+                physicalInventory,
+                physicalItems::reconcile,
+                task -> getServer().getScheduler().runTask(this, task),
+                adapterLogger);
         seclusionInventory = new SeclusionInventoryController(
                 this, gameServiceClient, sessionCache, cultivationAreas,
                 cultivationAndQuestRefresh);
@@ -248,6 +285,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                             result.account().minecraftUuid(),
                             gameServiceClient,
                             adapterLogger);
+                    physicalItems.reconcile(result.account().minecraftUuid());
                 },
                 playerId -> {
                     Player player = getServer().getPlayer(playerId);
@@ -279,6 +317,9 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                                 trackedQuestRefreshes::publish,
                                 adapterLogger,
                                 this::dialogueAudience,
+                                player -> physicalInventory.instanceIds(player.getInventory()),
+                                physicalItems::reconcile,
+                                playerId -> refreshCultivation(playerId, gameServiceClient, adapterLogger),
                                 Clock.systemUTC()),
                         NpcDialogueInteractionAction.ACTION,
                         new NpcDialogueInteractionAction(
@@ -340,7 +381,8 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                         citizensNpcResolver,
                         citizensIntegration.selector(),
                         questProviderCatalog,
-                        cultivationCommands);
+                        cultivationCommands::handle,
+                        storageInventory::open);
         PluginCommand immortalCommand =
                 Objects.requireNonNull(getCommand("immortal"), "Command 'immortal' is missing from plugin.yml");
         immortalCommand.setExecutor(commandExecutor);
@@ -350,10 +392,15 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new ImmortalPlayerJoinListener(playerJoinLogins), this);
         getServer().getPluginManager().registerEvents(cultivationRewardPresenter, this);
         getServer().getPluginManager().registerEvents(seclusionInventory, this);
+        getServer().getPluginManager().registerEvents(techniqueManuals, this);
+        getServer().getPluginManager().registerEvents(storageInventory, this);
         getServer().getPluginManager().registerEvents(
                 new ImmortalPlayerLifecycleListener(
                         this::cleanupPlayer,
-                        questNpcCoordinator::clearPlayer),
+                        playerId -> {
+                            questNpcCoordinator.clearPlayer(playerId);
+                            storageInventory.clearPlayer(playerId);
+                        }),
                 this);
         getServer().getPluginManager().registerEvents(
                 new ImmortalEntityInteractionListener(
@@ -389,6 +436,18 @@ public final class ImmortalMainPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (storageInventory != null) {
+            storageInventory.close();
+            storageInventory = null;
+        }
+        if (techniqueManuals != null) {
+            techniqueManuals.close();
+            techniqueManuals = null;
+        }
+        if (physicalItems != null) {
+            physicalItems.close();
+            physicalItems = null;
+        }
         if (seclusionInventory != null) {
             seclusionInventory.close();
             seclusionInventory = null;
@@ -494,6 +553,15 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         }
         cultivationHud.remove(playerId);
         cultivationProjections.remove(playerId);
+        if (techniqueManuals != null) {
+            techniqueManuals.clearPlayer(playerId);
+        }
+        if (physicalItems != null) {
+            physicalItems.clearPlayer(playerId);
+        }
+        if (storageInventory != null) {
+            storageInventory.clearPlayer(playerId);
+        }
         sessionCache.remove(playerId);
         questRequests.clearPlayer(playerId);
         trackedQuestRefreshes.clearPlayer(playerId);

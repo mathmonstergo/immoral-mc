@@ -2,21 +2,19 @@ import hashlib
 import json
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
-from uuid import UUID
+from pathlib import Path
+from uuid import UUID, uuid5
 
 from immortal_mmo.core.error_wire import serialize_domain_error
 from immortal_mmo.core.errors import ConflictError, DomainError, NotFoundError, RuleViolationError
 from immortal_mmo.core.uow import UnitOfWork, UnitOfWorkFactory
-from immortal_mmo.item.models import (
-    InsufficientItemQuantity,
-    ItemConsumptionRequest,
-    ItemConsumptionType,
-    ItemOperationConflict,
-)
+from immortal_mmo.cultivation.realm_catalog import RealmCatalog, load_realm_catalog
+from immortal_mmo.item.models import ItemInstance, ItemOperationConflict
 from immortal_mmo.player.models import CurrentLifeQuestFacts
 from immortal_mmo.player.service import PlayerAccountNotFoundError, PlayerLifecycleError
 from immortal_mmo.quest.definitions import QUEST_CATALOG, QuestDefinitionCatalog
 from immortal_mmo.quest.models import (
+    FixedItemRewardDefinition,
     ItemDeliveryObjectiveDefinition,
     MythicMobKillObjectiveDefinition,
     QuestCategory,
@@ -24,6 +22,7 @@ from immortal_mmo.quest.models import (
     QuestProviderDefinition,
     RealmLevelObjectiveDefinition,
     TechniqueLayerObjectiveDefinition,
+    UnrefinedCultivationRewardDefinition,
 )
 from immortal_mmo.quest.objectives import QuestEvaluationContext, evaluate_objective
 from immortal_mmo.quest.progression import QuestObjectiveProgressMismatchError
@@ -34,6 +33,7 @@ from immortal_mmo.quest.repository import (
     QuestOperationState,
     QuestProgress,
     QuestProgressStatus,
+    QuestRewardGrant,
     StoredQuestOperation,
 )
 from immortal_mmo.quest.schemas import (
@@ -46,6 +46,7 @@ from immortal_mmo.quest.schemas import (
     QuestProviderProjection,
     QuestProviderTemplate,
     QuestRevisionVector,
+    QuestRewardResult,
     TrackedQuest,
 )
 
@@ -99,10 +100,14 @@ class QuestService:
         uow_factory: UnitOfWorkFactory,
         catalog: QuestDefinitionCatalog = QUEST_CATALOG,
         *,
+        realm_catalog: RealmCatalog | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._catalog = catalog
+        self._realm_catalog = realm_catalog or load_realm_catalog(
+            Path(__file__).resolve().parents[1] / "cultivation" / "realm_catalog.json"
+        )
         self._clock = clock or (lambda: datetime.now(UTC))
 
     async def get_provider_catalog(self) -> QuestProviderCatalog:
@@ -168,6 +173,7 @@ class QuestService:
             provider_id,
             operation_id,
             QuestOperationCommand.ACCEPT,
+            inventory_item_instance_ids=(),
         )
 
     async def turn_in(
@@ -176,6 +182,8 @@ class QuestService:
         quest_id: str,
         provider_id: str,
         operation_id: UUID,
+        *,
+        inventory_item_instance_ids: tuple[UUID, ...],
     ) -> FrozenHttpResponse:
         return await self._mutate(
             account_id,
@@ -183,6 +191,7 @@ class QuestService:
             provider_id,
             operation_id,
             QuestOperationCommand.TURN_IN,
+            inventory_item_instance_ids=inventory_item_instance_ids,
         )
 
     async def _mutate(
@@ -192,8 +201,16 @@ class QuestService:
         provider_id: str,
         operation_id: UUID,
         command: QuestOperationCommand,
+        *,
+        inventory_item_instance_ids: tuple[UUID, ...],
     ) -> FrozenHttpResponse:
-        fingerprint = self._fingerprint(account_id, command, quest_id, provider_id)
+        fingerprint = self._fingerprint(
+            account_id,
+            command,
+            quest_id,
+            provider_id,
+            inventory_item_instance_ids=inventory_item_instance_ids,
+        )
         async with self._uow_factory(isolation="read_committed") as uow:
             existing = await uow.quests.get_operation(operation_id)
             if existing is not None:
@@ -253,7 +270,12 @@ class QuestService:
                 )
 
             try:
-                response = await self._apply_mutation(uow, operation, facts)
+                response = await self._apply_mutation(
+                    uow,
+                    operation,
+                    facts,
+                    inventory_item_instance_ids,
+                )
                 finalized = await uow.quests.finalize_operation(
                     operation_id,
                     state=QuestOperationState.SUCCEEDED,
@@ -284,6 +306,7 @@ class QuestService:
         uow: UnitOfWork,
         operation: StoredQuestOperation,
         facts: CurrentLifeQuestFacts,
+        inventory_item_instance_ids: tuple[UUID, ...],
     ) -> tuple[bool, bytes]:
         turn_in = operation.command is QuestOperationCommand.TURN_IN
         quest, _ = self._resolve_mutation_target(
@@ -303,12 +326,14 @@ class QuestService:
             uow,
             facts,
             objective_progresses,
-            lock_items=False,
+            lock_items=turn_in,
         )
         progress = progresses.get(quest.quest_id)
         current = self._project_quest(quest, progresses, context)
 
         changed = False
+        reward_results: list[QuestRewardResult] = []
+        consumed_item_instance_ids: tuple[UUID, ...] = ()
         if operation.command is QuestOperationCommand.ACCEPT:
             if current.state == "unavailable":
                 raise QuestNotAvailableError()
@@ -342,7 +367,14 @@ class QuestService:
                 raise QuestNotReadyError()
             if current.state == "ready_to_turn_in":
                 completed_at = self._clock()
-                await self._consume_delivery_items(
+                consumed_item_instance_ids = await self._consume_delivery_items(
+                    uow,
+                    facts.life_id,
+                    quest,
+                    inventory_item_instance_ids,
+                    completed_at,
+                )
+                reward_results = await self._grant_rewards(
                     uow,
                     facts.life_id,
                     quest,
@@ -390,8 +422,111 @@ class QuestService:
             changed=changed,
             quest=quest_projection,
             interaction_state=interaction_state,
+            rewards=reward_results,
+            consumed_item_instance_ids=list(consumed_item_instance_ids),
         )
         return changed, result.model_dump_json().encode()
+
+    async def _grant_rewards(
+        self,
+        uow: UnitOfWork,
+        life_id: UUID,
+        quest: QuestDefinition,
+        operation_id: UUID,
+        occurred_at: datetime,
+    ) -> list[QuestRewardResult]:
+        results: list[QuestRewardResult] = []
+        for reward in quest.rewards:
+            grant_id = uuid5(operation_id, f"quest-reward:{reward.reward_id}")
+            if isinstance(reward, FixedItemRewardDefinition):
+                item_instance_ids = tuple(
+                    uuid5(grant_id, f"item:{ordinal}")
+                    for ordinal in range(reward.quantity)
+                )
+                await uow.items.create_pending_instances(
+                    life_id=life_id,
+                    issuance_id=grant_id,
+                    quest_reward_grant_id=grant_id,
+                    item_code=reward.item_code,
+                    definition_version=1,
+                    technique_id=reward.technique_id,
+                    item_instance_ids=item_instance_ids,
+                    created_at=occurred_at,
+                )
+                grant = QuestRewardGrant(
+                    grant_id=grant_id,
+                    life_id=life_id,
+                    operation_id=operation_id,
+                    quest_id=quest.quest_id,
+                    reward_id=reward.reward_id,
+                    reward_type=reward.reward_type,
+                    item_code=reward.item_code,
+                    configured_amount=reward.quantity,
+                    applied_amount=0,
+                    pending_amount=reward.quantity,
+                    status="pending",
+                    created_at=occurred_at,
+                )
+                await uow.quests.insert_reward_grant(grant)
+                results.append(
+                    QuestRewardResult(
+                        grant_id=grant_id,
+                        reward_id=reward.reward_id,
+                        kind=reward.reward_type.value,
+                        status="pending",
+                        item_code=reward.item_code,
+                        quantity=reward.quantity,
+                        item_instance_ids=list(item_instance_ids),
+                        cultivation_amount=None,
+                        applied_amount=0,
+                        pending_amount=reward.quantity,
+                    )
+                )
+                continue
+
+            if not isinstance(reward, UnrefinedCultivationRewardDefinition):
+                raise RuntimeError("Unsupported quest reward definition")
+            state = await uow.cultivation.get_or_create_state(life_id, for_update=True)
+            credit = await uow.cultivation.grant_quest_reward(
+                grant_id=grant_id,
+                life_id=life_id,
+                operation_id=operation_id,
+                quest_id=quest.quest_id,
+                reward_id=reward.reward_id,
+                configured_amount=reward.amount,
+                cap=self._realm_catalog.level(state.current_level).max_exp,
+                occurred_at=occurred_at,
+            )
+            grant = QuestRewardGrant(
+                grant_id=grant_id,
+                life_id=life_id,
+                operation_id=operation_id,
+                quest_id=quest.quest_id,
+                reward_id=reward.reward_id,
+                reward_type=reward.reward_type,
+                item_code=None,
+                configured_amount=reward.amount,
+                applied_amount=credit.credited_amount,
+                pending_amount=credit.pending_amount,
+                status=credit.status,
+                created_at=occurred_at,
+            )
+            await uow.quests.insert_reward_grant(grant)
+            results.append(
+                QuestRewardResult(
+                    grant_id=grant_id,
+                    reward_id=reward.reward_id,
+                    kind=reward.reward_type.value,
+                    status=credit.status,
+                    item_code=None,
+                    quantity=None,
+                    item_instance_ids=[],
+                    cultivation_amount=reward.amount,
+                    applied_amount=credit.credited_amount,
+                    pending_amount=credit.pending_amount,
+                )
+            )
+        return results
 
     async def _load_player_facts(
         self,
@@ -435,9 +570,9 @@ class QuestService:
         uow: UnitOfWork,
         life_id: UUID,
         quest: QuestDefinition,
-        operation_id: UUID,
+        inventory_item_instance_ids: tuple[UUID, ...],
         occurred_at: datetime,
-    ) -> None:
+    ) -> tuple[UUID, ...]:
         deliveries = sorted(
             (
                 objective
@@ -446,25 +581,33 @@ class QuestService:
             ),
             key=lambda objective: objective.item_code,
         )
+        if not deliveries:
+            return ()
+        inventory = await self._validated_presented_inventory(
+            uow,
+            life_id,
+            inventory_item_instance_ids,
+            for_update=True,
+        )
+        selected: list[ItemInstance] = []
+        for objective in deliveries:
+            matching = [
+                item
+                for item in inventory
+                if item.item_code == objective.item_code and item not in selected
+            ]
+            if len(matching) < objective.required_quantity:
+                raise QuestNotReadyError()
+            selected.extend(matching[: objective.required_quantity])
         try:
-            await uow.items.consume_many(
+            await uow.items.consume_inventory_instances(
                 life_id=life_id,
-                consumptions=tuple(
-                    ItemConsumptionRequest(
-                        item_code=objective.item_code,
-                        quantity=objective.required_quantity,
-                        operation_id=operation_id,
-                        entry_type=ItemConsumptionType.QUEST_DELIVERY,
-                        session_id=None,
-                        occurred_at=occurred_at,
-                    )
-                    for objective in deliveries
-                ),
+                item_instance_ids=(item.item_instance_id for item in selected),
+                consumed_at=occurred_at,
             )
-        except ItemOperationConflict as error:
-            raise QuestIdempotencyConflictError() from error
-        except InsufficientItemQuantity as error:
+        except (KeyError, ItemOperationConflict) as error:
             raise QuestNotReadyError() from error
+        return tuple(item.item_instance_id for item in selected)
 
     async def _load_evaluation_context(
         self,
@@ -480,11 +623,14 @@ class QuestService:
             for objective in quest.objectives
             if isinstance(objective, ItemDeliveryObjectiveDefinition)
         }
-        item_stacks = await uow.items.get_stacks(
+        inventory_items = await uow.items.get_inventory_instances(
             facts.life_id,
             item_codes,
             for_update=lock_items,
         )
+        item_quantities: dict[str, int] = {item_code: 0 for item_code in item_codes}
+        for item in inventory_items:
+            item_quantities[item.item_code] = item_quantities.get(item.item_code, 0) + 1
 
         has_technique_objectives = any(
             isinstance(objective, TechniqueLayerObjectiveDefinition)
@@ -520,9 +666,7 @@ class QuestService:
 
         return QuestEvaluationContext(
             spirit_root_present=facts.spirit_root is not None,
-            item_quantities={
-                item_code: stack.quantity for item_code, stack in item_stacks.items()
-            },
+            item_quantities=item_quantities,
             kill_progress={
                 key: progress.current_value
                 for key, progress in objective_progresses.items()
@@ -531,9 +675,38 @@ class QuestService:
             current_realm_level=current_realm_level,
             revision=(
                 cultivation_revision
-                + sum(stack.revision for stack in item_stacks.values())
+                + len(inventory_items)
             ),
         )
+
+    async def _validated_presented_inventory(
+        self,
+        uow: UnitOfWork,
+        life_id: UUID,
+        item_instance_ids: tuple[UUID, ...],
+        *,
+        for_update: bool,
+    ) -> tuple[ItemInstance, ...]:
+        if not item_instance_ids or len(item_instance_ids) != len(set(item_instance_ids)):
+            raise QuestNotReadyError()
+        instances = await uow.items.get_instances(
+            item_instance_ids,
+            for_update=for_update,
+        )
+        by_id = {item.item_instance_id: item for item in instances}
+        try:
+            ordered = tuple(by_id[item_id] for item_id in item_instance_ids)
+        except KeyError as error:
+            raise QuestNotReadyError() from error
+        if any(
+            item.life_id != life_id
+            or item.status.value != "owned"
+            or item.location is None
+            or item.location.value != "inventory"
+            for item in ordered
+        ):
+            raise QuestNotReadyError()
+        return ordered
 
     def _validate_objective_progresses(
         self,
@@ -606,6 +779,8 @@ class QuestService:
         command: QuestOperationCommand,
         quest_id: str,
         provider_id: str,
+        *,
+        inventory_item_instance_ids: tuple[UUID, ...],
     ) -> str:
         canonical = json.dumps(
             {
@@ -614,6 +789,9 @@ class QuestService:
                 "contract_version": RESPONSE_CONTRACT_VERSION,
                 "provider_id": provider_id,
                 "quest_id": quest_id,
+                "inventory_item_instance_ids": sorted(
+                    str(item_id) for item_id in inventory_item_instance_ids
+                ),
             },
             ensure_ascii=False,
             separators=(",", ":"),

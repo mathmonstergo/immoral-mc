@@ -7,6 +7,8 @@ from tests.support.fakes import FakeStore, FakeUnitOfWorkFactory
 from immortal_mmo.api.v1 import health as health_module
 from immortal_mmo.main import create_app
 
+HEAD_REVISION = "20260719_005"
+
 
 @pytest.mark.asyncio
 async def test_health_endpoint_reports_service_status() -> None:
@@ -39,7 +41,7 @@ async def test_ready_reports_the_matching_migration_revision() -> None:
         readiness_check=FixedReadinessCheck(
             health_module.ReadinessResult(
                 ready=True,
-                migration_revision="20260718_003",
+                migration_revision=HEAD_REVISION,
             )
         ),
     )
@@ -52,7 +54,7 @@ async def test_ready_reports_the_matching_migration_revision() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ready",
-        "migration_revision": "20260718_003",
+        "migration_revision": HEAD_REVISION,
     }
 
 
@@ -90,11 +92,11 @@ class FixedScriptDirectory:
 @pytest.mark.parametrize(
     ("database_revisions", "code_heads"),
     [
-        ((), ("20260718_003",)),
-        (("20260718_003", "other"), ("20260718_003",)),
-        (("20260718_003",), ()),
-        (("20260718_003",), ("20260718_003", "other")),
-        (("20260718_003",), ("other",)),
+        ((), (HEAD_REVISION,)),
+        ((HEAD_REVISION, "other"), (HEAD_REVISION,)),
+        ((HEAD_REVISION,), ()),
+        ((HEAD_REVISION,), (HEAD_REVISION, "other")),
+        ((HEAD_REVISION,), ("other",)),
     ],
 )
 async def test_readiness_rejects_invalid_database_or_code_revision_cardinality(
@@ -120,7 +122,8 @@ async def test_readiness_rejects_invalid_database_or_code_revision_cardinality(
         async with postgres_sessions() as session:
             await session.execute(text("DELETE FROM alembic_version"))
             await session.execute(
-                text("INSERT INTO alembic_version (version_num) VALUES ('20260718_003')")
+                text("INSERT INTO alembic_version (version_num) VALUES (:revision)"),
+                {"revision": HEAD_REVISION},
             )
             await session.commit()
 
@@ -133,12 +136,12 @@ async def test_readiness_queries_connectivity_and_exact_revision_rows(
 ) -> None:
     result = await health_module.PostgresReadinessChecker(
         postgres_sessions,
-        FixedScriptDirectory(("20260718_003",)),
+        FixedScriptDirectory((HEAD_REVISION,)),
     )()
 
     assert result == health_module.ReadinessResult(
         ready=True,
-        migration_revision="20260718_003",
+        migration_revision=HEAD_REVISION,
     )
 
 
@@ -151,7 +154,7 @@ class FailingSessionFactory:
 async def test_readiness_returns_not_ready_for_connectivity_or_query_failure() -> None:
     result = await health_module.PostgresReadinessChecker(
         FailingSessionFactory(),
-        FixedScriptDirectory(("20260718_003",)),
+        FixedScriptDirectory((HEAD_REVISION,)),
     )()
 
     assert result == health_module.ReadinessResult(ready=False)
@@ -166,7 +169,7 @@ class BrokenSessionFactory:
 async def test_readiness_does_not_hide_unexpected_programming_errors() -> None:
     checker = health_module.PostgresReadinessChecker(
         BrokenSessionFactory(),
-        FixedScriptDirectory(("20260718_003",)),
+        FixedScriptDirectory((HEAD_REVISION,)),
     )
 
     with pytest.raises(RuntimeError, match="programming error"):

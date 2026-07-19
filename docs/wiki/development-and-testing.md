@@ -19,6 +19,7 @@ Game Service 是模块化单体：
 - `combat`：击杀事实、计数器和奖励解析；
 - `cultivation`：境界、功法、闭关和突破；
 - `item`：当前人生的物品栈与审计记录；
+- `storage`：按当前人生和 `area_id` 隔离的分页容器、槽位和幂等移动；
 - `core` / `db`：设置、错误、工作单元（Unit of Work）和 SQLAlchemy 装配。
 
 跨模块写入共享同一个工作单元（Unit of Work）；模块不得直接访问其他模块的表。

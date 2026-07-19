@@ -57,7 +57,7 @@ class QuestProviderInteractionActionTest {
         playerSessions.store(new PlayerLoginResult(
                 new AccountSnapshot(ACCOUNT_ID, PLAYER_ID, "Sensen"),
                 new LifeSnapshot(LIFE_ID, ACCOUNT_ID, 1, "alive", null)));
-        FakeQuestService quests = new FakeQuestService();
+        FakeQuestService quests = new FakeQuestService("available");
         RecordingScheduler scheduler = new RecordingScheduler();
         NpcDialogueRegistry dialogues = new NpcDialogueRegistry(() -> Map.of(
                 "first-steps.available",
@@ -84,6 +84,9 @@ class QuestProviderInteractionActionTest {
                 (playerId, state) -> published.set(state),
                 new RecordingAdapterLogger(),
                 ignored -> new RecordingAudience(),
+                ignored -> List.of(),
+                ignored -> {},
+                ignored -> {},
                 Clock.fixed(Instant.parse("2026-07-13T12:00:00Z"), ZoneOffset.UTC));
         EntityInteractionDefinition definition = definition();
         BukkitEntityInteractionContext context = new BukkitEntityInteractionContext(player(), npc());
@@ -104,6 +107,41 @@ class QuestProviderInteractionActionTest {
         assertTrue(offerSessions.find(PLAYER_ID).isEmpty());
         assertEquals(1, label.removals.get());
         assertEquals("first-steps", published.get().trackedQuest().questId());
+    }
+
+    @Test
+    void turnInScansPhysicalInventoryThenReconcilesItemsAndCultivation() {
+        PlayerSessionCache playerSessions = new PlayerSessionCache();
+        playerSessions.store(new PlayerLoginResult(
+                new AccountSnapshot(ACCOUNT_ID, PLAYER_ID, "Sensen"),
+                new LifeSnapshot(LIFE_ID, ACCOUNT_ID, 1, "alive", null)));
+        UUID itemId = UUID.fromString("50000000-0000-0000-0000-000000000001");
+        FakeQuestService quests = new FakeQuestService("ready_to_turn_in");
+        AtomicInteger reconciled = new AtomicInteger();
+        AtomicInteger cultivationRefreshes = new AtomicInteger();
+        AtomicReference<QuestInteractionState> published = new AtomicReference<>();
+        QuestProviderInteractionAction action = new QuestProviderInteractionAction(
+                playerSessions,
+                quests,
+                new NpcDialogueRegistry(Map::of),
+                new NpcDialoguePresenter(new RecordingScheduler()),
+                new QuestOfferSessionStore(),
+                (player, npc) -> new RecordingLabel(),
+                (playerId, state) -> published.set(state),
+                new RecordingAdapterLogger(),
+                ignored -> new RecordingAudience(),
+                ignored -> List.of(itemId),
+                ignored -> reconciled.incrementAndGet(),
+                ignored -> cultivationRefreshes.incrementAndGet(),
+                Clock.fixed(Instant.parse("2026-07-13T12:00:00Z"), ZoneOffset.UTC));
+
+        action.handle(definition(), new BukkitEntityInteractionContext(player(), npc()));
+
+        assertEquals(1, quests.turnInCalls.get());
+        assertEquals(List.of(itemId), quests.turnInItemIds.get());
+        assertEquals(1, reconciled.get());
+        assertEquals(1, cultivationRefreshes.get());
+        assertEquals("completed", published.get().providers().getFirst().quests().getFirst().state());
     }
 
     private static EntityInteractionDefinition definition() {
@@ -154,14 +192,21 @@ class QuestProviderInteractionActionTest {
     }
 
     private static final class FakeQuestService implements QuestInteractionService {
+        private final String refreshState;
         private final AtomicInteger refreshCalls = new AtomicInteger();
         private final AtomicInteger acceptCalls = new AtomicInteger();
+        private final AtomicInteger turnInCalls = new AtomicInteger();
+        private final AtomicReference<List<UUID>> turnInItemIds = new AtomicReference<>();
+
+        private FakeQuestService(String refreshState) {
+            this.refreshState = refreshState;
+        }
 
         @Override
         public CompletableFuture<QuestInteractionState> refresh(
                 UUID playerId, UUID accountId, UUID lifeId, String providerId) {
             refreshCalls.incrementAndGet();
-            return CompletableFuture.completedFuture(state("available", null));
+            return CompletableFuture.completedFuture(state(refreshState, null));
         }
 
         @Override
@@ -177,7 +222,13 @@ class QuestProviderInteractionActionTest {
                     "active",
                     new TrackedQuestSnapshot("first-steps", "初入凡尘", "active", List.of(), "前往鉴灵师处"));
             return CompletableFuture.completedFuture(
-                    new QuestMutationResult(operationId, true, state.providers().getFirst().quests().getFirst(), state));
+                    new QuestMutationResult(
+                            operationId,
+                            true,
+                            state.providers().getFirst().quests().getFirst(),
+                            state,
+                            List.of(),
+                            List.of()));
         }
 
         @Override
@@ -187,12 +238,26 @@ class QuestProviderInteractionActionTest {
                 UUID lifeId,
                 String questId,
                 String providerId,
-                UUID operationId) {
-            throw new UnsupportedOperationException();
+                UUID operationId,
+                List<UUID> inventoryItemInstanceIds) {
+            turnInCalls.incrementAndGet();
+            turnInItemIds.set(List.copyOf(inventoryItemInstanceIds));
+            QuestInteractionState state = state("completed", null);
+            return CompletableFuture.completedFuture(new QuestMutationResult(
+                    operationId,
+                    true,
+                    state.providers().getFirst().quests().getFirst(),
+                    state,
+                    List.of(),
+                    inventoryItemInstanceIds));
         }
 
         private static QuestInteractionState state(String questState, TrackedQuestSnapshot tracked) {
-            String action = questState.equals("available") ? "offer" : "remind";
+            String action = switch (questState) {
+                case "available" -> "offer";
+                case "ready_to_turn_in" -> "turn_in";
+                default -> "remind";
+            };
             ProviderQuestSnapshot quest = new ProviderQuestSnapshot(
                     "first-steps",
                     "初入凡尘",

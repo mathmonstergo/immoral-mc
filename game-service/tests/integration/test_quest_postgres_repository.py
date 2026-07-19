@@ -13,7 +13,7 @@ from immortal_mmo.combat.postgres_repository import PostgresCombatRepository
 from immortal_mmo.cultivation.db_models import LifeCultivationStateRow, LifeTechniqueRow
 from immortal_mmo.cultivation.postgres_repository import PostgresCultivationRepository
 from immortal_mmo.db.uow import SqlAlchemyUnitOfWorkFactory
-from immortal_mmo.item.db_models import LifeItemStackRow
+from immortal_mmo.item.db_models import ItemInstanceRow
 from immortal_mmo.item.postgres_repository import PostgresItemRepository
 from immortal_mmo.player.db_models import LifeRow
 from immortal_mmo.player.postgres_repository import PostgresPlayerRepository
@@ -80,6 +80,31 @@ def body(response: object) -> dict:
     return json.loads(response.body)
 
 
+def inventory_item(
+    *,
+    life_id: UUID,
+    item_instance_id: UUID,
+    item_code: str,
+    issuance_id: UUID,
+    issuance_ordinal: int = 0,
+    delivered_at: datetime,
+    location: str = "inventory",
+) -> ItemInstanceRow:
+    return ItemInstanceRow(
+        item_instance_id=item_instance_id,
+        life_id=life_id,
+        issuance_id=issuance_id,
+        issuance_ordinal=issuance_ordinal,
+        quest_reward_grant_id=None,
+        item_code=item_code,
+        definition_version=1,
+        technique_id=None,
+        status="owned",
+        location=location,
+        delivered_at=delivered_at,
+    )
+
+
 @pytest.mark.asyncio
 async def test_postgres_mixed_objective_quest_completes_and_consumes_delivery(
     postgres_sessions: async_sessionmaker[AsyncSession],
@@ -119,14 +144,16 @@ async def test_postgres_mixed_objective_quest_completes_and_consumes_delivery(
     )
     service = QuestService(factory, catalog, clock=lambda: now)
     technique_instance = UUID(int=98_001)
+    delivered_item_id = UUID(int=98_004)
     async with postgres_sessions() as session:
         session.add_all(
             [
-                LifeItemStackRow(
+                inventory_item(
                     life_id=life_id,
+                    item_instance_id=delivered_item_id,
                     item_code="foundation_pill",
-                    quantity=1,
-                    revision=1,
+                    issuance_id=UUID(int=98_005),
+                    delivered_at=now,
                 ),
                 LifeCultivationStateRow(
                     life_id=life_id,
@@ -174,23 +201,18 @@ async def test_postgres_mixed_objective_quest_completes_and_consumes_delivery(
         quest.quest_id,
         provider.provider_id,
         UUID(int=98_003),
+        inventory_item_instance_ids=(delivered_item_id,),
     )
-    assert body(completed)["quest"]["state"] == "completed"
+    completed_body = body(completed)
+    assert completed_body["quest"]["state"] == "completed"
+    assert completed_body["consumed_item_instance_ids"] == [str(delivered_item_id)]
 
     async with postgres_sessions() as session:
-        item = await session.get(
-            LifeItemStackRow,
-            {"life_id": life_id, "item_code": "foundation_pill"},
-        )
-        entry_type = await session.scalar(
-            text(
-                "SELECT entry_type FROM item_resource_entries "
-                "WHERE operation_id = :operation_id"
-            ),
-            {"operation_id": UUID(int=98_003)},
-        )
-    assert item is not None and item.quantity == 0
-    assert entry_type == "quest_delivery"
+        item = await session.get(ItemInstanceRow, delivered_item_id)
+    assert item is not None
+    assert item.status == "consumed"
+    assert item.location is None
+    assert item.consumed_at == now
 
 
 @pytest.mark.asyncio
@@ -229,14 +251,20 @@ async def test_postgres_multi_item_shortage_leaves_every_delivery_stack_unchange
         PostgresItemRepository,
     )
     service = QuestService(factory, catalog, clock=lambda: now)
+    alpha_ids = (UUID(int=121_010), UUID(int=121_011))
     async with postgres_sessions() as session:
-        session.add(
-            LifeItemStackRow(
-                life_id=life_id,
-                item_code="item_alpha",
-                quantity=2,
-                revision=1,
-            )
+        session.add_all(
+            [
+                inventory_item(
+                    life_id=life_id,
+                    item_instance_id=item_id,
+                    item_code="item_alpha",
+                    issuance_id=UUID(int=121_020),
+                    issuance_ordinal=ordinal,
+                    delivered_at=now,
+                )
+                for ordinal, item_id in enumerate(alpha_ids)
+            ]
         )
         await session.commit()
 
@@ -252,28 +280,25 @@ async def test_postgres_multi_item_shortage_leaves_every_delivery_stack_unchange
         quest.quest_id,
         provider.provider_id,
         operation_id,
+        inventory_item_instance_ids=alpha_ids,
     )
 
     async with postgres_sessions() as session:
-        alpha = await session.get(
-            LifeItemStackRow,
-            {"life_id": life_id, "item_code": "item_alpha"},
-        )
-        delivery_entries = await session.scalar(
-            text(
-                "SELECT count(*) FROM item_resource_entries "
-                "WHERE operation_id = :operation_id AND entry_type = 'quest_delivery'"
-            ),
-            {"operation_id": operation_id},
-        )
+        alpha = (
+            await session.scalars(
+                select(ItemInstanceRow).where(
+                    ItemInstanceRow.item_instance_id.in_(alpha_ids)
+                )
+            )
+        ).all()
     assert rejected.status_code == 409
     assert body(rejected)["error"]["code"] == "quest.not_ready"
-    assert alpha is not None and alpha.quantity == 2
-    assert delivery_entries == 0
+    assert {item.item_instance_id for item in alpha} == set(alpha_ids)
+    assert all(item.status == "owned" and item.location == "inventory" for item in alpha)
 
 
 @pytest.mark.asyncio
-async def test_multi_item_operation_conflict_leaves_every_delivery_stack_unchanged(
+async def test_turn_in_operation_id_is_bound_to_exact_inventory_item_ids(
     postgres_sessions: async_sessionmaker[AsyncSession],
     clean_postgres_data: None,
 ) -> None:
@@ -284,13 +309,10 @@ async def test_multi_item_operation_conflict_leaves_every_delivery_stack_unchang
     template = QUEST_CATALOG.get_quest("first-steps")
     quest = replace(
         template,
-        quest_id="multi-item-operation-collision",
+        quest_id="delivery-identity-replay",
         provider_ids=("objective-master",),
         turn_in_provider_ids=("objective-master",),
-        objectives=(
-            ItemDeliveryObjectiveDefinition("first", "交付第一种物品", "item_alpha", 1),
-            ItemDeliveryObjectiveDefinition("second", "交付第二种物品", "item_beta", 1),
-        ),
+        objectives=(ItemDeliveryObjectiveDefinition("item", "交付物品", "item_alpha", 1),),
     )
     provider = QuestProviderDefinition(
         provider_id="objective-master",
@@ -309,21 +331,21 @@ async def test_multi_item_operation_conflict_leaves_every_delivery_stack_unchang
     )
     service = QuestService(factory, catalog, clock=lambda: now)
     operation_id = UUID(int=123_001)
+    first_id = UUID(int=123_010)
+    second_id = UUID(int=123_011)
     async with postgres_sessions() as session:
-        repository = PostgresItemRepository(session)
-        await repository.adjust(
-            life_id=life_id,
-            item_code="item_alpha",
-            delta_quantity=1,
-            operation_id=UUID(int=123_002),
-            occurred_at=now,
-        )
-        await repository.adjust(
-            life_id=life_id,
-            item_code="item_beta",
-            delta_quantity=1,
-            operation_id=operation_id,
-            occurred_at=now,
+        session.add_all(
+            [
+                inventory_item(
+                    life_id=life_id,
+                    item_instance_id=item_id,
+                    item_code="item_alpha",
+                    issuance_id=UUID(int=123_020),
+                    issuance_ordinal=ordinal,
+                    delivered_at=now,
+                )
+                for ordinal, item_id in enumerate((first_id, second_id))
+            ]
         )
         await session.commit()
 
@@ -333,42 +355,34 @@ async def test_multi_item_operation_conflict_leaves_every_delivery_stack_unchang
         provider.provider_id,
         UUID(int=123_003),
     )
+    completed = await service.turn_in(
+        account_id,
+        quest.quest_id,
+        provider.provider_id,
+        operation_id,
+        inventory_item_instance_ids=(first_id,),
+    )
     rejected = await service.turn_in(
         account_id,
         quest.quest_id,
         provider.provider_id,
         operation_id,
+        inventory_item_instance_ids=(second_id,),
     )
 
     async with postgres_sessions() as session:
-        stacks = {
-            stack.item_code: stack.quantity
-            for stack in (
-                await session.scalars(
-                    select(LifeItemStackRow).where(
-                        LifeItemStackRow.life_id == life_id,
-                        LifeItemStackRow.item_code.in_(("item_alpha", "item_beta")),
-                    )
-                )
-            ).all()
-        }
-        progress = await session.get(QuestProgressRow, (life_id, quest.quest_id))
-        delivery_entries = await session.scalar(
-            text(
-                "SELECT count(*) FROM item_resource_entries "
-                "WHERE operation_id = :operation_id AND entry_type = 'quest_delivery'"
-            ),
-            {"operation_id": operation_id},
-        )
+        first = await session.get(ItemInstanceRow, first_id)
+        second = await session.get(ItemInstanceRow, second_id)
+    assert completed.status_code == 200
     assert rejected.status_code == 409
     assert body(rejected)["error"]["code"] == QuestIdempotencyConflictError.code
-    assert stacks == {"item_alpha": 1, "item_beta": 1}
-    assert progress is not None and progress.status == "active"
-    assert delivery_entries == 0
+    assert first is not None and first.status == "consumed"
+    assert second is not None and second.status == "owned"
+    assert second.location == "inventory"
 
 
 @pytest.mark.asyncio
-async def test_turn_in_rejects_item_operation_id_reused_by_another_command(
+async def test_turn_in_rejects_matching_item_that_is_not_in_player_inventory(
     postgres_sessions: async_sessionmaker[AsyncSession],
     clean_postgres_data: None,
 ) -> None:
@@ -379,7 +393,7 @@ async def test_turn_in_rejects_item_operation_id_reused_by_another_command(
     template = QUEST_CATALOG.get_quest("first-steps")
     quest = replace(
         template,
-        quest_id="item-operation-collision",
+        quest_id="stored-item-rejection",
         provider_ids=("objective-master",),
         turn_in_provider_ids=("objective-master",),
         objectives=(ItemDeliveryObjectiveDefinition("item", "交付物品", "foundation_pill", 1),),
@@ -400,15 +414,17 @@ async def test_turn_in_rejects_item_operation_id_reused_by_another_command(
         PostgresItemRepository,
     )
     service = QuestService(factory, catalog, clock=lambda: now)
-    operation_id = UUID(int=122_001)
+    item_id = UUID(int=122_010)
     async with postgres_sessions() as session:
-        repository = PostgresItemRepository(session)
-        await repository.adjust(
-            life_id=life_id,
-            item_code="foundation_pill",
-            delta_quantity=1,
-            operation_id=operation_id,
-            occurred_at=now,
+        session.add(
+            inventory_item(
+                life_id=life_id,
+                item_instance_id=item_id,
+                item_code="foundation_pill",
+                issuance_id=UUID(int=122_011),
+                delivered_at=now,
+                location="storage",
+            )
         )
         await session.commit()
 
@@ -422,30 +438,21 @@ async def test_turn_in_rejects_item_operation_id_reused_by_another_command(
         account_id,
         quest.quest_id,
         provider.provider_id,
-        operation_id,
+        UUID(int=122_003),
+        inventory_item_instance_ids=(item_id,),
     )
 
     async with postgres_sessions() as session:
-        stack = await session.get(
-            LifeItemStackRow,
-            {"life_id": life_id, "item_code": "foundation_pill"},
-        )
+        item = await session.get(ItemInstanceRow, item_id)
         progress = await session.get(
             QuestProgressRow,
             (life_id, quest.quest_id),
         )
-        delivery_entries = await session.scalar(
-            text(
-                "SELECT count(*) FROM item_resource_entries "
-                "WHERE operation_id = :operation_id AND entry_type = 'quest_delivery'"
-            ),
-            {"operation_id": operation_id},
-        )
     assert rejected.status_code == 409
-    assert body(rejected)["error"]["code"] == QuestIdempotencyConflictError.code
-    assert stack is not None and stack.quantity == 1
+    assert body(rejected)["error"]["code"] == "quest.not_ready"
+    assert item is not None and item.status == "owned"
+    assert item.location == "storage"
     assert progress is not None and progress.status == "active"
-    assert delivery_entries == 0
 
 
 @pytest.mark.asyncio
@@ -767,8 +774,20 @@ async def test_same_operation_domain_failure_concurrently_replays_exact_bytes(
     operation_id = uuid4()
 
     first, second = await asyncio.gather(
-        quests.turn_in(account_id, "first-steps", "old-man", operation_id),
-        quests.turn_in(account_id, "first-steps", "old-man", operation_id),
+        quests.turn_in(
+            account_id,
+            "first-steps",
+            "old-man",
+            operation_id,
+            inventory_item_instance_ids=(),
+        ),
+        quests.turn_in(
+            account_id,
+            "first-steps",
+            "old-man",
+            operation_id,
+            inventory_item_instance_ids=(),
+        ),
     )
 
     assert first.status_code == 409
@@ -788,8 +807,20 @@ async def test_same_operation_turn_in_concurrently_completes_once_and_replays_ex
     operation_id = uuid4()
 
     first, second = await asyncio.gather(
-        quests.turn_in(account_id, "first-steps", "old-man", operation_id),
-        quests.turn_in(account_id, "first-steps", "old-man", operation_id),
+        quests.turn_in(
+            account_id,
+            "first-steps",
+            "old-man",
+            operation_id,
+            inventory_item_instance_ids=(),
+        ),
+        quests.turn_in(
+            account_id,
+            "first-steps",
+            "old-man",
+            operation_id,
+            inventory_item_instance_ids=(),
+        ),
     )
 
     assert first.status_code == second.status_code == 200
@@ -804,6 +835,7 @@ async def test_same_operation_turn_in_concurrently_completes_once_and_replays_ex
         "first-steps",
         "old-man",
         operation_id,
+        inventory_item_instance_ids=(),
     )
     assert (replayed.status_code, replayed.content_type, replayed.body) == (
         first.status_code,
@@ -885,8 +917,20 @@ async def test_different_operation_turn_ins_change_once_and_increment_revision_o
 
     await players.detect_current_life_spirit_root(account_id)
     turn_ins = await asyncio.gather(
-        quests.turn_in(account_id, "first-steps", "old-man", uuid4()),
-        quests.turn_in(account_id, "first-steps", "old-man", uuid4()),
+        quests.turn_in(
+            account_id,
+            "first-steps",
+            "old-man",
+            uuid4(),
+            inventory_item_instance_ids=(),
+        ),
+        quests.turn_in(
+            account_id,
+            "first-steps",
+            "old-man",
+            uuid4(),
+            inventory_item_instance_ids=(),
+        ),
     )
     assert sorted(body(response)["changed"] for response in turn_ins) == [False, True]
     assert {body(response)["interaction_state"]["revision"]["quest"] for response in turn_ins} == {
@@ -903,6 +947,7 @@ async def test_different_operation_turn_ins_change_once_and_increment_revision_o
         "first-steps",
         "old-man",
         uuid4(),
+        inventory_item_instance_ids=(),
     )
     assert body(completed_accept)["changed"] is False
     assert body(completed_turn_in)["changed"] is False
@@ -928,7 +973,13 @@ async def test_restart_and_new_life_still_replay_old_global_success_and_failure(
     success_id = uuid4()
     failure_id = uuid4()
     success = await quests.accept(account_id, "first-steps", "old-man", success_id)
-    failure = await quests.turn_in(account_id, "first-steps", "old-man", failure_id)
+    failure = await quests.turn_in(
+        account_id,
+        "first-steps",
+        "old-man",
+        failure_id,
+        inventory_item_instance_ids=(),
+    )
 
     new_life_id = uuid4()
     async with postgres_sessions.begin() as session:
@@ -957,7 +1008,11 @@ async def test_restart_and_new_life_still_replay_old_global_success_and_failure(
         account_id, "first-steps", "old-man", success_id
     )
     replayed_failure = await restarted.turn_in(
-        account_id, "first-steps", "old-man", failure_id
+        account_id,
+        "first-steps",
+        "old-man",
+        failure_id,
+        inventory_item_instance_ids=(),
     )
     state = await restarted.get_interaction_state(account_id, ["old-man"])
 
@@ -1070,7 +1125,7 @@ async def test_reusing_operation_id_with_any_changed_identity_conflicts_without_
         monkeypatch.setattr(
             QuestService,
             "_fingerprint",
-            staticmethod(lambda *args: "f" * 64),
+            staticmethod(lambda *args, **kwargs: "f" * 64),
         )
 
     with pytest.raises(QuestIdempotencyConflictError):
@@ -1080,6 +1135,7 @@ async def test_reusing_operation_id_with_any_changed_identity_conflicts_without_
                 request_quest,
                 request_provider,
                 operation_id,
+                inventory_item_instance_ids=(),
             )
         else:
             await quests.accept(
@@ -1152,19 +1208,39 @@ async def test_restart_reads_completed_progress_revision_and_exact_success_failu
     failure_id = uuid4()
     accept_id = uuid4()
     turn_in_id = uuid4()
-    failure = await quests.turn_in(account_id, "first-steps", "old-man", failure_id)
+    failure = await quests.turn_in(
+        account_id,
+        "first-steps",
+        "old-man",
+        failure_id,
+        inventory_item_instance_ids=(),
+    )
     accepted = await quests.accept(account_id, "first-steps", "old-man", accept_id)
     await players.detect_current_life_spirit_root(account_id)
-    completed = await quests.turn_in(account_id, "first-steps", "old-man", turn_in_id)
+    completed = await quests.turn_in(
+        account_id,
+        "first-steps",
+        "old-man",
+        turn_in_id,
+        inventory_item_instance_ids=(),
+    )
 
     _, restarted = services(postgres_sessions)
     state = await restarted.get_interaction_state(account_id, ["old-man"])
     replayed_failure = await restarted.turn_in(
-        account_id, "first-steps", "old-man", failure_id
+        account_id,
+        "first-steps",
+        "old-man",
+        failure_id,
+        inventory_item_instance_ids=(),
     )
     replayed_accept = await restarted.accept(account_id, "first-steps", "old-man", accept_id)
     replayed_turn_in = await restarted.turn_in(
-        account_id, "first-steps", "old-man", turn_in_id
+        account_id,
+        "first-steps",
+        "old-man",
+        turn_in_id,
+        inventory_item_instance_ids=(),
     )
 
     assert state.life_id == life_id

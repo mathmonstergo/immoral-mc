@@ -91,7 +91,7 @@ async def test_full_quest_loop_returns_and_replays_frozen_http_bytes(
         completed = await client.put(
             f"{base}/turn-in",
             headers={"Idempotency-Key": str(UUID(int=201))},
-            json={"provider_id": "old-man"},
+            json={"provider_id": "old-man", "inventory_item_instance_ids": []},
         )
 
     assert accepted.status_code == 200
@@ -112,7 +112,7 @@ async def test_committed_domain_failure_is_replayed_as_the_same_http_response(
         account_id = (await login(client, 3))["account"]["account_id"]
         path = f"/api/v1/players/{account_id}/current-life/quests/first-steps/turn-in"
         headers = {"Idempotency-Key": str(UUID(int=300))}
-        body = {"provider_id": "old-man"}
+        body = {"provider_id": "old-man", "inventory_item_instance_ids": []}
 
         first = await client.put(path, headers=headers, json=body)
         replayed = await client.put(path, headers=headers, json=body)
@@ -143,7 +143,7 @@ async def test_operation_id_reuse_with_a_different_fingerprint_conflicts(
         conflict = await client.put(
             f"/api/v1/players/{account_id}/current-life/quests/first-steps/turn-in",
             headers=headers,
-            json={"provider_id": "old-man"},
+            json={"provider_id": "old-man", "inventory_item_instance_ids": []},
         )
 
     assert conflict.status_code == 409

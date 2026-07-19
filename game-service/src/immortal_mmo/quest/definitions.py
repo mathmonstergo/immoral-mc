@@ -6,12 +6,14 @@ from typing import Any
 
 from immortal_mmo.quest.models import (
     CurrentLifeSpiritRootObjectiveDefinition,
+    FixedItemRewardDefinition,
     QuestCategory,
     QuestDefinition,
     QuestDialogueKeys,
     QuestPresentationHints,
     QuestProviderDefinition,
     QuestRepeatability,
+    UnrefinedCultivationRewardDefinition,
     objective_target_key,
 )
 
@@ -190,6 +192,18 @@ FIRST_STEPS = QuestDefinition(
         available_proximity_text="最近太不太平了...",
         active_proximity_text="去找鉴灵师看看吧。",
         ready_proximity_text="看来你已经有所收获。",
+    ),
+    rewards=(
+        FixedItemRewardDefinition(
+            reward_id="starter-technique-manual",
+            item_code="technique_manual:GF_YinqiShu_01",
+            quantity=1,
+            technique_id="GF_YinqiShu_01",
+        ),
+        UnrefinedCultivationRewardDefinition(
+            reward_id="starter-cultivation",
+            amount=50,
+        ),
     ),
 )
 

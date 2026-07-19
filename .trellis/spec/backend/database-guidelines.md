@@ -447,10 +447,9 @@ quest_objective_progress(
 )
 ```
 
-`item_resource_entries.entry_type` includes `quest_delivery`; its session ID
-must be NULL and its delta must be negative. Item operation identity is the
-tuple `(life_id, item_code, operation_id, entry_type, session_id, delta)`, not
-the UUID alone.
+Physical delivery uses `item_instances` with stable `item_instance_id`, status,
+and location. Logical `life_item_stacks` remain for quantity resources such as
+breakthrough pills; quest delivery must not add a second stack-debit path.
 
 ### 3. Contracts
 
@@ -466,17 +465,11 @@ the UUID alone.
   already-committed combat event.
 * A combat transaction inserts the event, advances all matching active rows in
   one bounded update, updates the lifetime counter/reward, and commits once.
-* Every item mutation acquires a PostgreSQL transaction advisory lock derived
-  from `(operation_id, item_code)` before reading replay history. A batch sorts
-  these physical lock keys, then locks stacks by item code, validates all
-  replay identities and balances, writes every `quest_delivery` debit, and
-  completes the quest in one transaction. Turn-in projection must not pre-lock
-  stacks in the reverse order. A later conflict or shortage leaves no earlier
-  item debited.
-* Migration `20260718_003` recalculates legacy `current_layer` values using a
-  frozen copy of the authored cultivation curve. It refuses downgrade when
-  objective rows or quest-delivery audit rows exist, rather than silently
-  destroying history.
+* Turn-in receives the unique item-instance IDs observed in the Paper player
+  inventory. Game Service locks those rows, verifies current-life ownership,
+  `status=owned`, `location=inventory`, and exact `item_code`, selects every
+  required instance, consumes them, and completes the quest in one transaction.
+  A later shortage or identity mismatch leaves every instance owned.
 
 ### 4. Validation & Error Matrix
 
@@ -486,32 +479,31 @@ the UUID alone.
 | Counter would exceed required value | Bounded at required value |
 | Kill races with quest acceptance | Wait on the quest revision lock, then count when `occurred_at >= accepted_at` |
 | Rewardable combat fact has no matching source life | `current_life_unavailable`; no reward, lifetime counter, or quest progress |
-| One delivery stack is insufficient | No stack or audit row changes |
-| Reused item operation has different immutable facts | Item operation conflict; caller returns a stable domain conflict |
-| Two transactions race on the same item operation key | Loser waits on the advisory lock, reloads the winner, and returns replay/conflict without `IntegrityError` |
-| A later item in one delivery batch conflicts | No earlier item debit is committed |
-| Downgrade with typed progress or delivery history | Abort before changing constraints |
+| Presented item ID is duplicated, missing, stored, consumed, or belongs to another life | `quest.not_ready` or stable conflict; no instance is consumed |
+| One delivery type is insufficient | No instance is consumed and the quest remains active |
+| Same quest operation key and request | Frozen response replay; no second reward or consumption |
+| Same quest operation key with different inventory identities | `quest.idempotency_conflict`; no mutation |
 
 ### 5. Good/Base/Bad Cases
 
 * Good: repositories own only their module tables; the shared Unit of Work
   coordinates combat, quest, cultivation, and item changes.
-* Base: missing item stacks are initialized and locked in sorted order inside
-  the final batch-consumption boundary.
-* Bad: treat any matching `(operation_id, item_code)` ledger row as a replay,
-  or issue separate commits for each delivered item.
+* Base: Paper scans physical identities; Game Service independently validates
+  every identity and chooses the exact instances to consume.
+* Bad: debit `life_item_stacks` for quest delivery, trust display names/Lore,
+  or consume one item before validating the rest.
 
 ### 6. Tests Required
 
 * Fresh migration metadata checks table fields, constraints, trigger, index,
   and head revision.
 * PostgreSQL tests cover bounded bulk increments, duplicate/replayed events,
-  item UUID identity conflicts (including a later-item conflict), multi-item
-  shortage rollback, successful delivery audit shape, and restart reads.
+  physical-instance ownership/location validation, multi-item shortage rollback,
+  exact consumed IDs, reward issuance, and restart reads.
 * Real PostgreSQL concurrency tests prove accept-versus-kill serialization and
-  advisory-lock waiting for cross-life/cross-domain item operation collisions.
-* Migration smoke checks legacy technique rows are backfilled and data-bearing
-  downgrade is rejected before partial DDL.
+  stable quest-operation replay under concurrent delivery.
+* Fresh migration smoke checks exact metadata at head; disposable development
+  data is reset instead of backfilled or protected by downgrade guards.
 
 ### 7. Wrong vs Correct
 
@@ -528,4 +520,99 @@ if existing_entry_for(operation_id, item_code):
 if existing_entry.identity != requested_identity:
     raise ItemOperationConflict
 return existing_entry
+```
+
+## Scenario: Physical Item Issuance and Regional Storage
+
+### 1. Scope / Trigger
+
+Trigger: a quest, loot, crafting, delivery, technique manual, or regional
+warehouse flow creates or moves a stable physical item instance.
+
+### 2. Signatures
+
+```text
+item_instances(
+  item_instance_id, life_id, issuance_id, issuance_ordinal,
+  quest_reward_grant_id?, item_code, definition_version, technique_id?,
+  status, location?, delivered_at?, consumed_at?
+)
+regional_storage_containers(life_id, area_id, page_count,
+                            item_slots_per_page, revision)
+regional_storage_slots(life_id, area_id, page, slot, item_instance_id)
+regional_storage_operations(operation_id, life_id, area_id, move_kind,
+                            expected_revision, resulting_revision,
+                            request_fingerprint, response_body)
+```
+
+Mutation APIs require UUID `Idempotency-Key`; storage moves also carry
+`expected_revision` and exact source/destination coordinates.
+
+### 3. Contracts
+
+* `issuance_id + issuance_ordinal` is the generic creation identity. A nullable
+  `quest_reward_grant_id` records quest provenance without making every item a
+  quest item. Do not add required source-specific columns for loot or crafting.
+* Item state is one exact shape: `pending_delivery` has no location,
+  `owned` has `inventory` or `storage`, and `consumed` has no location.
+* Quest turn-in consumes only explicitly presented, current-life,
+  `owned/inventory` instances. Logical stacks are not a compatibility path.
+* Regional storage is current-life plus stable `area_id`; Paper coordinates
+  never become the database key.
+* Every storage operation acquires the operation UUID advisory transaction
+  lock before reading replay history. The container row then serializes its
+  revision, and slot rows are locked in deterministic coordinate order.
+* A successful move updates item location, slot rows, container revision, and
+  frozen operation response in one Unit of Work. An occupied destination is an
+  atomic swap.
+* Fresh development databases migrate directly to the target schema. Do not
+  retain `grant_id`-only item identity, dual reads, backfills, or downgrade
+  guards for disposable local data.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Same issuance identity repeats | Return/reuse the same logical issuance; never create a second instance |
+| Same operation UUID and fingerprint repeats | Return the frozen response |
+| Same operation UUID with different account/area/request | Stable idempotency conflict |
+| Expected storage revision is stale | Stable revision conflict; no slot or location mutation |
+| Slot references a missing or non-`owned/storage` item | Fail visibly as an invariant violation |
+| Deposit item is not `owned/inventory` | Reject; do not create a slot |
+| Withdraw target inventory is full on Paper | Do not submit, or reconcile after uncertainty; storage remains authoritative |
+
+### 5. Good/Base/Bad Cases
+
+* Good: task reward creates a pending manual, Paper confirms delivery, storage
+  changes its location, withdrawal restores it, and learning consumes the same
+  instance ID.
+* Base: two items in one page exchange slots with one revision increment.
+* Bad: copy an ItemStack by display name, store inventory in plugin YAML, or
+  catch a uniqueness race and report success without replay validation.
+
+### 6. Tests Required
+
+* Fresh migration/ORM metadata asserts all columns, named constraints, indexes,
+  foreign keys, and the single Alembic head.
+* Unit tests cover issuance replay, delivery confirmation, manual consumption,
+  area isolation, pagination, stale revision, move, swap, withdrawal, and
+  snapshot invariant rejection.
+* PostgreSQL tests cover full reward-manual storage round trip and prove a
+  competing identical operation waits on an advisory lock.
+* Adapter tests assert exact snake-case HTTP payloads, stable manual operation
+  UUID derivation, reconciliation deduplication, and strict DTO state shapes.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+quest reward -> Paper gives named book -> local chest YAML -> trust GUI contents
+```
+
+#### Correct
+
+```text
+Game Service issuance -> item_instance_id -> Paper projection
+-> revisioned Game Service storage move -> authoritative reconciliation
 ```

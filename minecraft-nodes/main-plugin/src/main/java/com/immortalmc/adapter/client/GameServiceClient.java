@@ -3,20 +3,24 @@ package com.immortalmc.adapter.client;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.immortalmc.adapter.item.PhysicalItemGateway;
+import com.immortalmc.adapter.item.TechniqueLearningGateway;
+import com.immortalmc.adapter.storage.RegionalStorageGateway;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.List;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
-public final class GameServiceClient {
+public final class GameServiceClient
+        implements PhysicalItemGateway, TechniqueLearningGateway, RegionalStorageGateway {
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(2);
 
     private final URI baseUri;
@@ -109,12 +113,32 @@ public final class GameServiceClient {
 
     public CompletableFuture<QuestMutationResult> acceptQuest(
             UUID accountId, String questId, String providerId, UUID operationId) {
-        return mutateQuest(accountId, questId, providerId, operationId, "accept");
+        return mutateQuest(
+                accountId,
+                questId,
+                providerId,
+                operationId,
+                "accept",
+                new QuestProviderRequest(providerId));
     }
 
     public CompletableFuture<QuestMutationResult> turnInQuest(
-            UUID accountId, String questId, String providerId, UUID operationId) {
-        return mutateQuest(accountId, questId, providerId, operationId, "turn-in");
+            UUID accountId,
+            String questId,
+            String providerId,
+            UUID operationId,
+            List<UUID> inventoryItemInstanceIds) {
+        return mutateQuest(
+                accountId,
+                questId,
+                providerId,
+                operationId,
+                "turn-in",
+                new QuestTurnInRequest(
+                        providerId,
+                        List.copyOf(Objects.requireNonNull(
+                                inventoryItemInstanceIds,
+                                "inventoryItemInstanceIds"))));
     }
 
     public CompletableFuture<CombatKillBatchResponse> sendCombatKills(
@@ -232,6 +256,81 @@ public final class GameServiceClient {
                 "item adjustment");
     }
 
+    @Override
+    public CompletableFuture<ItemInstancesSnapshot> fetchPendingItemDeliveries(UUID accountId) {
+        Objects.requireNonNull(accountId, "accountId");
+        return sendGet(
+                "/api/v1/players/" + accountId + "/current-life/items/pending-deliveries",
+                ItemInstancesSnapshot.class,
+                "pending item deliveries");
+    }
+
+    @Override
+    public CompletableFuture<ItemInstancesSnapshot> fetchInventoryItems(UUID accountId) {
+        Objects.requireNonNull(accountId, "accountId");
+        return sendGet(
+                "/api/v1/players/" + accountId + "/current-life/items/inventory",
+                ItemInstancesSnapshot.class,
+                "inventory item instances");
+    }
+
+    @Override
+    public CompletableFuture<ItemDeliveryConfirmationSnapshot> confirmItemDelivery(
+            UUID accountId, UUID itemInstanceId) {
+        Objects.requireNonNull(accountId, "accountId");
+        Objects.requireNonNull(itemInstanceId, "itemInstanceId");
+        return sendNoBody(
+                "/api/v1/players/" + accountId + "/current-life/items/" + itemInstanceId
+                        + "/delivery-confirmation",
+                "PUT",
+                ItemDeliveryConfirmationSnapshot.class,
+                "item delivery confirmation");
+    }
+
+    @Override
+    public CompletableFuture<LearnTechniqueSnapshot> learnTechnique(
+            UUID accountId, UUID itemInstanceId, UUID operationId) {
+        Objects.requireNonNull(accountId, "accountId");
+        Objects.requireNonNull(itemInstanceId, "itemInstanceId");
+        return sendMutation(
+                "/api/v1/players/" + accountId + "/current-life/cultivation/techniques/learn",
+                "POST",
+                new LearnTechniqueRequest(itemInstanceId),
+                operationId,
+                LearnTechniqueSnapshot.class,
+                "technique learning");
+    }
+
+    @Override
+    public CompletableFuture<StorageSnapshot> fetchStorage(UUID accountId, String areaId, int page) {
+        Objects.requireNonNull(accountId, "accountId");
+        requireText(areaId, "areaId");
+        if (page < 1) {
+            throw new IllegalArgumentException("page must be positive");
+        }
+        return sendGet(
+                "/api/v1/players/" + accountId + "/current-life/storage/" + areaId + "?page=" + page,
+                StorageSnapshot.class,
+                "regional storage snapshot");
+    }
+
+    @Override
+    public CompletableFuture<StorageMoveSnapshot> moveStorage(
+            UUID accountId,
+            String areaId,
+            StorageMoveRequest request,
+            UUID operationId) {
+        Objects.requireNonNull(accountId, "accountId");
+        requireText(areaId, "areaId");
+        return sendMutation(
+                "/api/v1/players/" + accountId + "/current-life/storage/" + areaId + "/moves",
+                "POST",
+                request,
+                operationId,
+                StorageMoveSnapshot.class,
+                "regional storage move");
+    }
+
     private <T> CompletableFuture<T> sendGet(String path, Class<T> responseType, String operationName) {
         HttpRequest request = newRequestBuilder(path).GET().build();
         return httpClient
@@ -272,19 +371,38 @@ public final class GameServiceClient {
                 .thenApply(response -> parseJsonResponse(response, responseType, operationName));
     }
 
+    private <T> CompletableFuture<T> sendNoBody(
+            String path,
+            String method,
+            Class<T> responseType,
+            String operationName) {
+        HttpRequest request = newRequestBuilder(path)
+                .method(method, HttpRequest.BodyPublishers.noBody())
+                .build();
+        return httpClient
+                .sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenApply(response -> parseJsonResponse(response, responseType, operationName));
+    }
+
     private CompletableFuture<QuestMutationResult> mutateQuest(
-            UUID accountId, String questId, String providerId, UUID operationId, String operation) {
+            UUID accountId,
+            String questId,
+            String providerId,
+            UUID operationId,
+            String operation,
+            Object requestBody) {
         Objects.requireNonNull(accountId, "accountId");
         Objects.requireNonNull(questId, "questId");
         Objects.requireNonNull(providerId, "providerId");
         Objects.requireNonNull(operationId, "operationId");
+        Objects.requireNonNull(requestBody, "requestBody");
 
         return sendJson(
                 newRequestBuilder("/api/v1/players/" + accountId + "/current-life/quests/" + questId + "/"
                                 + operation)
                         .header("Idempotency-Key", operationId.toString()),
                 "PUT",
-                new QuestMutationRequest(providerId),
+                requestBody,
                 QuestMutationResult.class,
                 "quest " + operation);
     }
@@ -391,11 +509,22 @@ public final class GameServiceClient {
                 .timeout(REQUEST_TIMEOUT);
     }
 
+    private static String requireText(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(field + " must be non-blank");
+        }
+        return value;
+    }
+
     private record PlayerLoginRequest(UUID minecraftUuid, String playerName) {}
 
     private record QuestInteractionStateRequest(List<String> providerIds) {}
 
-    private record QuestMutationRequest(String providerId) {}
+    private record QuestProviderRequest(String providerId) {}
+
+    private record QuestTurnInRequest(String providerId, List<UUID> inventoryItemInstanceIds) {}
+
+    private record LearnTechniqueRequest(UUID itemInstanceId) {}
 
     private record ErrorEnvelope(ErrorBody error) {}
 

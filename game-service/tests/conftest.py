@@ -40,6 +40,12 @@ async def clean_postgres_data(postgres_engine: AsyncEngine) -> AsyncIterator[Non
     statement = text(
         """
         TRUNCATE TABLE
+            technique_learn_operations,
+            regional_storage_operations,
+            regional_storage_slots,
+            regional_storage_containers,
+            item_instances,
+            quest_cultivation_reward_claims,
             item_resource_entries,
             life_item_stacks,
             breakthrough_technique_debits,
@@ -47,11 +53,13 @@ async def clean_postgres_data(postgres_engine: AsyncEngine) -> AsyncIterator[Non
             cultivation_session_techniques,
             life_realm_entries,
             cultivation_resource_entries,
+            quest_cultivation_reward_grants,
             life_cultivation_states,
             cultivation_sessions,
             life_techniques,
             life_mob_kill_counters,
             combat_kill_events,
+            quest_reward_grants,
             quest_operations,
             quest_objective_progress,
             quest_progress,

@@ -7,9 +7,10 @@ from starlette.responses import Response
 from immortal_mmo.quest.schemas import (
     QuestInteractionState,
     QuestInteractionStateRequest,
-    QuestMutationRequest,
     QuestMutationResult,
     QuestProviderCatalog,
+    QuestProviderRequest,
+    QuestTurnInRequest,
 )
 from immortal_mmo.quest.service import QuestService
 
@@ -54,7 +55,7 @@ async def get_quest_interaction_state(
 async def accept_quest(
     account_id: UUID,
     quest_id: str,
-    body: QuestMutationRequest,
+    body: QuestProviderRequest,
     idempotency_key: Annotated[UUID, idempotency_key_header],
     service: QuestService = quest_service_dependency,
 ) -> Response:
@@ -73,11 +74,17 @@ async def accept_quest(
 async def turn_in_quest(
     account_id: UUID,
     quest_id: str,
-    body: QuestMutationRequest,
+    body: QuestTurnInRequest,
     idempotency_key: Annotated[UUID, idempotency_key_header],
     service: QuestService = quest_service_dependency,
 ) -> Response:
-    frozen = await service.turn_in(account_id, quest_id, body.provider_id, idempotency_key)
+    frozen = await service.turn_in(
+        account_id,
+        quest_id,
+        body.provider_id,
+        idempotency_key,
+        inventory_item_instance_ids=tuple(body.inventory_item_instance_ids),
+    )
     return Response(
         content=frozen.body,
         status_code=frozen.status_code,

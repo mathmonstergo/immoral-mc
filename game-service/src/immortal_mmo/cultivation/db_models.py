@@ -16,7 +16,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import BYTEA, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.schema import conv
@@ -110,7 +110,7 @@ class CultivationResourceEntryRow(Base):
         CheckConstraint(
             """
             entry_type IN (
-                'combat_reward', 'seclusion_consumption',
+                'combat_reward', 'quest_reward', 'seclusion_consumption',
                 'seclusion_realization', 'technique_abandonment',
                 'technique_transfer', 'breakthrough_penalty',
                 'administrative_adjustment'
@@ -131,11 +131,21 @@ class CultivationResourceEntryRow(Base):
             (entry_type = 'combat_reward'
                 AND resource_code = 'unrefined_cultivation'
                 AND delta_amount > 0
-                AND kill_event_id IS NOT NULL)
+                AND kill_event_id IS NOT NULL
+                AND quest_reward_grant_id IS NULL)
             OR
-            (entry_type <> 'combat_reward' AND kill_event_id IS NULL)
+            (entry_type = 'quest_reward'
+                AND resource_code = 'unrefined_cultivation'
+                AND delta_amount > 0
+                AND kill_event_id IS NULL
+                AND quest_reward_grant_id IS NOT NULL
+                AND operation_id IS NOT NULL)
+            OR
+            (entry_type NOT IN ('combat_reward', 'quest_reward')
+                AND kill_event_id IS NULL
+                AND quest_reward_grant_id IS NULL)
             """,
-            name=conv("ck_cultivation_combat_source"),
+            name=conv("ck_cultivation_reward_source"),
         ),
         UniqueConstraint(
             "operation_id",
@@ -190,10 +200,152 @@ class CultivationResourceEntryRow(Base):
         PostgreSQLUUID(as_uuid=True),
         nullable=True,
     )
+    quest_reward_grant_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey(
+            "quest_cultivation_reward_grants.grant_id",
+            name=conv("fk_cultivation_entries_quest_reward_grant"),
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=text("now()"),
+    )
+
+
+class QuestCultivationRewardGrantRow(Base):
+    __tablename__ = "quest_cultivation_reward_grants"
+    __table_args__ = (
+        PrimaryKeyConstraint("grant_id", name=conv("pk_quest_cultivation_reward_grants")),
+        UniqueConstraint(
+            "operation_id",
+            "reward_id",
+            name=conv("uq_quest_cultivation_reward_operation"),
+        ),
+        CheckConstraint(
+            "configured_amount > 0 AND credited_amount >= 0 AND pending_amount >= 0 "
+            "AND credited_amount + pending_amount = configured_amount",
+            name=conv("ck_quest_cultivation_reward_amounts"),
+        ),
+        CheckConstraint(
+            "status IN ('applied', 'pending')",
+            name=conv("ck_quest_cultivation_reward_status"),
+        ),
+        CheckConstraint(
+            "(status = 'applied' AND pending_amount = 0) OR "
+            "(status = 'pending' AND pending_amount > 0)",
+            name=conv("ck_quest_cultivation_reward_status_shape"),
+        ),
+        Index("ix_quest_cultivation_reward_pending", "life_id", "status"),
+    )
+
+    grant_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    life_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey(
+            "lives.life_id",
+            name=conv("fk_quest_cultivation_reward_grants_life_id_lives"),
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    operation_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
+    quest_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    reward_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    configured_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    credited_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    pending_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    balance_after: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class QuestCultivationRewardClaimRow(Base):
+    __tablename__ = "quest_cultivation_reward_claims"
+    __table_args__ = (
+        PrimaryKeyConstraint("operation_id", name=conv("pk_quest_cultivation_reward_claims")),
+        UniqueConstraint(
+            "grant_id",
+            "operation_id",
+            name=conv("uq_quest_cultivation_reward_claim_grant"),
+        ),
+        CheckConstraint(
+            "applied_amount > 0 AND pending_amount >= 0 AND balance_after >= 0",
+            name=conv("ck_quest_cultivation_reward_claim_amounts"),
+        ),
+    )
+
+    operation_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    grant_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey(
+            "quest_cultivation_reward_grants.grant_id",
+            name=conv("fk_quest_cultivation_reward_claims_grant_id_grants"),
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    life_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey(
+            "lives.life_id",
+            name=conv("fk_quest_cultivation_reward_claims_life_id_lives"),
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    applied_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    pending_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    balance_after: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    response_body: Mapped[bytes | None] = mapped_column(BYTEA, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class TechniqueLearnOperationRow(Base):
+    __tablename__ = "technique_learn_operations"
+    __table_args__ = (
+        PrimaryKeyConstraint("operation_id", name=conv("pk_technique_learn_operations")),
+        UniqueConstraint(
+            "item_instance_id",
+            name=conv("uq_technique_learn_operations_item"),
+        ),
+        CheckConstraint(
+            "request_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_technique_learn_operations_fingerprint"),
+        ),
+    )
+
+    operation_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    life_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey(
+            "lives.life_id",
+            name=conv("fk_technique_learn_operations_life_id_lives"),
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    item_instance_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey(
+            "item_instances.item_instance_id",
+            name=conv("fk_technique_learn_operations_item_instance_id_item_instances"),
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    technique_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    response_body: Mapped[bytes | None] = mapped_column(BYTEA, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
 
 

@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "storages": [
+    {"area_id": "neutral_training_ground", "page_count": 9, "item_slots_per_page": 45, "permission": "immortalmc.storage"},
+    {"area_id": "accelerated_cave", "page_count": 9, "item_slots_per_page": 45, "permission": "immortalmc.storage"},
+    {"area_id": "rich_spirit_vein", "page_count": 9, "item_slots_per_page": 45, "permission": "immortalmc.storage"}
+  ]
+}

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CultivationSnapshotResponse(BaseModel):
@@ -66,6 +66,33 @@ class TechniqueMutationResponse(BaseModel):
     transferred_amount: int
     destroyed_amount: int
     cultivation: CultivationSnapshotResponse
+
+
+class LearnTechniqueRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_instance_id: UUID
+
+
+class LearnTechniqueResponse(BaseModel):
+    contract_version: Literal[1] = 1
+    operation_id: UUID
+    item_instance_id: UUID
+    life_technique_id: UUID
+    technique_id: str
+    display_name: str
+    current_layer: Literal[0] = 0
+    status: Literal["active"] = "active"
+
+
+class PendingQuestRewardResponse(BaseModel):
+    contract_version: Literal[1] = 1
+    grant_id: UUID
+    operation_id: UUID
+    pending_amount: int
+    applied_amount: int
+    status: Literal["applied", "pending"]
+    unrefined_balance_after: int
 
 
 class StartBreakthroughRequest(BaseModel):

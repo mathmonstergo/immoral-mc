@@ -107,75 +107,7 @@ def upgrade() -> None:
         """
     )
 
-    op.drop_constraint(
-        op.f("ck_item_resource_entry_type"),
-        "item_resource_entries",
-        type_="check",
-    )
-    op.drop_constraint(
-        op.f("ck_item_resource_session_shape"),
-        "item_resource_entries",
-        type_="check",
-    )
-    op.create_check_constraint(
-        op.f("ck_item_resource_entry_type"),
-        "item_resource_entries",
-        "entry_type IN ("
-        "'breakthrough_consumption', 'quest_delivery', 'administrative_adjustment'"
-        ")",
-    )
-    op.create_check_constraint(
-        op.f("ck_item_resource_session_shape"),
-        "item_resource_entries",
-        "(entry_type = 'breakthrough_consumption' "
-        "AND delta_quantity < 0 AND session_id IS NOT NULL) OR "
-        "(entry_type = 'quest_delivery' "
-        "AND delta_quantity < 0 AND session_id IS NULL) OR "
-        "(entry_type = 'administrative_adjustment' AND session_id IS NULL)",
-    )
-
-
 def downgrade() -> None:
-    op.execute(
-        """
-        DO $$
-        BEGIN
-            IF EXISTS (SELECT 1 FROM quest_objective_progress LIMIT 1)
-                OR EXISTS (
-                    SELECT 1
-                    FROM item_resource_entries
-                    WHERE entry_type = 'quest_delivery'
-                    LIMIT 1
-                ) THEN
-                RAISE EXCEPTION
-                    'typed quest objective data exists; downgrade would lose authoritative history';
-            END IF;
-        END;
-        $$
-        """
-    )
-    op.drop_constraint(
-        op.f("ck_item_resource_session_shape"),
-        "item_resource_entries",
-        type_="check",
-    )
-    op.drop_constraint(
-        op.f("ck_item_resource_entry_type"),
-        "item_resource_entries",
-        type_="check",
-    )
-    op.create_check_constraint(
-        op.f("ck_item_resource_entry_type"),
-        "item_resource_entries",
-        "entry_type IN ('breakthrough_consumption', 'administrative_adjustment')",
-    )
-    op.create_check_constraint(
-        op.f("ck_item_resource_session_shape"),
-        "item_resource_entries",
-        "(entry_type = 'breakthrough_consumption' AND delta_quantity < 0) OR "
-        "(entry_type = 'administrative_adjustment' AND session_id IS NULL)",
-    )
-
     op.execute(
         "DROP TRIGGER trg_quest_objective_progress_prevent_reversal_delete "
         "ON quest_objective_progress"

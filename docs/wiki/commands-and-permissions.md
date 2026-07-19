@@ -8,8 +8,10 @@ ImmortalMC 当前只注册一个根命令：`/immortal`。
 |---|---|---|
 | `immortalmc.command` | OP | 诊断、内容绑定、测试入口和物品发放 |
 | `immortalmc.cultivation` | 所有玩家 | 闭关和突破命令 |
+| `immortalmc.storage` | 所有玩家 | 打开当前地区的个人分页仓库 |
 
-只有 `seclusion` 和 `breakthrough` 使用公开修炼权限，其余当前子命令都使用管理权限。
+`seclusion` 和 `breakthrough` 使用公开修炼权限，`storage` 使用公开仓库权限，其余当前
+子命令都使用管理权限。
 
 ## 玩家修炼命令
 
@@ -17,6 +19,7 @@ ImmortalMC 当前只注册一个根命令：`/immortal`。
 |---|---|---|
 | `/immortal seclusion` | 仅玩家 | 打开权威功法选择界面 |
 | `/immortal breakthrough <pill-count>` | 仅玩家，数量 1-10 | 发起突破并安排自动结算 |
+| `/immortal storage` | 仅玩家，位于已配置地区 | 打开当前人生、当前地区的分页大箱子仓库 |
 
 ## 诊断与测试命令
 
@@ -74,4 +77,4 @@ ImmortalMC 当前只注册一个根命令：`/immortal`。
 - `No Citizens NPC selected`：以玩家身份执行 `/npc select <id|name>`。
 - 模板目录不可用：确认 Game Service 已就绪，再执行 `/immortal quest reload`。
 - 视线命令找不到实体：站到 8 格内并准确看向实体碰撞箱，不会自动选择最近实体。
-- 权限不足：检查上面的两个权限节点及发送者是否还需要 OP 身份。
+- 权限不足：检查上面的三个权限节点及发送者是否还需要 OP 身份。

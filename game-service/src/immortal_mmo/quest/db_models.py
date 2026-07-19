@@ -15,6 +15,7 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     SmallInteger,
     String,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import BYTEA
@@ -268,4 +269,67 @@ class QuestOperationRow(Base):
     finalized_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
+    )
+
+
+class QuestRewardGrantRow(Base):
+    __tablename__ = "quest_reward_grants"
+    __table_args__ = (
+        PrimaryKeyConstraint("grant_id", name=conv("pk_quest_reward_grants")),
+        ForeignKeyConstraint(
+            ["operation_id"],
+            ["quest_operations.operation_id"],
+            name=conv("fk_quest_reward_grants_operation"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["life_id", "quest_id"],
+            ["quest_progress.life_id", "quest_progress.quest_id"],
+            name=conv("fk_quest_reward_grants_progress"),
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "operation_id",
+            "reward_id",
+            name=conv("uq_quest_reward_grants_operation_reward"),
+        ),
+        CheckConstraint(
+            "reward_type IN ('fixed_item', 'unrefined_cultivation')",
+            name=conv("ck_quest_reward_grants_type"),
+        ),
+        CheckConstraint(
+            "configured_amount > 0 AND applied_amount >= 0 AND pending_amount >= 0 "
+            "AND applied_amount + pending_amount = configured_amount",
+            name=conv("ck_quest_reward_grants_amounts"),
+        ),
+        CheckConstraint(
+            "status IN ('applied', 'pending')",
+            name=conv("ck_quest_reward_grants_status"),
+        ),
+        CheckConstraint(
+            "(reward_type = 'fixed_item' AND item_code IS NOT NULL) OR "
+            "(reward_type = 'unrefined_cultivation' AND item_code IS NULL)",
+            name=conv("ck_quest_reward_grants_item_shape"),
+        ),
+        CheckConstraint(
+            "(status = 'applied' AND pending_amount = 0) OR "
+            "(status = 'pending' AND pending_amount > 0)",
+            name=conv("ck_quest_reward_grants_status_shape"),
+        ),
+        Index("ix_quest_reward_grants_life_status", "life_id", "status"),
+    )
+
+    grant_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    life_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
+    operation_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
+    quest_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    reward_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    reward_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    item_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    configured_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    applied_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    pending_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

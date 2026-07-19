@@ -5,7 +5,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from immortal_mmo.core.errors import ConflictError, NotFoundError, RuleViolationError
 from immortal_mmo.core.uow import UnitOfWorkFactory
@@ -24,9 +24,11 @@ from immortal_mmo.cultivation.errors import (
 from immortal_mmo.cultivation.models import (
     BreakthroughTechniqueDebit,
     CultivationSession,
+    LifeTechnique,
     RealmEntry,
     SessionTechnique,
     TechniqueInvestmentChange,
+    TechniqueLearnOperation,
 )
 from immortal_mmo.cultivation.penalties import (
     allocate_breakthrough_penalty,
@@ -43,6 +45,8 @@ from immortal_mmo.cultivation.schemas import (
     BreakthroughSnapshotResponse,
     CultivationSnapshotResponse,
     ItemAdjustmentResponse,
+    LearnTechniqueResponse,
+    PendingQuestRewardResponse,
     SeclusionSnapshotResponse,
     TechniqueMutationResponse,
     TechniqueSnapshotResponse,
@@ -89,6 +93,16 @@ class CultivationTechniqueNotFoundError(NotFoundError):
 class CultivationTechniqueRuleError(RuleViolationError):
     code = "cultivation.technique_rule_violation"
     message = "Technique mutation is not allowed."
+
+
+class CultivationTechniqueLearnConflictError(ConflictError):
+    code = "cultivation.technique_learn_conflict"
+    message = "Technique learning conflicts with current state."
+
+
+class CultivationTechniqueLearnRuleError(RuleViolationError):
+    code = "cultivation.technique_learn_rule_violation"
+    message = "Technique cannot be learned in the current state."
 
 
 class CultivationBreakthroughConflictError(ConflictError):
@@ -206,6 +220,232 @@ class CultivationService:
                 )
             )
         return tuple(snapshots)
+
+    async def learn_technique(
+        self,
+        *,
+        account_id: UUID,
+        item_instance_id: UUID,
+        idempotency_key: UUID,
+    ) -> LearnTechniqueResponse:
+        request_payload = {
+            "item_instance_id": str(item_instance_id),
+        }
+        request_fingerprint = _request_fingerprint(request_payload)
+        now = self._clock()
+        async with self._uow_factory() as uow:
+            account = await uow.players.lock_account(account_id)
+            if account is None:
+                raise PlayerAccountNotFoundError()
+            facts = await uow.players.get_current_life_facts(account_id, for_update=True)
+            if facts is None:
+                raise PlayerLifecycleError()
+            replay = await uow.cultivation.get_learn_operation(idempotency_key)
+            if replay is not None:
+                if (
+                    replay.life_id != facts.life_id
+                    or replay.item_instance_id != item_instance_id
+                    or replay.request_fingerprint != request_fingerprint
+                    or replay.response_body is None
+                ):
+                    raise CultivationTechniqueLearnConflictError(
+                        "Technique learn idempotency key was reused"
+                    )
+                await uow.rollback()
+                return LearnTechniqueResponse.model_validate_json(replay.response_body)
+
+            item = await uow.items.get_instance(item_instance_id, for_update=True)
+            if item is None or item.life_id != facts.life_id:
+                raise CultivationTechniqueLearnRuleError(
+                    "Technique manual does not belong to the current life"
+                )
+            if item.status.value == "consumed":
+                raise CultivationTechniqueLearnConflictError(
+                    "Technique manual has already been consumed"
+                )
+            if (
+                item.status.value != "owned"
+                or item.location is None
+                or item.location.value != "inventory"
+            ):
+                raise CultivationTechniqueLearnConflictError(
+                    "Technique manual is not in the player inventory"
+                )
+            technique_id = item.technique_id
+            if technique_id is None or item.item_code != f"technique_manual:{technique_id}":
+                raise CultivationTechniqueLearnRuleError(
+                    "Item is not a technique manual"
+                )
+
+            state = await uow.cultivation.get_or_create_state(
+                facts.life_id,
+                for_update=True,
+            )
+            if state.active_session_id is not None:
+                raise CultivationTechniqueLearnConflictError(
+                    "Cannot learn a technique during an active cultivation session"
+                )
+            definition = self._technique_catalog.techniques.get(technique_id)
+            if definition is None:
+                raise CultivationTechniqueLearnRuleError("Unknown technique")
+            if state.current_level < definition.minimum_player_level:
+                raise CultivationTechniqueLearnRuleError(
+                    "Current realm is below the technique requirement"
+                )
+            if facts.spirit_root is None:
+                raise CultivationTechniqueLearnRuleError(
+                    "Spirit root must be detected before learning a technique"
+                )
+            available_elements = set(facts.spirit_root.base_element_codes)
+            if facts.spirit_root.variant_element_code is not None:
+                available_elements.add(facts.spirit_root.variant_element_code)
+            if not set(definition.required_elements).issubset(available_elements):
+                raise CultivationTechniqueLearnRuleError(
+                    "Spirit root does not satisfy the technique elements"
+                )
+            techniques = await uow.cultivation.get_techniques(
+                facts.life_id,
+                for_update=True,
+            )
+            if any(item.technique_id == technique_id for item in techniques):
+                raise CultivationTechniqueLearnRuleError("Technique is already known")
+            active_in_group = sum(
+                item.status == "active" and item.group_code == definition.group
+                for item in techniques
+            )
+            if active_in_group >= self._technique_catalog.group_retention_cap(definition.group):
+                raise CultivationTechniqueLearnRuleError(
+                    "Technique group retention capacity is full"
+                )
+            by_technique_id = {
+                item.technique_id: item
+                for item in techniques
+                if item.status == "active"
+            }
+            for prerequisite in definition.prerequisites:
+                learned = by_technique_id.get(prerequisite.technique_id)
+                if learned is None or learned.current_layer < prerequisite.min_layer:
+                    raise CultivationTechniqueLearnRuleError(
+                        "Technique prerequisites are not satisfied"
+                    )
+
+            if (
+                item.definition_version != self._technique_catalog.schema_version
+            ):
+                raise CultivationTechniqueLearnRuleError(
+                    "Technique manual definition version is not current"
+                )
+            capacity = self._technique_capacity(definition.group)
+            life_technique = LifeTechnique(
+                life_technique_id=uuid5(
+                    idempotency_key,
+                    f"life-technique:{facts.life_id}:{technique_id}",
+                ),
+                life_id=facts.life_id,
+                technique_id=technique_id,
+                definition_version=self._technique_catalog.schema_version,
+                group_code=definition.group,
+                major_realm=definition.major_realm,
+                invested_amount=0,
+                max_investment=capacity,
+                current_layer=0,
+                status="active",
+            )
+            operation = TechniqueLearnOperation(
+                operation_id=idempotency_key,
+                life_id=facts.life_id,
+                item_instance_id=item_instance_id,
+                technique_id=technique_id,
+                request_fingerprint=request_fingerprint,
+                response_body=None,
+                created_at=now,
+            )
+            await uow.cultivation.learn_technique(
+                operation=operation,
+                technique=life_technique,
+            )
+            try:
+                await uow.items.consume_instance(
+                    item_instance_id=item_instance_id,
+                    life_id=facts.life_id,
+                    consumed_at=now,
+                )
+            except (KeyError, ItemOperationConflict) as error:
+                raise CultivationTechniqueLearnConflictError(
+                    "Technique manual ownership changed"
+                ) from error
+            response = LearnTechniqueResponse(
+                operation_id=idempotency_key,
+                item_instance_id=item_instance_id,
+                life_technique_id=life_technique.life_technique_id,
+                technique_id=technique_id,
+                display_name=definition.name,
+            )
+            await uow.cultivation.finalize_learn_operation(
+                operation_id=idempotency_key,
+                response_body=response.model_dump_json().encode(),
+            )
+            await uow.commit()
+        return response
+
+    def _technique_capacity(self, group: str) -> int:
+        if group == "qi":
+            return 3_780
+        try:
+            level = int(group.split(":", 1)[1])
+        except (IndexError, ValueError) as error:
+            raise CultivationTechniqueLearnRuleError("Unknown technique group") from error
+        return self._realm_catalog.level(level).max_exp
+
+    async def claim_pending_quest_reward(
+        self,
+        *,
+        account_id: UUID,
+        grant_id: UUID,
+        idempotency_key: UUID,
+    ) -> PendingQuestRewardResponse:
+        now = self._clock()
+        async with self._uow_factory() as uow:
+            account = await uow.players.lock_account(account_id)
+            if account is None:
+                raise PlayerAccountNotFoundError()
+            life = await uow.players.get_current_life(account_id, for_update=True)
+            if life is None:
+                raise PlayerLifecycleError()
+            state = await uow.cultivation.get_or_create_state(life.life_id, for_update=True)
+            try:
+                claim = await uow.cultivation.claim_pending_quest_reward(
+                    operation_id=idempotency_key,
+                    grant_id=grant_id,
+                    life_id=life.life_id,
+                    cap=self._realm_catalog.level(state.current_level).max_exp,
+                    occurred_at=now,
+                )
+            except KeyError as error:
+                raise CultivationTechniqueLearnRuleError(str(error)) from error
+            except ValueError as error:
+                raise CultivationTechniqueLearnConflictError(str(error)) from error
+            await uow.quests.update_reward_grant_progress(
+                grant_id=grant_id,
+                pending_amount=claim.pending_amount,
+            )
+            response = PendingQuestRewardResponse(
+                operation_id=idempotency_key,
+                grant_id=grant_id,
+                pending_amount=claim.pending_amount,
+                applied_amount=claim.applied_amount,
+                status="applied" if claim.pending_amount == 0 else "pending",
+                unrefined_balance_after=claim.balance_after,
+            )
+            if claim.response_body is not None:
+                await uow.rollback()
+                return PendingQuestRewardResponse.model_validate_json(claim.response_body)
+            await uow.cultivation.finalize_quest_reward_claim(
+                operation_id=idempotency_key,
+                response_body=response.model_dump_json().encode(),
+            )
+            await uow.commit()
+        return response
 
     async def abandon_technique(
         self,

@@ -46,6 +46,16 @@ Content-Type: application/json
 {"provider_id": "old-man"}
 ```
 
+交付任务使用独立请求体，并且必须显式提交玩家背包中扫描到的实体物品 ID；没有物品目标时
+也提交空列表：
+
+```json
+{
+  "provider_id": "old-man",
+  "inventory_item_instance_ids": []
+}
+```
+
 首次成功或领域失败的 HTTP 响应正文会被冻结；使用相同操作标识重试时，将重放该响应。
 
 ## 战斗
@@ -63,6 +73,8 @@ POST /api/v1/combat/mythicmob-kills/batch
 ```http
 GET  /api/v1/players/{account_id}/current-life/cultivation
 GET  /api/v1/players/{account_id}/current-life/cultivation/techniques
+POST /api/v1/players/{account_id}/current-life/cultivation/techniques/learn
+POST /api/v1/players/{account_id}/current-life/cultivation/quest-rewards/{grant_id}/claim
 POST /api/v1/players/{account_id}/current-life/cultivation/techniques/{life_technique_id}/abandon
 POST /api/v1/players/{account_id}/current-life/cultivation/techniques/{life_technique_id}/transfer
 POST /api/v1/players/{account_id}/current-life/items/adjustments
@@ -76,6 +88,30 @@ POST /api/v1/players/{account_id}/current-life/cultivation/breakthroughs/{sessio
 
 启动会话、功法变更和物品调整操作按照 OpenAPI 定义使用 UUID 幂等键。状态查询和
 结算接口读取或推进此前创建的权威会话；客户端不得自行生成结算数值。
+
+功法学习请求只提交权威 `item_instance_id`；`technique_id`、目录版本、资格和初始层数由
+Game Service 从实体物品与功法目录推导。
+
+实体物品投递与背包对账接口：
+
+```http
+GET /api/v1/players/{account_id}/current-life/items/pending-deliveries
+GET /api/v1/players/{account_id}/current-life/items/inventory
+PUT /api/v1/players/{account_id}/current-life/items/{item_instance_id}/delivery-confirmation
+```
+
+公开投影只包含物品身份、定义版本、可选功法 ID、状态和位置，不暴露内部来源字段。
+
+## 地区仓库
+
+```http
+GET  /api/v1/players/{account_id}/current-life/storage/{area_id}?page=1
+POST /api/v1/players/{account_id}/current-life/storage/{area_id}/moves
+```
+
+仓库快照包含页码、页数、45 个物品槽和容器修订版本。移动请求必须携带 UUID
+`Idempotency-Key` 和预期修订版本；客户端只能提交稳定槽位/物品实例身份，不能提交可信
+的最终槽位内容。过期修订会返回稳定冲突错误，客户端应重新获取页面。
 
 ## 错误封装格式
 

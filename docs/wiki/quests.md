@@ -23,7 +23,7 @@ provider: old-man / 老村民
 | 类型 | 构造字段 | 完成条件 | 接受任务前的状态 |
 |---|---|---|---|
 | 灵根存在（`current_life_spirit_root_present`） | 无额外目标字段 | 当前人生已有灵根 | 立即计入 |
-| 物品交付 | `item_code`, `required_quantity` | 当前人生的权威物品堆数量充足；交付时消耗准确数量 | 立即计入 |
+| 物品交付 | `item_code`, `required_quantity` | 玩家实际背包中的权威实体物品数量充足；交付时消耗准确实例 | 立即计入 |
 | MythicMobs 击杀数量 | `mob_internal_name`, `required_count` | 接受任务后产生了足够数量、符合条件的新权威击杀 | 不计入 |
 | 功法层数 | `technique_id`, `target_layer` | 指定的有效功法达到或超过目标层数 | 立即计入 |
 | 境界等级 | `target_level` | 当前人生达到或超过配置的绝对等级 | 立即计入 |
@@ -47,9 +47,10 @@ ItemDeliveryObjectiveDefinition(
 )
 ```
 
-投影只读取 Game Service 的物品堆。交付时会锁定全部所需物品堆，校验所有余额和重放身份，
-然后在同一事务中消耗全部物品并完成任务。数量不足或发生冲突时不会消耗任何物品。
-这里使用的不是玩家原版 Bukkit 背包。
+Paper 在交付时扫描玩家实际背包中的实体 `item_instance_id`，Game Service 再校验实例属于
+当前人生、状态为 `owned`、位置为 `inventory` 且 `item_code` 匹配。所有所需实例会在同一
+事务中校验、消耗并完成任务；数量不足、重复实例或身份冲突时不会消耗任何物品。仅有同名
+原版物品、伪造名称/Lore 或存放在地区仓库中的实例都不能交付。
 
 通用目标模型接受稳定的物品 ID。在完整物品目录加入前，当前 Paper 管理员发放命令/API
 只开放 `foundation_pill`。
@@ -218,6 +219,38 @@ plugins/ImmortalMC/dialogues/foundation-trial.completed.yml
 选中的 Citizens NPC 必须已生成。重新绑定只会替换该 NPC 原有的任务提供者绑定。
 同一个提供者模板可以由多个 NPC 复用。解除绑定绝不会删除 Citizens NPC。
 
+## 配置任务奖励
+
+任务可以配置固定实体物品和固定未炼化修为奖励：
+
+```python
+from immortal_mmo.quest.models import (
+    FixedItemRewardDefinition,
+    UnrefinedCultivationRewardDefinition,
+)
+
+rewards=(
+    FixedItemRewardDefinition(
+        reward_id="starter-technique-manual",
+        item_code="technique_manual:GF_YinqiShu_01",
+        quantity=1,
+        technique_id="GF_YinqiShu_01",
+    ),
+    UnrefinedCultivationRewardDefinition(
+        reward_id="starter-cultivation",
+        amount=50,
+    ),
+)
+```
+
+`reward_id` 在任务内必须唯一。固定物品奖励会创建独立 `item_instance_id` 并进入待投递状态；
+功法秘籍的 `item_code` 与 `technique_id` 必须准确对应。固定未炼化修为直接写入权威储备，
+不受地区、境界、闭关速度或产出倍率影响；达到储备上限的剩余部分会保持待领取状态，可通过
+权威领取 API 在容量释放后继续领取。VIP 奖励倍率尚未实现。
+
+当前 `first-steps` 已配置 1 本引气术秘籍和 50 点未炼化修为。实体物品的投递、对账和使用
+参见[实体物品与功法秘籍](physical-items-and-technique-manuals.md)。
+
 ## 玩家交互
 
 - 进入配置半径后，可以显示一条根据状态变化的私有接近提示。
@@ -235,5 +268,3 @@ plugins/ImmortalMC/dialogues/foundation-trial.completed.yml
 5. 验证接受任务前的击杀不会计入，重复事件也不会被计算两次。
 6. 验证物品不足时不会消耗任何物品，成功交付会消耗准确的配置数量。
 7. 验证只有指定功法/境界能够完成状态目标，无关功法或境界不能完成目标。
-
-当前功能范围尚未实现任务奖励。在奖励模型完成前，不要在对话中承诺奖励。

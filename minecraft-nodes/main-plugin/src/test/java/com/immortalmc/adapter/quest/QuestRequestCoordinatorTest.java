@@ -156,11 +156,7 @@ class QuestRequestCoordinatorTest {
         CompletableFuture<QuestMutationResult> accept = coordinator.accept(
                 PLAYER_ID, ACCOUNT_ID, LIFE_ID, "first-steps", "old-man", OPERATION_ID);
         QuestInteractionState acceptedState = state(1, 2, "active");
-        mutationNetwork.complete(new QuestMutationResult(
-                OPERATION_ID,
-                true,
-                acceptedState.providers().getFirst().quests().getFirst(),
-                acceptedState));
+        mutationNetwork.complete(mutation(OPERATION_ID, acceptedState));
         accept.join();
 
         assertTrue(inspectNetwork.isCancelled());
@@ -183,11 +179,7 @@ class QuestRequestCoordinatorTest {
         CompletableFuture<QuestInteractionState> refresh =
                 coordinator.refresh(PLAYER_ID, ACCOUNT_ID, LIFE_ID, "old-man");
         QuestInteractionState acceptedState = state(1, 2, "active");
-        mutationNetwork.complete(new QuestMutationResult(
-                OPERATION_ID,
-                true,
-                acceptedState.providers().getFirst().quests().getFirst(),
-                acceptedState));
+        mutationNetwork.complete(mutation(OPERATION_ID, acceptedState));
 
         assertEquals(acceptedState, accept.join().interactionState());
         assertEquals(acceptedState, refresh.join());
@@ -207,7 +199,13 @@ class QuestRequestCoordinatorTest {
         CompletableFuture<QuestMutationResult> duplicate = coordinator.accept(
                 PLAYER_ID, ACCOUNT_ID, LIFE_ID, "first-steps", "old-man", OPERATION_ID);
         CompletableFuture<QuestMutationResult> busy = coordinator.turnIn(
-                PLAYER_ID, ACCOUNT_ID, LIFE_ID, "first-steps", "old-man", OTHER_OPERATION_ID);
+                PLAYER_ID,
+                ACCOUNT_ID,
+                LIFE_ID,
+                "first-steps",
+                "old-man",
+                OTHER_OPERATION_ID,
+                List.of());
 
         assertSame(first, duplicate);
         assertEquals(1, gateway.acceptCalls.get());
@@ -216,11 +214,7 @@ class QuestRequestCoordinatorTest {
         assertEquals(0, gateway.turnInCalls.get());
 
         QuestInteractionState acceptedState = state(1, 2, "active");
-        mutationNetwork.complete(new QuestMutationResult(
-                OPERATION_ID,
-                true,
-                acceptedState.providers().getFirst().quests().getFirst(),
-                acceptedState));
+        mutationNetwork.complete(mutation(OPERATION_ID, acceptedState));
         first.join();
     }
 
@@ -254,11 +248,7 @@ class QuestRequestCoordinatorTest {
         FakeGateway gateway = new FakeGateway();
         QuestInteractionState acceptedState = state(1, 2, "active");
         gateway.accepts.add(CompletableFuture.failedFuture(new GameServiceException("connection reset")));
-        gateway.accepts.add(CompletableFuture.completedFuture(new QuestMutationResult(
-                OPERATION_ID,
-                true,
-                acceptedState.providers().getFirst().quests().getFirst(),
-                acceptedState)));
+        gateway.accepts.add(CompletableFuture.completedFuture(mutation(OPERATION_ID, acceptedState)));
         QuestRequestCoordinator coordinator = coordinator(gateway, Runnable::run, new MutableClock(NOW));
 
         QuestMutationResult result = coordinator.accept(
@@ -291,11 +281,7 @@ class QuestRequestCoordinatorTest {
     void successfulTurnInWritesThroughCompletedProjection() {
         FakeGateway gateway = new FakeGateway();
         QuestInteractionState completedState = state(2, 3, "completed");
-        gateway.turnIns.add(CompletableFuture.completedFuture(new QuestMutationResult(
-                OPERATION_ID,
-                true,
-                completedState.providers().getFirst().quests().getFirst(),
-                completedState)));
+        gateway.turnIns.add(CompletableFuture.completedFuture(mutation(OPERATION_ID, completedState)));
         QuestInteractionCache cache = new QuestInteractionCache();
         QuestRequestCoordinator coordinator = new QuestRequestCoordinator(
                 gateway,
@@ -305,7 +291,16 @@ class QuestRequestCoordinatorTest {
                 Duration.ofMillis(100),
                 Duration.ofSeconds(1));
 
-        coordinator.turnIn(PLAYER_ID, ACCOUNT_ID, LIFE_ID, "first-steps", "old-man", OPERATION_ID).join();
+        List<UUID> inventoryItemIds = List.of(UUID.fromString("50000000-0000-0000-0000-000000000001"));
+        coordinator.turnIn(
+                        PLAYER_ID,
+                        ACCOUNT_ID,
+                        LIFE_ID,
+                        "first-steps",
+                        "old-man",
+                        OPERATION_ID,
+                        inventoryItemIds)
+                .join();
 
         assertEquals("completed", cache.findLastConfirmed(PLAYER_ID, "old-man")
                 .orElseThrow()
@@ -315,17 +310,14 @@ class QuestRequestCoordinatorTest {
                 .quests()
                 .getFirst()
                 .state());
+        assertEquals(List.of(inventoryItemIds), gateway.turnInItemIds);
     }
 
     @Test
     void mutationWithWrongLifeProjectionFailsInsteadOfPublishingSuccess() {
         FakeGateway gateway = new FakeGateway();
         QuestInteractionState wrongLife = state(1, 1, "active", NEXT_LIFE_ID);
-        gateway.accepts.add(CompletableFuture.completedFuture(new QuestMutationResult(
-                OPERATION_ID,
-                true,
-                wrongLife.providers().getFirst().quests().getFirst(),
-                wrongLife)));
+        gateway.accepts.add(CompletableFuture.completedFuture(mutation(OPERATION_ID, wrongLife)));
         QuestInteractionCache cache = new QuestInteractionCache();
         QuestRequestCoordinator coordinator = new QuestRequestCoordinator(
                 gateway,
@@ -386,11 +378,7 @@ class QuestRequestCoordinatorTest {
                 PLAYER_ID, ACCOUNT_ID, LIFE_ID, "first-steps", "old-man", OPERATION_ID);
         coordinator.clearPlayer(PLAYER_ID);
         QuestInteractionState acceptedState = state(1, 1, "active");
-        network.complete(new QuestMutationResult(
-                OPERATION_ID,
-                true,
-                acceptedState.providers().getFirst().quests().getFirst(),
-                acceptedState));
+        network.complete(mutation(OPERATION_ID, acceptedState));
 
         assertThrows(java.util.concurrent.CancellationException.class, mutation::join);
         assertTrue(cache.findLastConfirmed(PLAYER_ID, "old-man").isEmpty());
@@ -459,11 +447,24 @@ class QuestRequestCoordinatorTest {
                 2000);
     }
 
+    private static QuestMutationResult mutation(
+            UUID operationId,
+            QuestInteractionState state) {
+        return new QuestMutationResult(
+                operationId,
+                true,
+                state.providers().getFirst().quests().getFirst(),
+                state,
+                List.of(),
+                List.of());
+    }
+
     private static final class FakeGateway implements QuestRequestCoordinator.Gateway {
         private final AtomicInteger refreshCalls = new AtomicInteger();
         private final AtomicInteger acceptCalls = new AtomicInteger();
         private final AtomicInteger turnInCalls = new AtomicInteger();
         private final List<UUID> acceptOperationIds = new ArrayList<>();
+        private final List<List<UUID>> turnInItemIds = new ArrayList<>();
         private final Queue<CompletableFuture<QuestInteractionState>> refreshes = new ArrayDeque<>();
         private final Queue<CompletableFuture<QuestMutationResult>> accepts = new ArrayDeque<>();
         private final Queue<CompletableFuture<QuestMutationResult>> turnIns = new ArrayDeque<>();
@@ -485,8 +486,13 @@ class QuestRequestCoordinatorTest {
 
         @Override
         public CompletableFuture<QuestMutationResult> turnInQuest(
-                UUID accountId, String questId, String providerId, UUID operationId) {
+                UUID accountId,
+                String questId,
+                String providerId,
+                UUID operationId,
+                List<UUID> inventoryItemInstanceIds) {
             turnInCalls.incrementAndGet();
+            turnInItemIds.add(List.copyOf(inventoryItemInstanceIds));
             return turnIns.remove();
         }
     }

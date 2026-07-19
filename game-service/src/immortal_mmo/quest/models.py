@@ -12,6 +12,11 @@ class QuestRepeatability(StrEnum):
     ONCE_PER_LIFE = "once_per_life"
 
 
+class QuestRewardType(StrEnum):
+    FIXED_ITEM = "fixed_item"
+    UNREFINED_CULTIVATION = "unrefined_cultivation"
+
+
 class QuestObjectiveType(StrEnum):
     CURRENT_LIFE_SPIRIT_ROOT_PRESENT = "current_life_spirit_root_present"
     ITEM_DELIVERY = "item_delivery"
@@ -129,6 +134,45 @@ QuestObjectiveDefinition = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class FixedItemRewardDefinition:
+    reward_id: str
+    item_code: str
+    quantity: int
+    technique_id: str | None = None
+    reward_type: QuestRewardType = field(init=False, default=QuestRewardType.FIXED_ITEM)
+
+    def __post_init__(self) -> None:
+        _validate_target_id(self.reward_id, "reward_id")
+        _validate_target_id(self.item_code, "item_code")
+        _validate_positive_int(self.quantity, "quantity")
+        if self.technique_id is not None:
+            _validate_target_id(self.technique_id, "technique_id")
+        if self.item_code.startswith("technique_manual:"):
+            encoded_technique_id = self.item_code.split(":", 1)[1]
+            if self.technique_id != encoded_technique_id:
+                raise ValueError(
+                    "Technique manual reward item_code and technique_id must match"
+                )
+
+
+@dataclass(frozen=True, slots=True)
+class UnrefinedCultivationRewardDefinition:
+    reward_id: str
+    amount: int
+    reward_type: QuestRewardType = field(
+        init=False,
+        default=QuestRewardType.UNREFINED_CULTIVATION,
+    )
+
+    def __post_init__(self) -> None:
+        _validate_target_id(self.reward_id, "reward_id")
+        _validate_positive_int(self.amount, "amount")
+
+
+QuestRewardDefinition = FixedItemRewardDefinition | UnrefinedCultivationRewardDefinition
+
+
 def objective_target_key(objective: QuestObjectiveDefinition) -> tuple[str, str]:
     if isinstance(objective, CurrentLifeSpiritRootObjectiveDefinition):
         target = "current-life"
@@ -192,6 +236,20 @@ class QuestDefinition:
     turn_in_provider_ids: tuple[str, ...]
     dialogue_keys: QuestDialogueKeys
     presentation: QuestPresentationHints
+    rewards: tuple[QuestRewardDefinition, ...] = ()
+
+    def __post_init__(self) -> None:
+        if any(
+            not isinstance(
+                reward,
+                (FixedItemRewardDefinition, UnrefinedCultivationRewardDefinition),
+            )
+            for reward in self.rewards
+        ):
+            raise ValueError(f"Quest {self.quest_id} contains an unsupported reward definition")
+        reward_ids = [reward.reward_id for reward in self.rewards]
+        if len(reward_ids) != len(set(reward_ids)):
+            raise ValueError(f"Duplicate reward ID in quest {self.quest_id}")
 
 
 @dataclass(frozen=True, slots=True)

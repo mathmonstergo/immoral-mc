@@ -9,12 +9,15 @@ from immortal_mmo.cultivation.repository import CultivationRepository
 from immortal_mmo.item.repository import ItemRepository
 from immortal_mmo.player.repository import PlayerRepository
 from immortal_mmo.quest.repository import QuestRepository
+from immortal_mmo.storage.postgres_repository import PostgresStorageRepository
+from immortal_mmo.storage.repository import StorageRepository
 
 PlayerRepositoryFactory = Callable[[AsyncSession], PlayerRepository]
 QuestRepositoryFactory = Callable[[AsyncSession], QuestRepository]
 CombatRepositoryFactory = Callable[[AsyncSession], CombatRepository]
 CultivationRepositoryFactory = Callable[[AsyncSession], CultivationRepository]
 ItemRepositoryFactory = Callable[[AsyncSession], ItemRepository]
+StorageRepositoryFactory = Callable[[AsyncSession], StorageRepository]
 
 ISOLATION_LEVELS: dict[IsolationLevel, str] = {
     "read_committed": "READ COMMITTED",
@@ -32,6 +35,7 @@ class SqlAlchemyUnitOfWork:
         combat_repository_factory: CombatRepositoryFactory,
         cultivation_repository_factory: CultivationRepositoryFactory,
         item_repository_factory: ItemRepositoryFactory,
+        storage_repository_factory: StorageRepositoryFactory,
     ) -> None:
         self._sessions = sessions
         self._isolation = isolation
@@ -40,6 +44,7 @@ class SqlAlchemyUnitOfWork:
         self._combat_repository_factory = combat_repository_factory
         self._cultivation_repository_factory = cultivation_repository_factory
         self._item_repository_factory = item_repository_factory
+        self._storage_repository_factory = storage_repository_factory
 
     async def __aenter__(self) -> "SqlAlchemyUnitOfWork":
         self.session = self._sessions()
@@ -52,6 +57,7 @@ class SqlAlchemyUnitOfWork:
             self.combat = self._combat_repository_factory(self.session)
             self.cultivation = self._cultivation_repository_factory(self.session)
             self.items = self._item_repository_factory(self.session)
+            self.storage = self._storage_repository_factory(self.session)
             return self
         except BaseException:
             await self._rollback_and_close()
@@ -88,6 +94,7 @@ class SqlAlchemyUnitOfWorkFactory:
         combat_repository_factory: CombatRepositoryFactory,
         cultivation_repository_factory: CultivationRepositoryFactory,
         item_repository_factory: ItemRepositoryFactory,
+        storage_repository_factory: StorageRepositoryFactory = PostgresStorageRepository,
     ) -> None:
         self._sessions = sessions
         self._player_repository_factory = player_repository_factory
@@ -95,6 +102,7 @@ class SqlAlchemyUnitOfWorkFactory:
         self._combat_repository_factory = combat_repository_factory
         self._cultivation_repository_factory = cultivation_repository_factory
         self._item_repository_factory = item_repository_factory
+        self._storage_repository_factory = storage_repository_factory
 
     def __call__(
         self,
@@ -109,4 +117,5 @@ class SqlAlchemyUnitOfWorkFactory:
             self._combat_repository_factory,
             self._cultivation_repository_factory,
             self._item_repository_factory,
+            self._storage_repository_factory,
         )

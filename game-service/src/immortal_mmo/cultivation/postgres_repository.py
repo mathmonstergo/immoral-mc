@@ -16,7 +16,10 @@ from immortal_mmo.cultivation.db_models import (
     LifeCultivationStateRow,
     LifeRealmEntryRow,
     LifeTechniqueRow,
+    QuestCultivationRewardClaimRow,
+    QuestCultivationRewardGrantRow,
     TechniqueInvestmentEntryRow,
+    TechniqueLearnOperationRow,
 )
 from immortal_mmo.cultivation.layer_curves import layer_for_major_realm
 from immortal_mmo.cultivation.models import (
@@ -25,9 +28,12 @@ from immortal_mmo.cultivation.models import (
     CultivationSession,
     CultivationState,
     LifeTechnique,
+    QuestCultivationRewardClaim,
+    QuestCultivationRewardGrant,
     RealmEntry,
     SessionTechnique,
     TechniqueInvestmentChange,
+    TechniqueLearnOperation,
 )
 from immortal_mmo.cultivation.repository import ActiveCultivationSessionExists
 
@@ -35,6 +41,253 @@ from immortal_mmo.cultivation.repository import ActiveCultivationSessionExists
 class PostgresCultivationRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def claim_pending_quest_reward(
+        self,
+        *,
+        operation_id: UUID,
+        grant_id: UUID,
+        life_id: UUID,
+        cap: int,
+        occurred_at: datetime,
+    ) -> QuestCultivationRewardClaim:
+        replay = await self._session.get(QuestCultivationRewardClaimRow, operation_id)
+        if replay is not None:
+            if replay.grant_id != grant_id or replay.life_id != life_id:
+                raise ValueError("Quest reward claim operation identity conflict")
+            return _quest_reward_claim(replay)
+        grant = await self._session.scalar(
+            select(QuestCultivationRewardGrantRow)
+            .where(QuestCultivationRewardGrantRow.grant_id == grant_id)
+            .with_for_update(of=QuestCultivationRewardGrantRow)
+        )
+        if grant is None or grant.life_id != life_id:
+            raise KeyError("Pending quest cultivation reward was not found")
+        if grant.pending_amount == 0:
+            raise ValueError("Quest cultivation reward is already fully applied")
+        state = await self.get_or_create_state(life_id, for_update=True)
+        available = max(cap - state.unrefined_cultivation, 0)
+        applied_amount = min(grant.pending_amount, available)
+        if applied_amount == 0:
+            raise ValueError("Unrefined cultivation reserve is full")
+        pending_amount = grant.pending_amount - applied_amount
+        balance_after = state.unrefined_cultivation + applied_amount
+        await self._session.execute(
+            update(LifeCultivationStateRow)
+            .where(LifeCultivationStateRow.life_id == life_id)
+            .values(
+                unrefined_cultivation=balance_after,
+                revision=LifeCultivationStateRow.revision + 1,
+                updated_at=func.now(),
+            )
+        )
+        await self._session.execute(
+            update(QuestCultivationRewardGrantRow)
+            .where(QuestCultivationRewardGrantRow.grant_id == grant_id)
+            .values(
+                credited_amount=grant.credited_amount + applied_amount,
+                pending_amount=pending_amount,
+                balance_after=balance_after,
+                status="applied" if pending_amount == 0 else "pending",
+            )
+        )
+        claim = QuestCultivationRewardClaimRow(
+            operation_id=operation_id,
+            grant_id=grant_id,
+            life_id=life_id,
+            applied_amount=applied_amount,
+            pending_amount=pending_amount,
+            balance_after=balance_after,
+            response_body=None,
+            created_at=occurred_at,
+        )
+        self._session.add(claim)
+        self._session.add(
+            CultivationResourceEntryRow(
+                entry_id=uuid4(),
+                life_id=life_id,
+                resource_code="unrefined_cultivation",
+                entry_type="quest_reward",
+                delta_amount=applied_amount,
+                balance_after=balance_after,
+                kill_event_id=None,
+                session_id=None,
+                operation_id=operation_id,
+                quest_reward_grant_id=grant_id,
+                created_at=occurred_at,
+            )
+        )
+        await self._session.flush()
+        return _quest_reward_claim(claim)
+
+    async def finalize_quest_reward_claim(
+        self,
+        *,
+        operation_id: UUID,
+        response_body: bytes,
+    ) -> QuestCultivationRewardClaim:
+        row = await self._session.scalar(
+            update(QuestCultivationRewardClaimRow)
+            .where(
+                QuestCultivationRewardClaimRow.operation_id == operation_id,
+                QuestCultivationRewardClaimRow.response_body.is_(None),
+            )
+            .values(response_body=response_body)
+            .returning(QuestCultivationRewardClaimRow)
+        )
+        if row is None:
+            replay = await self._session.get(QuestCultivationRewardClaimRow, operation_id)
+            if replay is None or replay.response_body != response_body:
+                raise RuntimeError("Quest reward claim could not be finalized")
+            row = replay
+        return _quest_reward_claim(row)
+
+    async def get_learn_operation(
+        self,
+        operation_id: UUID,
+    ) -> TechniqueLearnOperation | None:
+        row = await self._session.get(TechniqueLearnOperationRow, operation_id)
+        return None if row is None else _learn_operation(row)
+
+    async def learn_technique(
+        self,
+        *,
+        operation: TechniqueLearnOperation,
+        technique: LifeTechnique,
+    ) -> LifeTechnique:
+        state = await self.get_or_create_state(technique.life_id, for_update=True)
+        self._session.add(
+            TechniqueLearnOperationRow(
+                operation_id=operation.operation_id,
+                life_id=operation.life_id,
+                item_instance_id=operation.item_instance_id,
+                technique_id=operation.technique_id,
+                request_fingerprint=operation.request_fingerprint,
+                response_body=operation.response_body,
+                created_at=operation.created_at,
+            )
+        )
+        self._session.add(
+            LifeTechniqueRow(
+                life_technique_id=technique.life_technique_id,
+                life_id=technique.life_id,
+                technique_id=technique.technique_id,
+                definition_version=technique.definition_version,
+                group_code=technique.group_code,
+                major_realm=technique.major_realm,
+                invested_amount=technique.invested_amount,
+                max_investment=technique.max_investment,
+                current_layer=technique.current_layer,
+                status=technique.status,
+                learned_at=operation.created_at,
+            )
+        )
+        await self._session.execute(
+            update(LifeCultivationStateRow)
+            .where(LifeCultivationStateRow.life_id == state.life_id)
+            .values(
+                revision=LifeCultivationStateRow.revision + 1,
+                updated_at=func.now(),
+            )
+        )
+        await self._session.flush()
+        return technique
+
+    async def finalize_learn_operation(
+        self,
+        *,
+        operation_id: UUID,
+        response_body: bytes,
+    ) -> TechniqueLearnOperation:
+        row = await self._session.scalar(
+            update(TechniqueLearnOperationRow)
+            .where(
+                TechniqueLearnOperationRow.operation_id == operation_id,
+                TechniqueLearnOperationRow.response_body.is_(None),
+            )
+            .values(response_body=response_body)
+            .returning(TechniqueLearnOperationRow)
+        )
+        if row is None:
+            raise RuntimeError("Technique learn operation was already finalized")
+        return _learn_operation(row)
+
+    async def grant_quest_reward(
+        self,
+        *,
+        grant_id: UUID,
+        life_id: UUID,
+        operation_id: UUID,
+        quest_id: str,
+        reward_id: str,
+        configured_amount: int,
+        cap: int,
+        occurred_at: datetime,
+    ) -> QuestCultivationRewardGrant:
+        if configured_amount <= 0 or cap <= 0:
+            raise ValueError("Quest cultivation reward amount and cap must be positive")
+        existing = await self._session.get(QuestCultivationRewardGrantRow, grant_id)
+        if existing is not None:
+            if (
+                existing.life_id != life_id
+                or existing.operation_id != operation_id
+                or existing.quest_id != quest_id
+                or existing.reward_id != reward_id
+                or existing.configured_amount != configured_amount
+            ):
+                raise ValueError("Quest cultivation reward grant identity conflict")
+            return _quest_reward_grant(existing)
+
+        state = await self.get_or_create_state(life_id, for_update=True)
+        available = max(cap - state.unrefined_cultivation, 0)
+        credited_amount = min(configured_amount, available)
+        pending_amount = configured_amount - credited_amount
+        balance_after = state.unrefined_cultivation + credited_amount
+        if credited_amount > 0:
+            updated = await self._session.scalar(
+                update(LifeCultivationStateRow)
+                .where(LifeCultivationStateRow.life_id == life_id)
+                .values(
+                    unrefined_cultivation=balance_after,
+                    revision=LifeCultivationStateRow.revision + 1,
+                    updated_at=func.now(),
+                )
+                .returning(LifeCultivationStateRow)
+            )
+            if updated is None:
+                raise RuntimeError("Cultivation state disappeared before quest reward")
+        row = QuestCultivationRewardGrantRow(
+            grant_id=grant_id,
+            life_id=life_id,
+            operation_id=operation_id,
+            quest_id=quest_id,
+            reward_id=reward_id,
+            configured_amount=configured_amount,
+            credited_amount=credited_amount,
+            pending_amount=pending_amount,
+            balance_after=balance_after,
+            status="applied" if pending_amount == 0 else "pending",
+            created_at=occurred_at,
+        )
+        self._session.add(row)
+        if credited_amount > 0:
+            self._session.add(
+                CultivationResourceEntryRow(
+                    entry_id=uuid4(),
+                    life_id=life_id,
+                    resource_code="unrefined_cultivation",
+                    entry_type="quest_reward",
+                    delta_amount=credited_amount,
+                    balance_after=balance_after,
+                    kill_event_id=None,
+                    session_id=None,
+                    operation_id=grant_id,
+                    quest_reward_grant_id=grant_id,
+                    created_at=occurred_at,
+                )
+            )
+        await self._session.flush()
+        return _quest_reward_grant(row)
 
     async def get_or_create_state(self, life_id: UUID, *, for_update: bool) -> CultivationState:
         await self._session.execute(
@@ -738,6 +991,50 @@ def _breakthrough_debit(row: BreakthroughTechniqueDebitRow) -> BreakthroughTechn
         allocated_amount=row.allocated_amount,
         balance_before=row.balance_before,
         balance_after=row.balance_after,
+    )
+
+
+def _learn_operation(row: TechniqueLearnOperationRow) -> TechniqueLearnOperation:
+    return TechniqueLearnOperation(
+        operation_id=row.operation_id,
+        life_id=row.life_id,
+        item_instance_id=row.item_instance_id,
+        technique_id=row.technique_id,
+        request_fingerprint=row.request_fingerprint,
+        response_body=(bytes(row.response_body) if row.response_body is not None else None),
+        created_at=row.created_at,
+    )
+
+
+def _quest_reward_grant(
+    row: QuestCultivationRewardGrantRow,
+) -> QuestCultivationRewardGrant:
+    return QuestCultivationRewardGrant(
+        grant_id=row.grant_id,
+        life_id=row.life_id,
+        operation_id=row.operation_id,
+        quest_id=row.quest_id,
+        reward_id=row.reward_id,
+        configured_amount=row.configured_amount,
+        credited_amount=row.credited_amount,
+        pending_amount=row.pending_amount,
+        balance_after=row.balance_after,
+        status=row.status,
+    )
+
+
+def _quest_reward_claim(
+    row: QuestCultivationRewardClaimRow,
+) -> QuestCultivationRewardClaim:
+    return QuestCultivationRewardClaim(
+        operation_id=row.operation_id,
+        grant_id=row.grant_id,
+        life_id=row.life_id,
+        applied_amount=row.applied_amount,
+        pending_amount=row.pending_amount,
+        balance_after=row.balance_after,
+        response_body=bytes(row.response_body) if row.response_body is not None else None,
+        created_at=row.created_at,
     )
 
 

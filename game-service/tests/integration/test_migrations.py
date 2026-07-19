@@ -39,6 +39,14 @@ GAMEPLAY_TABLES = {
     "breakthrough_technique_debits",
     "life_item_stacks",
     "item_resource_entries",
+    "quest_reward_grants",
+    "item_instances",
+    "quest_cultivation_reward_grants",
+    "quest_cultivation_reward_claims",
+    "technique_learn_operations",
+    "regional_storage_containers",
+    "regional_storage_slots",
+    "regional_storage_operations",
 }
 
 EXPECTED_CONSTRAINTS = {
@@ -143,7 +151,8 @@ EXPECTED_CONSTRAINTS = {
         "ck_cultivation_entry_type",
         "ck_cultivation_entry_delta",
         "ck_cultivation_entry_balance_nonnegative",
-        "ck_cultivation_combat_source",
+        "fk_cultivation_entries_quest_reward_grant",
+        "ck_cultivation_reward_source",
         "fk_cultivation_entries_session",
         "uq_cultivation_operation_resource",
     },
@@ -225,6 +234,76 @@ EXPECTED_CONSTRAINTS = {
         "ck_item_resource_balance",
         "ck_item_resource_session_shape",
     },
+    "quest_reward_grants": {
+        "pk_quest_reward_grants",
+        "fk_quest_reward_grants_operation",
+        "fk_quest_reward_grants_progress",
+        "uq_quest_reward_grants_operation_reward",
+        "ck_quest_reward_grants_type",
+        "ck_quest_reward_grants_amounts",
+        "ck_quest_reward_grants_status",
+        "ck_quest_reward_grants_item_shape",
+        "ck_quest_reward_grants_status_shape",
+    },
+    "item_instances": {
+        "pk_item_instances",
+        "fk_item_instances_life_id_lives",
+        "fk_item_instances_quest_reward_grant",
+        "uq_item_instances_issuance",
+        "uq_item_instances_identity_life",
+        "ck_item_instances_definition_version",
+        "ck_item_instances_issuance_ordinal",
+        "ck_item_instances_status",
+        "ck_item_instances_state_shape",
+    },
+    "quest_cultivation_reward_grants": {
+        "pk_quest_cultivation_reward_grants",
+        "fk_quest_cultivation_reward_grants_life_id_lives",
+        "uq_quest_cultivation_reward_operation",
+        "ck_quest_cultivation_reward_amounts",
+        "ck_quest_cultivation_reward_status",
+        "ck_quest_cultivation_reward_status_shape",
+    },
+    "quest_cultivation_reward_claims": {
+        "pk_quest_cultivation_reward_claims",
+        "fk_quest_cultivation_reward_claims_grant_id_grants",
+        "fk_quest_cultivation_reward_claims_life_id_lives",
+        "uq_quest_cultivation_reward_claim_grant",
+        "ck_quest_cultivation_reward_claim_amounts",
+    },
+    "technique_learn_operations": {
+        "pk_technique_learn_operations",
+        "fk_technique_learn_operations_life_id_lives",
+        "fk_technique_learn_operations_item_instance_id_item_instances",
+        "uq_technique_learn_operations_item",
+        "ck_technique_learn_operations_fingerprint",
+    },
+    "regional_storage_containers": {
+        "pk_regional_storage_containers",
+        "fk_regional_storage_containers_life_id_lives",
+        "ck_regional_storage_containers_area_id",
+        "ck_regional_storage_containers_page_count",
+        "ck_regional_storage_containers_item_slots",
+        "ck_regional_storage_containers_revision",
+    },
+    "regional_storage_slots": {
+        "pk_regional_storage_slots",
+        "fk_regional_storage_slots_container",
+        "fk_regional_storage_slots_item_life",
+        "uq_regional_storage_slots_item_instance",
+        "ck_regional_storage_slots_page",
+        "ck_regional_storage_slots_slot",
+    },
+    "regional_storage_operations": {
+        "pk_regional_storage_operations",
+        "fk_regional_storage_operations_container",
+        "fk_regional_storage_operations_item_life",
+        "ck_regional_storage_operations_kind",
+        "ck_regional_storage_operations_revisions",
+        "ck_regional_storage_operations_fingerprint",
+        "ck_regional_storage_operations_view_page",
+        "ck_regional_storage_operations_shape",
+    },
 }
 
 EXPECTED_INDEXES = {
@@ -243,6 +322,11 @@ EXPECTED_INDEXES = {
     "ix_life_realm_entries_active_chain",
     "ix_technique_investment_life_created",
     "ix_item_resource_life_created",
+    "ix_quest_reward_grants_life_status",
+    "ix_item_instances_life_status",
+    "ix_quest_cultivation_reward_pending",
+    "ix_regional_storage_slots_item_instance",
+    "ix_regional_storage_operations_life_created",
 }
 
 EXPECTED_FUNCTIONS = {
@@ -399,7 +483,7 @@ async def test_upgrade_creates_expected_tables_and_head_revision(
 
     assert table_names - {"alembic_version"} == GAMEPLAY_TABLES
     assert "alembic_version" in table_names
-    assert revision == "20260718_003"
+    assert revision == "20260719_005"
 
 
 @pytest.mark.asyncio
@@ -864,7 +948,7 @@ async def test_alembic_cli_uses_database_url_from_environment(
     )
 
     assert result.returncode == 0, result.stderr
-    assert "20260718_003 (head)" in result.stdout
+    assert "20260719_005 (head)" in result.stdout
 
 
 @pytest.mark.asyncio

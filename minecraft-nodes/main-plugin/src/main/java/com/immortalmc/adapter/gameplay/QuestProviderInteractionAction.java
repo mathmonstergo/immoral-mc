@@ -21,10 +21,12 @@ import com.immortalmc.adapter.quest.QuestOfferSession;
 import com.immortalmc.adapter.quest.QuestOfferSessionStore;
 import com.immortalmc.adapter.session.PlayerSessionCache;
 import java.time.Clock;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
@@ -43,6 +45,9 @@ public final class QuestProviderInteractionAction implements EntityInteractionAc
     private final BiConsumer<UUID, QuestInteractionState> statePublisher;
     private final AdapterLogger logger;
     private final Function<Player, NpcDialogueAudience> audienceFactory;
+    private final Function<Player, List<UUID>> inventoryItemIds;
+    private final Consumer<UUID> reconcileItems;
+    private final Consumer<UUID> refreshCultivation;
     private final Clock clock;
 
     public QuestProviderInteractionAction(
@@ -55,6 +60,9 @@ public final class QuestProviderInteractionAction implements EntityInteractionAc
             BiConsumer<UUID, QuestInteractionState> statePublisher,
             AdapterLogger logger,
             Function<Player, NpcDialogueAudience> audienceFactory,
+            Function<Player, List<UUID>> inventoryItemIds,
+            Consumer<UUID> reconcileItems,
+            Consumer<UUID> refreshCultivation,
             Clock clock) {
         this.playerSessions = Objects.requireNonNull(playerSessions, "playerSessions");
         this.quests = Objects.requireNonNull(quests, "quests");
@@ -65,6 +73,9 @@ public final class QuestProviderInteractionAction implements EntityInteractionAc
         this.statePublisher = Objects.requireNonNull(statePublisher, "statePublisher");
         this.logger = Objects.requireNonNull(logger, "logger");
         this.audienceFactory = Objects.requireNonNull(audienceFactory, "audienceFactory");
+        this.inventoryItemIds = Objects.requireNonNull(inventoryItemIds, "inventoryItemIds");
+        this.reconcileItems = Objects.requireNonNull(reconcileItems, "reconcileItems");
+        this.refreshCultivation = Objects.requireNonNull(refreshCultivation, "refreshCultivation");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -205,20 +216,32 @@ public final class QuestProviderInteractionAction implements EntityInteractionAc
             PlayerLoginResult session,
             String providerId,
             ProviderQuestSnapshot quest) {
+        List<UUID> itemInstanceIds;
+        try {
+            itemInstanceIds = List.copyOf(inventoryItemIds.apply(player));
+        } catch (RuntimeException error) {
+            player.sendMessage("§c背包中的实体物品数据异常，任务未交付。");
+            logFailure("quest_turn_in_inventory_failure", player, providerId, error);
+            reconcileItems.accept(player.getUniqueId());
+            return;
+        }
         quests.turnIn(
                         player.getUniqueId(),
                         session.account().accountId(),
                         session.currentLife().lifeId(),
                         quest.questId(),
                         providerId,
-                        UUID.randomUUID())
+                        UUID.randomUUID(),
+                        itemInstanceIds)
                 .whenComplete((result, error) -> {
+                    reconcileItems.accept(player.getUniqueId());
                     if (error != null) {
                         player.sendMessage(turnInFailureMessage(error));
                         logFailure("quest_turn_in_failure", player, providerId, error);
                         return;
                     }
                     statePublisher.accept(player.getUniqueId(), result.interactionState());
+                    refreshCultivation.accept(player.getUniqueId());
                     playDialogue(player, result.quest().dialogueKey());
                 });
     }

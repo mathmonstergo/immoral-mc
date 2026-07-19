@@ -11,6 +11,7 @@ from immortal_mmo.quest.db_models import (
     QuestObjectiveProgressRow,
     QuestOperationRow,
     QuestProgressRow,
+    QuestRewardGrantRow,
 )
 from immortal_mmo.quest.repository import (
     QuestObjectiveProgress,
@@ -18,6 +19,7 @@ from immortal_mmo.quest.repository import (
     QuestOperationState,
     QuestProgress,
     QuestProgressStatus,
+    QuestRewardGrant,
     StoredQuestOperation,
 )
 
@@ -68,9 +70,87 @@ def _objective_progress_from_row(row: QuestObjectiveProgressRow) -> QuestObjecti
     )
 
 
+def _reward_grant_from_row(row: QuestRewardGrantRow) -> QuestRewardGrant:
+    from immortal_mmo.quest.models import QuestRewardType
+
+    return QuestRewardGrant(
+        grant_id=row.grant_id,
+        life_id=row.life_id,
+        operation_id=row.operation_id,
+        quest_id=row.quest_id,
+        reward_id=row.reward_id,
+        reward_type=QuestRewardType(row.reward_type),
+        item_code=row.item_code,
+        configured_amount=row.configured_amount,
+        applied_amount=row.applied_amount,
+        pending_amount=row.pending_amount,
+        status=row.status,
+        created_at=row.created_at,
+    )
+
+
 class PostgresQuestRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def insert_reward_grant(self, grant: QuestRewardGrant) -> None:
+        self._session.add(
+            QuestRewardGrantRow(
+                grant_id=grant.grant_id,
+                life_id=grant.life_id,
+                operation_id=grant.operation_id,
+                quest_id=grant.quest_id,
+                reward_id=grant.reward_id,
+                reward_type=grant.reward_type.value,
+                item_code=grant.item_code,
+                configured_amount=grant.configured_amount,
+                applied_amount=grant.applied_amount,
+                pending_amount=grant.pending_amount,
+                status=grant.status,
+                created_at=grant.created_at,
+            )
+        )
+        await self._session.flush()
+
+    async def get_reward_grants(
+        self,
+        operation_id: UUID,
+    ) -> tuple[QuestRewardGrant, ...]:
+        rows = (
+            await self._session.scalars(
+                select(QuestRewardGrantRow)
+                .where(QuestRewardGrantRow.operation_id == operation_id)
+                .order_by(QuestRewardGrantRow.reward_id)
+            )
+        ).all()
+        return tuple(_reward_grant_from_row(row) for row in rows)
+
+    async def get_reward_grant(self, grant_id: UUID) -> QuestRewardGrant | None:
+        row = await self._session.get(QuestRewardGrantRow, grant_id)
+        return None if row is None else _reward_grant_from_row(row)
+
+    async def update_reward_grant_progress(
+        self,
+        *,
+        grant_id: UUID,
+        pending_amount: int,
+    ) -> QuestRewardGrant:
+        row = await self._session.scalar(
+            update(QuestRewardGrantRow)
+            .where(
+                QuestRewardGrantRow.grant_id == grant_id,
+                QuestRewardGrantRow.pending_amount >= pending_amount,
+            )
+            .values(
+                applied_amount=QuestRewardGrantRow.configured_amount - pending_amount,
+                pending_amount=pending_amount,
+                status="applied" if pending_amount == 0 else "pending",
+            )
+            .returning(QuestRewardGrantRow)
+        )
+        if row is None:
+            raise KeyError("Quest reward grant was not found or is not mutable")
+        return _reward_grant_from_row(row)
 
     async def get_operation(self, operation_id: UUID) -> StoredQuestOperation | None:
         row = await self._session.scalar(

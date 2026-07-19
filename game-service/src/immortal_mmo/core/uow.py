@@ -6,6 +6,7 @@ from immortal_mmo.cultivation.repository import CultivationRepository
 from immortal_mmo.item.repository import ItemRepository
 from immortal_mmo.player.repository import PlayerRepository
 from immortal_mmo.quest.repository import QuestRepository
+from immortal_mmo.storage.repository import StorageRepository
 
 IsolationLevel = Literal["read_committed", "repeatable_read"]
 
@@ -16,6 +17,7 @@ class UnitOfWork(Protocol):
     combat: CombatRepository
     cultivation: CultivationRepository
     items: ItemRepository
+    storage: StorageRepository
 
     async def __aenter__(self) -> "UnitOfWork": ...
 

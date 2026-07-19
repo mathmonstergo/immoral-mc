@@ -2,6 +2,7 @@ package com.immortalmc.adapter.quest;
 
 import com.immortalmc.adapter.client.QuestInteractionState;
 import com.immortalmc.adapter.client.QuestMutationResult;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -23,5 +24,6 @@ public interface QuestInteractionService {
             UUID lifeId,
             String questId,
             String providerId,
-            UUID operationId);
+            UUID operationId,
+            List<UUID> inventoryItemInstanceIds);
 }

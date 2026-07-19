@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import Callable, Collection
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from types import TracebackType
 from uuid import UUID, uuid4
 
@@ -14,15 +14,21 @@ from immortal_mmo.cultivation.models import (
     CultivationSession,
     CultivationState,
     LifeTechnique,
+    QuestCultivationRewardClaim,
+    QuestCultivationRewardGrant,
     RealmEntry,
     SessionTechnique,
     TechniqueInvestmentChange,
+    TechniqueLearnOperation,
 )
 from immortal_mmo.cultivation.repository import ActiveCultivationSessionExists
 from immortal_mmo.item.models import (
     InsufficientItemQuantity,
     ItemConsumptionRequest,
     ItemConsumptionType,
+    ItemInstance,
+    ItemInstanceStatus,
+    ItemLocation,
     ItemOperationConflict,
     ItemResourceEntry,
     ItemStack,
@@ -34,7 +40,13 @@ from immortal_mmo.quest.repository import (
     QuestOperationState,
     QuestProgress,
     QuestProgressStatus,
+    QuestRewardGrant,
     StoredQuestOperation,
+)
+from immortal_mmo.storage.models import (
+    StorageContainer,
+    StorageOperation,
+    StorageSlot,
 )
 
 
@@ -50,11 +62,23 @@ class _FakeState:
     objective_progresses: dict[tuple[UUID, str, str], QuestObjectiveProgress] = field(
         default_factory=dict
     )
+    quest_reward_grants: dict[tuple[UUID, str], QuestRewardGrant] = field(
+        default_factory=dict
+    )
     combat_events: dict[UUID, CombatKillEvent] = field(default_factory=dict)
     mob_kill_counters: dict[tuple[UUID, str], int] = field(default_factory=dict)
     cultivation_balances: dict[UUID, int] = field(default_factory=dict)
     cultivation_revisions: dict[UUID, int] = field(default_factory=dict)
     cultivation_credits: dict[tuple[UUID, UUID], CombatCultivationCredit] = field(
+        default_factory=dict
+    )
+    quest_cultivation_grants: dict[UUID, QuestCultivationRewardGrant] = field(
+        default_factory=dict
+    )
+    quest_cultivation_claims: dict[UUID, QuestCultivationRewardClaim] = field(
+        default_factory=dict
+    )
+    technique_learn_operations: dict[UUID, TechniqueLearnOperation] = field(
         default_factory=dict
     )
     cultivation_states: dict[UUID, CultivationState] = field(default_factory=dict)
@@ -67,6 +91,14 @@ class _FakeState:
     )
     item_stacks: dict[tuple[UUID, str], ItemStack] = field(default_factory=dict)
     item_entries: dict[tuple[UUID, str], ItemResourceEntry] = field(default_factory=dict)
+    item_instances: dict[UUID, ItemInstance] = field(default_factory=dict)
+    storage_containers: dict[tuple[UUID, str], StorageContainer] = field(
+        default_factory=dict
+    )
+    storage_slots: dict[tuple[UUID, str, int, int], StorageSlot] = field(
+        default_factory=dict
+    )
+    storage_operations: dict[UUID, StorageOperation] = field(default_factory=dict)
 
 
 class FakeStore:
@@ -186,6 +218,64 @@ class FakeQuestRepository:
     def __init__(self, state: _FakeState, ensure_active: Callable[[], None]) -> None:
         self._state = state
         self._ensure_active = ensure_active
+
+    async def insert_reward_grant(self, grant: QuestRewardGrant) -> None:
+        self._ensure_active()
+        key = (grant.operation_id, grant.reward_id)
+        if key in self._state.quest_reward_grants:
+            raise RuntimeError("Quest reward grant already exists")
+        self._state.quest_reward_grants[key] = grant
+
+    async def get_reward_grants(
+        self,
+        operation_id: UUID,
+    ) -> tuple[QuestRewardGrant, ...]:
+        self._ensure_active()
+        return tuple(
+            sorted(
+                (
+                    grant
+                    for (stored_operation_id, _), grant in self._state.quest_reward_grants.items()
+                    if stored_operation_id == operation_id
+                ),
+                key=lambda grant: grant.reward_id,
+            )
+        )
+
+    async def get_reward_grant(self, grant_id: UUID) -> QuestRewardGrant | None:
+        self._ensure_active()
+        return next(
+            (
+                grant
+                for grant in self._state.quest_reward_grants.values()
+                if grant.grant_id == grant_id
+            ),
+            None,
+        )
+
+    async def update_reward_grant_progress(
+        self,
+        *,
+        grant_id: UUID,
+        pending_amount: int,
+    ) -> QuestRewardGrant:
+        self._ensure_active()
+        matches = [
+            (key, grant)
+            for key, grant in self._state.quest_reward_grants.items()
+            if grant.grant_id == grant_id
+        ]
+        if not matches:
+            raise KeyError("Quest reward grant was not found")
+        key, grant = matches[0]
+        updated = replace(
+            grant,
+            applied_amount=grant.configured_amount - pending_amount,
+            pending_amount=pending_amount,
+            status="applied" if pending_amount == 0 else "pending",
+        )
+        self._state.quest_reward_grants[key] = updated
+        return updated
 
     async def get_operation(self, operation_id: UUID) -> StoredQuestOperation | None:
         self._ensure_active()
@@ -523,6 +613,149 @@ class FakeCultivationRepository:
     def __init__(self, state: _FakeState, ensure_active: Callable[[], None]) -> None:
         self._state = state
         self._ensure_active = ensure_active
+
+    async def claim_pending_quest_reward(
+        self,
+        *,
+        operation_id: UUID,
+        grant_id: UUID,
+        life_id: UUID,
+        cap: int,
+        occurred_at: datetime,
+    ) -> QuestCultivationRewardClaim:
+        self._ensure_active()
+        replay = self._state.quest_cultivation_claims.get(operation_id)
+        if replay is not None:
+            return replay
+        grant = self._state.quest_cultivation_grants.get(grant_id)
+        if grant is None or grant.life_id != life_id:
+            raise KeyError("Pending quest cultivation reward was not found")
+        if grant.pending_amount == 0:
+            raise ValueError("Quest cultivation reward is already fully applied")
+        state = await self.get_or_create_state(life_id, for_update=True)
+        applied = min(grant.pending_amount, max(cap - state.unrefined_cultivation, 0))
+        if applied == 0:
+            raise ValueError("Unrefined cultivation reserve is full")
+        pending = grant.pending_amount - applied
+        balance = state.unrefined_cultivation + applied
+        self._state.cultivation_states[life_id] = replace(
+            state,
+            unrefined_cultivation=balance,
+            revision=state.revision + 1,
+        )
+        self._state.quest_cultivation_grants[grant_id] = replace(
+            grant,
+            credited_amount=grant.credited_amount + applied,
+            pending_amount=pending,
+            balance_after=balance,
+            status="applied" if pending == 0 else "pending",
+        )
+        claim = QuestCultivationRewardClaim(
+            operation_id=operation_id,
+            grant_id=grant_id,
+            life_id=life_id,
+            applied_amount=applied,
+            pending_amount=pending,
+            balance_after=balance,
+            response_body=None,
+            created_at=occurred_at,
+        )
+        self._state.quest_cultivation_claims[operation_id] = claim
+        return claim
+
+    async def finalize_quest_reward_claim(
+        self,
+        *,
+        operation_id: UUID,
+        response_body: bytes,
+    ) -> QuestCultivationRewardClaim:
+        self._ensure_active()
+        claim = self._state.quest_cultivation_claims[operation_id]
+        finalized = replace(claim, response_body=response_body)
+        self._state.quest_cultivation_claims[operation_id] = finalized
+        return finalized
+
+    async def get_learn_operation(
+        self,
+        operation_id: UUID,
+    ) -> TechniqueLearnOperation | None:
+        self._ensure_active()
+        return self._state.technique_learn_operations.get(operation_id)
+
+    async def learn_technique(
+        self,
+        *,
+        operation: TechniqueLearnOperation,
+        technique: LifeTechnique,
+    ) -> LifeTechnique:
+        self._ensure_active()
+        if operation.operation_id in self._state.technique_learn_operations:
+            raise RuntimeError("Technique learn operation already exists")
+        if any(
+            item.life_id == technique.life_id and item.technique_id == technique.technique_id
+            for item in self._state.life_techniques.values()
+        ):
+            raise ValueError("Technique is already known")
+        self._state.technique_learn_operations[operation.operation_id] = operation
+        self._state.life_techniques[technique.life_technique_id] = technique
+        state = await self.get_or_create_state(technique.life_id, for_update=True)
+        self._state.cultivation_states[technique.life_id] = replace(
+            state,
+            revision=state.revision + 1,
+        )
+        return technique
+
+    async def finalize_learn_operation(
+        self,
+        *,
+        operation_id: UUID,
+        response_body: bytes,
+    ) -> TechniqueLearnOperation:
+        self._ensure_active()
+        operation = self._state.technique_learn_operations[operation_id]
+        finalized = replace(operation, response_body=response_body)
+        self._state.technique_learn_operations[operation_id] = finalized
+        return finalized
+
+    async def grant_quest_reward(
+        self,
+        *,
+        grant_id: UUID,
+        life_id: UUID,
+        operation_id: UUID,
+        quest_id: str,
+        reward_id: str,
+        configured_amount: int,
+        cap: int,
+        occurred_at: datetime,
+    ) -> QuestCultivationRewardGrant:
+        self._ensure_active()
+        existing = self._state.quest_cultivation_grants.get(grant_id)
+        if existing is not None:
+            return existing
+        state = await self.get_or_create_state(life_id, for_update=True)
+        credited = min(configured_amount, max(cap - state.unrefined_cultivation, 0))
+        pending = configured_amount - credited
+        updated = replace(
+            state,
+            unrefined_cultivation=state.unrefined_cultivation + credited,
+            revision=state.revision + (1 if credited else 0),
+        )
+        self._state.cultivation_states[life_id] = updated
+        grant = QuestCultivationRewardGrant(
+            grant_id=grant_id,
+            life_id=life_id,
+            operation_id=operation_id,
+            quest_id=quest_id,
+            reward_id=reward_id,
+            configured_amount=configured_amount,
+            credited_amount=credited,
+            pending_amount=pending,
+            balance_after=updated.unrefined_cultivation,
+            status="applied" if pending == 0 else "pending",
+        )
+        self._state.quest_cultivation_grants[grant_id] = grant
+        return grant
 
     async def get_or_create_state(self, life_id: UUID, *, for_update: bool) -> CultivationState:
         self._ensure_active()
@@ -884,6 +1117,232 @@ class FakeItemRepository:
         self._state = state
         self._ensure_active = ensure_active
 
+    async def get_pending_instances(self, life_id: UUID) -> tuple[ItemInstance, ...]:
+        self._ensure_active()
+        return tuple(
+            sorted(
+                (
+                    item
+                    for item in self._state.item_instances.values()
+                    if item.life_id == life_id
+                    and item.status is ItemInstanceStatus.PENDING_DELIVERY
+                ),
+                key=lambda item: (item.created_at, item.item_instance_id.int),
+            )
+        )
+
+    async def count_pending_quest_reward_instances(
+        self,
+        quest_reward_grant_id: UUID,
+    ) -> int:
+        self._ensure_active()
+        return sum(
+            item.quest_reward_grant_id == quest_reward_grant_id
+            and item.status is ItemInstanceStatus.PENDING_DELIVERY
+            for item in self._state.item_instances.values()
+        )
+
+    async def create_pending_instances(
+        self,
+        *,
+        life_id: UUID,
+        issuance_id: UUID,
+        quest_reward_grant_id: UUID | None,
+        item_code: str,
+        definition_version: int,
+        technique_id: str | None,
+        item_instance_ids: Collection[UUID],
+        created_at: datetime,
+    ) -> tuple[ItemInstance, ...]:
+        self._ensure_active()
+        result: list[ItemInstance] = []
+        for ordinal, item_instance_id in enumerate(item_instance_ids):
+            existing = self._state.item_instances.get(item_instance_id)
+            if existing is not None:
+                if (
+                    existing.life_id != life_id
+                    or existing.issuance_id != issuance_id
+                    or existing.issuance_ordinal != ordinal
+                    or existing.quest_reward_grant_id != quest_reward_grant_id
+                    or existing.item_code != item_code
+                ):
+                    raise ItemOperationConflict
+                result.append(existing)
+                continue
+            instance = ItemInstance(
+                item_instance_id=item_instance_id,
+                life_id=life_id,
+                item_code=item_code,
+                definition_version=definition_version,
+                technique_id=technique_id,
+                issuance_id=issuance_id,
+                issuance_ordinal=ordinal,
+                quest_reward_grant_id=quest_reward_grant_id,
+                status=ItemInstanceStatus.PENDING_DELIVERY,
+                created_at=created_at,
+                delivered_at=None,
+                consumed_at=None,
+            )
+            self._state.item_instances[item_instance_id] = instance
+            result.append(instance)
+        return tuple(result)
+
+    async def get_instance(
+        self,
+        item_instance_id: UUID,
+        *,
+        for_update: bool,
+    ) -> ItemInstance | None:
+        self._ensure_active()
+        del for_update
+        return self._state.item_instances.get(item_instance_id)
+
+    async def get_instances(
+        self,
+        item_instance_ids: Collection[UUID],
+        *,
+        for_update: bool,
+    ) -> tuple[ItemInstance, ...]:
+        self._ensure_active()
+        del for_update
+        identities = tuple(sorted(set(item_instance_ids)))
+        return tuple(
+            self._state.item_instances[item_id]
+            for item_id in identities
+            if item_id in self._state.item_instances
+        )
+
+    async def confirm_delivery(
+        self,
+        *,
+        item_instance_id: UUID,
+        life_id: UUID,
+        delivered_at: datetime,
+    ) -> ItemInstance:
+        self._ensure_active()
+        instance = self._state.item_instances.get(item_instance_id)
+        if instance is None or instance.life_id != life_id:
+            raise KeyError("Item instance was not found for current life")
+        if instance.status in {
+            ItemInstanceStatus.OWNED,
+            ItemInstanceStatus.CONSUMED,
+        }:
+            return instance
+        updated = replace(
+            instance,
+            status=ItemInstanceStatus.OWNED,
+            location=ItemLocation.INVENTORY,
+            delivered_at=delivered_at,
+        )
+        self._state.item_instances[item_instance_id] = updated
+        return updated
+
+    async def consume_instance(
+        self,
+        *,
+        item_instance_id: UUID,
+        life_id: UUID,
+        consumed_at: datetime,
+    ) -> ItemInstance:
+        self._ensure_active()
+        instance = self._state.item_instances.get(item_instance_id)
+        if instance is None or instance.life_id != life_id:
+            raise KeyError("Item instance was not found for current life")
+        if instance.status is ItemInstanceStatus.CONSUMED:
+            return instance
+        if instance.status not in {
+            ItemInstanceStatus.PENDING_DELIVERY,
+            ItemInstanceStatus.OWNED,
+        }:
+            raise ItemOperationConflict
+        consumed = replace(
+            instance,
+            status=ItemInstanceStatus.CONSUMED,
+            location=None,
+            consumed_at=consumed_at,
+        )
+        self._state.item_instances[item_instance_id] = consumed
+        return consumed
+
+    async def consume_inventory_instances(
+        self,
+        *,
+        life_id: UUID,
+        item_instance_ids: Collection[UUID],
+        consumed_at: datetime,
+    ) -> tuple[ItemInstance, ...]:
+        self._ensure_active()
+        identities = tuple(dict.fromkeys(item_instance_ids))
+        if not identities:
+            return ()
+        instances = await self.get_instances(identities, for_update=True)
+        by_id = {item.item_instance_id: item for item in instances}
+        if len(by_id) != len(identities):
+            raise KeyError("One or more item instances were not found")
+        if any(
+            item.life_id != life_id
+            or item.status is not ItemInstanceStatus.OWNED
+            or item.location is not ItemLocation.INVENTORY
+            for item in instances
+        ):
+            raise ItemOperationConflict("One or more item instances are not in inventory")
+        result = []
+        for item_id in identities:
+            consumed = replace(
+                by_id[item_id],
+                status=ItemInstanceStatus.CONSUMED,
+                location=None,
+                consumed_at=consumed_at,
+            )
+            self._state.item_instances[item_id] = consumed
+            result.append(consumed)
+        return tuple(result)
+
+    async def get_inventory_instances(
+        self,
+        life_id: UUID,
+        item_codes: Collection[str] = (),
+        *,
+        for_update: bool,
+    ) -> tuple[ItemInstance, ...]:
+        self._ensure_active()
+        del for_update
+        allowed = set(item_codes)
+        return tuple(
+            sorted(
+                (
+                    item
+                    for item in self._state.item_instances.values()
+                    if item.life_id == life_id
+                    and item.status is ItemInstanceStatus.OWNED
+                    and item.location is ItemLocation.INVENTORY
+                    and (not allowed or item.item_code in allowed)
+                ),
+                key=lambda item: (item.item_code, item.item_instance_id),
+            )
+        )
+
+    async def set_instance_location(
+        self,
+        *,
+        item_instance_id: UUID,
+        life_id: UUID,
+        expected: ItemLocation,
+        destination: ItemLocation,
+    ) -> ItemInstance:
+        self._ensure_active()
+        item = self._state.item_instances.get(item_instance_id)
+        if (
+            item is None
+            or item.life_id != life_id
+            or item.status is not ItemInstanceStatus.OWNED
+            or item.location is not expected
+        ):
+            raise ItemOperationConflict("Item instance location changed")
+        updated = replace(item, location=destination)
+        self._state.item_instances[item_instance_id] = updated
+        return updated
+
     async def get_stack(self, life_id: UUID, item_code: str, *, for_update: bool) -> ItemStack:
         self._ensure_active()
         del for_update
@@ -1039,11 +1498,6 @@ def _validate_fake_consumption_request(request: ItemConsumptionRequest) -> None:
         and request.session_id is None
     ):
         raise ValueError("Breakthrough consumption requires a session ID")
-    if (
-        request.entry_type is ItemConsumptionType.QUEST_DELIVERY
-        and request.session_id is not None
-    ):
-        raise ValueError("Quest delivery must not have a cultivation session ID")
 
 
 def _validate_fake_replay(
@@ -1060,6 +1514,197 @@ def _validate_fake_replay(
         raise ItemOperationConflict
 
 
+class FakeStorageRepository:
+    def __init__(self, state: _FakeState, ensure_active: Callable[[], None]) -> None:
+        self._state = state
+        self._ensure_active = ensure_active
+
+    async def lock_operation(self, operation_id: UUID) -> None:
+        del operation_id
+        self._ensure_active()
+
+    async def get_container(
+        self,
+        life_id: UUID,
+        area_id: str,
+        *,
+        for_update: bool,
+    ) -> StorageContainer | None:
+        self._ensure_active()
+        del for_update
+        return self._state.storage_containers.get((life_id, area_id))
+
+    async def create_container(
+        self,
+        *,
+        life_id: UUID,
+        area_id: str,
+        page_count: int,
+        item_slots_per_page: int,
+    ) -> StorageContainer:
+        self._ensure_active()
+        key = (life_id, area_id)
+        container = self._state.storage_containers.get(key)
+        if container is None:
+            now = datetime.now(UTC)
+            container = StorageContainer(
+                life_id=life_id,
+                area_id=area_id,
+                page_count=page_count,
+                item_slots_per_page=item_slots_per_page,
+                revision=0,
+                created_at=now,
+                updated_at=now,
+            )
+            self._state.storage_containers[key] = container
+        if (
+            container.page_count != page_count
+            or container.item_slots_per_page != item_slots_per_page
+        ):
+            raise RuntimeError("Storage container shape differs from current catalog")
+        return container
+
+    async def get_page_slots(
+        self,
+        life_id: UUID,
+        area_id: str,
+        page: int,
+    ) -> tuple[StorageSlot, ...]:
+        self._ensure_active()
+        return tuple(
+            sorted(
+                (
+                    slot
+                    for slot in self._state.storage_slots.values()
+                    if slot.life_id == life_id
+                    and slot.area_id == area_id
+                    and slot.page == page
+                ),
+                key=lambda value: value.slot,
+            )
+        )
+
+    async def get_slots(
+        self,
+        life_id: UUID,
+        area_id: str,
+        positions: Collection[tuple[int, int]],
+        *,
+        for_update: bool,
+    ) -> dict[tuple[int, int], StorageSlot]:
+        self._ensure_active()
+        del for_update
+        return {
+            (page, slot): stored
+            for page, slot in sorted(set(positions))
+            if (
+                stored := self._state.storage_slots.get(
+                    (life_id, area_id, page, slot)
+                )
+            )
+            is not None
+        }
+
+    async def find_item_slot(
+        self,
+        item_instance_id: UUID,
+        *,
+        for_update: bool,
+    ) -> StorageSlot | None:
+        self._ensure_active()
+        del for_update
+        return next(
+            (
+                slot
+                for slot in self._state.storage_slots.values()
+                if slot.item_instance_id == item_instance_id
+            ),
+            None,
+        )
+
+    async def put_slot(self, slot: StorageSlot) -> None:
+        self._ensure_active()
+        key = (slot.life_id, slot.area_id, slot.page, slot.slot)
+        if key in self._state.storage_slots:
+            raise RuntimeError("Storage slot is occupied")
+        if await self.find_item_slot(slot.item_instance_id, for_update=True) is not None:
+            raise RuntimeError("Item already occupies a storage slot")
+        self._state.storage_slots[key] = slot
+
+    async def delete_slot(
+        self,
+        *,
+        life_id: UUID,
+        area_id: str,
+        page: int,
+        slot: int,
+        item_instance_id: UUID,
+    ) -> None:
+        self._ensure_active()
+        key = (life_id, area_id, page, slot)
+        stored = self._state.storage_slots.get(key)
+        if stored is None or stored.item_instance_id != item_instance_id:
+            raise RuntimeError("Storage slot changed before removal")
+        del self._state.storage_slots[key]
+
+    async def move_slot(
+        self,
+        *,
+        life_id: UUID,
+        area_id: str,
+        source_page: int,
+        source_slot: int,
+        destination_page: int,
+        destination_slot: int,
+        item_instance_id: UUID,
+    ) -> None:
+        self._ensure_active()
+        source_key = (life_id, area_id, source_page, source_slot)
+        destination_key = (life_id, area_id, destination_page, destination_slot)
+        source = self._state.storage_slots.get(source_key)
+        if source is None or source.item_instance_id != item_instance_id:
+            raise RuntimeError("Storage source slot changed before move")
+        if destination_key in self._state.storage_slots:
+            raise RuntimeError("Storage destination slot is occupied")
+        del self._state.storage_slots[source_key]
+        self._state.storage_slots[destination_key] = replace(
+            source,
+            page=destination_page,
+            slot=destination_slot,
+            updated_at=datetime.now(UTC),
+        )
+
+    async def increment_revision(
+        self,
+        *,
+        life_id: UUID,
+        area_id: str,
+        expected_revision: int,
+    ) -> int:
+        self._ensure_active()
+        key = (life_id, area_id)
+        container = self._state.storage_containers[key]
+        if container.revision != expected_revision:
+            raise RuntimeError("Storage revision changed before mutation")
+        container = replace(
+            container,
+            revision=container.revision + 1,
+            updated_at=datetime.now(UTC),
+        )
+        self._state.storage_containers[key] = container
+        return container.revision
+
+    async def get_operation(self, operation_id: UUID) -> StorageOperation | None:
+        self._ensure_active()
+        return self._state.storage_operations.get(operation_id)
+
+    async def insert_operation(self, operation: StorageOperation) -> None:
+        self._ensure_active()
+        if operation.operation_id in self._state.storage_operations:
+            raise RuntimeError("Storage operation already exists")
+        self._state.storage_operations[operation.operation_id] = operation
+
+
 class FakeUnitOfWork:
     def __init__(self, store: FakeStore, isolation: str) -> None:
         self._store = store
@@ -1069,6 +1714,7 @@ class FakeUnitOfWork:
         self.combat: FakeCombatRepository
         self.cultivation: FakeCultivationRepository
         self.items: FakeItemRepository
+        self.storage: FakeStorageRepository
         self._working_state: _FakeState | None = None
         self._entered = False
         self._active = False
@@ -1087,6 +1733,7 @@ class FakeUnitOfWork:
         self.combat = FakeCombatRepository(self._working_state, self._ensure_active)
         self.cultivation = FakeCultivationRepository(self._working_state, self._ensure_active)
         self.items = FakeItemRepository(self._working_state, self._ensure_active)
+        self.storage = FakeStorageRepository(self._working_state, self._ensure_active)
         return self
 
     async def __aexit__(

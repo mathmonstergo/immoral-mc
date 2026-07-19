@@ -9,9 +9,12 @@ from immortal_mmo.cultivation.models import (
     CultivationSession,
     CultivationState,
     LifeTechnique,
+    QuestCultivationRewardClaim,
+    QuestCultivationRewardGrant,
     RealmEntry,
     SessionTechnique,
     TechniqueInvestmentChange,
+    TechniqueLearnOperation,
 )
 
 
@@ -20,6 +23,55 @@ class ActiveCultivationSessionExists(RuntimeError):
 
 
 class CultivationRepository(Protocol):
+    async def claim_pending_quest_reward(
+        self,
+        *,
+        operation_id: UUID,
+        grant_id: UUID,
+        life_id: UUID,
+        cap: int,
+        occurred_at: datetime,
+    ) -> QuestCultivationRewardClaim: ...
+
+    async def finalize_quest_reward_claim(
+        self,
+        *,
+        operation_id: UUID,
+        response_body: bytes,
+    ) -> QuestCultivationRewardClaim: ...
+
+    async def get_learn_operation(
+        self,
+        operation_id: UUID,
+    ) -> TechniqueLearnOperation | None: ...
+
+    async def learn_technique(
+        self,
+        *,
+        operation: TechniqueLearnOperation,
+        technique: LifeTechnique,
+    ) -> LifeTechnique: ...
+
+    async def finalize_learn_operation(
+        self,
+        *,
+        operation_id: UUID,
+        response_body: bytes,
+    ) -> TechniqueLearnOperation: ...
+
+    async def grant_quest_reward(
+        self,
+        *,
+        grant_id: UUID,
+        life_id: UUID,
+        operation_id: UUID,
+        quest_id: str,
+        reward_id: str,
+        configured_amount: int,
+        cap: int,
+        occurred_at: datetime,
+    ) -> QuestCultivationRewardGrant: ...
+
     async def get_or_create_state(self, life_id: UUID, *, for_update: bool) -> CultivationState: ...
 
     async def get_techniques(

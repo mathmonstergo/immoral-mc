@@ -5,6 +5,8 @@ from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
 
+from immortal_mmo.quest.models import QuestRewardType
+
 
 class QuestProgressStatus(StrEnum):
     ACTIVE = "active"
@@ -73,7 +75,39 @@ class FrozenHttpResponse:
     contract_version: int
 
 
+@dataclass(frozen=True, slots=True)
+class QuestRewardGrant:
+    grant_id: UUID
+    life_id: UUID
+    operation_id: UUID
+    quest_id: str
+    reward_id: str
+    reward_type: QuestRewardType
+    item_code: str | None
+    configured_amount: int
+    applied_amount: int
+    pending_amount: int
+    status: str
+    created_at: datetime
+
+
 class QuestRepository(Protocol):
+    async def insert_reward_grant(self, grant: QuestRewardGrant) -> None: ...
+
+    async def get_reward_grants(
+        self,
+        operation_id: UUID,
+    ) -> tuple[QuestRewardGrant, ...]: ...
+
+    async def get_reward_grant(self, grant_id: UUID) -> QuestRewardGrant | None: ...
+
+    async def update_reward_grant_progress(
+        self,
+        *,
+        grant_id: UUID,
+        pending_amount: int,
+    ) -> QuestRewardGrant: ...
+
     async def get_operation(self, operation_id: UUID) -> StoredQuestOperation | None: ...
 
     async def reserve_operation(self, operation: StoredQuestOperation) -> bool: ...
