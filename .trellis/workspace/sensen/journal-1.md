@@ -709,3 +709,37 @@ Added a complete layer 0-13 technique curve, ten-second cumulative seclusion set
 ### Next Steps
 
 - None - task complete
+
+
+## Session 21: Unified local startup and Java 25 baseline
+
+**Date**: 2026-07-19
+**Task**: Unified local startup and Java 25 baseline
+**Branch**: `feat/cultivation-progression`
+
+### Summary
+
+Added the one-command local startup orchestrator for PostgreSQL, Game Service, BetterHud resource-pack HTTP, and Paper with idempotent tmux sessions and readiness checks. Removed dependency/config mutation from standalone startup, made Java 25 the sole compile/runtime baseline, upgraded Mockito for Java 25 tests, synchronized Chinese Wiki/specs, and verified cold/repeated startup plus all Python and Java checks.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `254cbc6` | (see git log) |
+| `85d1736` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
