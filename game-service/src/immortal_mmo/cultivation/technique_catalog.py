@@ -202,15 +202,15 @@ class TechniqueCatalog:
         if (
             isinstance(technique.minimum_player_level, bool)
             or not isinstance(technique.minimum_player_level, int)
-            or not 1 <= technique.minimum_player_level <= 22
+            or not 0 <= technique.minimum_player_level <= 22
         ):
             raise TechniqueCatalogError(
-                "Technique minimum_player_level must be an integer from 1 through 22"
+                "Technique minimum_player_level must be an integer from 0 through 22"
             )
         if technique.group == "qi":
-            if not 1 <= technique.minimum_player_level <= 13:
+            if not 0 <= technique.minimum_player_level <= 13:
                 raise TechniqueCatalogError(
-                    "qi technique minimum_player_level must be 1 through 13"
+                    "qi technique minimum_player_level must be 0 through 13"
                 )
         else:
             group_level = int(technique.group.split(":", 1)[1])

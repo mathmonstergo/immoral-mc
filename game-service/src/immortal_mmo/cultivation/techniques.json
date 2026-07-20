@@ -10,7 +10,7 @@
       "time_weight": 1,
       "max_layer": 13,
       "required_elements": [],
-      "minimum_player_level": 1,
+      "minimum_player_level": 0,
       "prerequisites": [],
       "equipped_item_requirements": [],
       "category": "辅助",

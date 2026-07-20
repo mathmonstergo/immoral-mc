@@ -85,24 +85,27 @@ async def full_qi_player(
             "active",
         )
     qi_totals = load_realm_catalog(ROOT / "realm_catalog.json").qi_cumulative_totals()
-    baseline = qi_totals[level - 1] if level > 1 else 0
-    entry_id = UUID(int=suffix * 1000 + level)
-    factory.store._state.realm_entries[entry_id] = RealmEntry(
-        entry_id,
-        life_id,
-        1,
-        None,
-        max(level - 1, 1),
-        level,
-        "qi",
-        "qi",
-        baseline,
-        baseline,
-        "adjacent",
-        None,
-        "active",
-        None,
-    )
+    parent_entry_id = None
+    for source_level in range(level):
+        entry_id = UUID(int=suffix * 1000 + source_level + 1)
+        baseline = qi_totals[source_level]
+        factory.store._state.realm_entries[entry_id] = RealmEntry(
+            entry_id,
+            life_id,
+            source_level + 1,
+            parent_entry_id,
+            source_level,
+            source_level + 1,
+            "qi",
+            "qi",
+            baseline,
+            baseline,
+            "adjacent",
+            None,
+            "active",
+            None,
+        )
+        parent_entry_id = entry_id
     realized = sum(technique_amounts)
     factory.store._state.cultivation_states[life_id] = CultivationState(
         life_id,
@@ -125,7 +128,7 @@ async def test_guaranteed_foundation_breakthrough_consumes_pill_and_settles_afte
         level=10,
         quality="triple",
         root_count=3,
-        technique_amounts=(11_293,),
+        technique_amounts=(11_343,),
     )
     factory.store._state.item_stacks[(life_id, "foundation_pill")] = ItemStack(
         life_id, "foundation_pill", 1, 1
@@ -170,7 +173,7 @@ async def test_failed_four_root_attempt_can_advance_to_optional_qi_layer_without
         level=10,
         quality="quad",
         root_count=4,
-        technique_amounts=(11_293,),
+        technique_amounts=(11_343,),
     )
     factory.store._state.item_stacks[(life_id, "foundation_pill")] = ItemStack(
         life_id, "foundation_pill", 1, 1
@@ -193,7 +196,7 @@ async def test_failed_four_root_attempt_can_advance_to_optional_qi_layer_without
     assert settled.outcome == "failure_advance"
     assert snapshot.current_level == 11
     assert snapshot.current_progress == 0
-    assert snapshot.realized_total == 11_293
+    assert snapshot.realized_total == 11_343
     assert snapshot.unrefined_reserve == 777
 
 
@@ -206,7 +209,7 @@ async def test_level_thirteen_failure_applies_fixed_penalty_without_touching_res
         level=13,
         quality="penta",
         root_count=5,
-        technique_amounts=(8_215, 8_215, 8_215, 8_215),
+        technique_amounts=(8_265, 8_215, 8_215, 8_215),
     )
     factory.store._state.item_stacks[(life_id, "foundation_pill")] = ItemStack(
         life_id, "foundation_pill", 10, 1
@@ -228,7 +231,7 @@ async def test_level_thirteen_failure_applies_fixed_penalty_without_touching_res
     assert settled.status == "failed"
     assert settled.outcome == "failure_loss"
     assert snapshot.current_level == 13
-    assert snapshot.realized_total == 32_860 - 3_140
+    assert snapshot.realized_total == 32_910 - 3_140
     assert snapshot.current_progress == 9_420 - 3_140
     assert snapshot.unrefined_reserve == 777
 
@@ -274,7 +277,7 @@ async def test_breakthrough_item_shortage_is_domain_conflict_and_rolls_back() ->
         level=10,
         quality="triple",
         root_count=3,
-        technique_amounts=(11_293,),
+        technique_amounts=(11_343,),
     )
     clock = MutableClock(datetime(2026, 7, 16, 8, tzinfo=UTC))
     state_before = factory.store._state.cultivation_states[life_id]
@@ -307,7 +310,7 @@ async def test_breakthrough_active_session_race_is_domain_conflict_and_rolls_bac
         level=10,
         quality="triple",
         root_count=3,
-        technique_amounts=(11_293,),
+        technique_amounts=(11_343,),
     )
     factory.store._state.item_stacks[(life_id, "foundation_pill")] = ItemStack(
         life_id, "foundation_pill", 1, 1

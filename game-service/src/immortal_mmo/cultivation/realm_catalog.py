@@ -34,8 +34,8 @@ class RealmCatalog:
                 raise ValueError(f"Duplicate realm level: {level.level_id}")
             if isinstance(level.level_id, bool) or not isinstance(level.level_id, int):
                 raise ValueError("Realm level ID must be an integer")
-            if level.level_id < 1 or level.level_id > 22:
-                raise ValueError("Realm level IDs must be 1 through 22")
+            if level.level_id < 0 or level.level_id > 22:
+                raise ValueError("Realm level IDs must be 0 through 22")
             if not level.name:
                 raise ValueError("Realm level name must not be empty")
             if not level.major_realm:
@@ -60,8 +60,8 @@ class RealmCatalog:
                     raise ValueError("Realm catalog terminal level must not have a successor")
                 raise ValueError("Non-terminal realm level has an invalid successor")
 
-        if level_ids != list(range(1, 23)):
-            raise ValueError("Realm catalog must contain levels 1 through 22 exactly")
+        if level_ids != list(range(0, 23)):
+            raise ValueError("Realm catalog must contain levels 0 through 22 exactly")
 
         object.__setattr__(self, "_schema_version", schema_version)
         object.__setattr__(self, "_levels", MappingProxyType(by_id))
@@ -83,7 +83,7 @@ class RealmCatalog:
     def qi_cumulative_totals(self) -> dict[int, int]:
         total = 0
         result: dict[int, int] = {}
-        for level_id in range(1, 14):
+        for level_id in range(0, 14):
             total += self.level(level_id).max_exp
             result[level_id] = total
         return result

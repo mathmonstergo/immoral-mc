@@ -17,6 +17,23 @@ class CultivationProjectionStoreTest {
             UUID.fromString("33333333-3333-4333-8333-333333333333");
 
     @Test
+    void confirmedMortalSnapshotIsDisplayedWithoutInventingLevelOne() {
+        CultivationProjectionStore store = new CultivationProjectionStore();
+        store.beginLife(PLAYER_ID, LIFE_ID);
+
+        assertTrue(store.confirm(
+                PLAYER_ID,
+                LIFE_ID,
+                new CultivationSnapshot(
+                        1, 0, "凡人", 0, 50, 0, 20, 50, 1, false, false, false)));
+
+        CultivationProjectionStore.Projection projection = store.snapshot(PLAYER_ID);
+        assertEquals("凡人", projection.realmName());
+        assertEquals(50L, projection.maxExp());
+        assertEquals(0.4, projection.reserveRatio());
+    }
+
+    @Test
     void missingStateIsDisplayDisabledRatherThanInventedGameplay() {
         CultivationProjectionStore store = new CultivationProjectionStore();
         store.beginLife(PLAYER_ID, LIFE_ID);

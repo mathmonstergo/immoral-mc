@@ -21,7 +21,7 @@ def upgrade() -> None:
     op.create_table(
         "life_cultivation_states",
         sa.Column("life_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("current_level", sa.SmallInteger(), server_default="1", nullable=False),
+        sa.Column("current_level", sa.SmallInteger(), server_default="0", nullable=False),
         sa.Column(
             "unrefined_cultivation",
             sa.BigInteger(),
@@ -56,7 +56,7 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.CheckConstraint(
-            "current_level BETWEEN 1 AND 22",
+            "current_level BETWEEN 0 AND 22",
             name=op.f("ck_life_cultivation_states_level"),
         ),
         sa.CheckConstraint(
@@ -196,7 +196,7 @@ def upgrade() -> None:
             name=op.f("ck_cultivation_session_fingerprint"),
         ),
         sa.CheckConstraint(
-            "source_level BETWEEN 1 AND 22 AND "
+            "source_level BETWEEN 0 AND 22 AND "
             "(target_level IS NULL OR target_level BETWEEN 1 AND 22)",
             name=op.f("ck_cultivation_session_levels"),
         ),
@@ -288,9 +288,13 @@ def upgrade() -> None:
         sa.UniqueConstraint("life_id", "realm_entry_id", name="uq_life_realm_entry_identity"),
         sa.CheckConstraint("generation > 0", name=op.f("ck_life_realm_entry_generation")),
         sa.CheckConstraint(
-            "source_level BETWEEN 1 AND 22 AND target_level BETWEEN 1 AND 22 "
+            "source_level BETWEEN 0 AND 21 AND target_level BETWEEN 1 AND 22 "
             "AND target_level > source_level",
             name=op.f("ck_life_realm_entry_levels"),
+        ),
+        sa.CheckConstraint(
+            "(parent_entry_id IS NULL) = (source_level = 0 AND target_level = 1)",
+            name=op.f("ck_life_realm_entry_root_shape"),
         ),
         sa.CheckConstraint(
             "source_floor >= 0 AND target_baseline >= 0",

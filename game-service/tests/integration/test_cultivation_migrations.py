@@ -63,6 +63,60 @@ async def test_fresh_schema_contains_complete_cultivation_persistence(
 
 
 @pytest.mark.asyncio
+async def test_fresh_schema_supports_mortal_current_and_transition_levels(
+    postgres_engine: AsyncEngine,
+) -> None:
+    async with postgres_engine.connect() as connection:
+        default = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT column_default
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'life_cultivation_states'
+                      AND column_name = 'current_level'
+                    """
+                )
+            )
+        ).scalar_one()
+        constraints = dict(
+            (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT con.conname, pg_get_constraintdef(con.oid)
+                        FROM pg_constraint AS con
+                        JOIN pg_class AS rel ON rel.oid = con.conrelid
+                        WHERE rel.relname IN (
+                            'life_cultivation_states',
+                            'cultivation_sessions',
+                            'life_realm_entries'
+                        )
+                          AND con.conname IN (
+                            'ck_life_cultivation_states_level',
+                            'ck_cultivation_session_levels',
+                            'ck_life_realm_entry_levels',
+                            'ck_life_realm_entry_root_shape'
+                        )
+                        """
+                    )
+                )
+            ).all()
+        )
+
+    assert default == "'0'::smallint"
+    assert "current_level >= 0" in constraints["ck_life_cultivation_states_level"]
+    assert "source_level >= 0" in constraints["ck_cultivation_session_levels"]
+    assert "source_level >= 0" in constraints["ck_life_realm_entry_levels"]
+    assert "target_level >= 1" in constraints["ck_life_realm_entry_levels"]
+    root_shape = constraints["ck_life_realm_entry_root_shape"]
+    assert "parent_entry_id IS NULL" in root_shape
+    assert "source_level = 0" in root_shape
+    assert "target_level = 1" in root_shape
+
+
+@pytest.mark.asyncio
 async def test_active_session_pointer_is_life_consistent_and_restricted(
     postgres_engine: AsyncEngine,
 ) -> None:

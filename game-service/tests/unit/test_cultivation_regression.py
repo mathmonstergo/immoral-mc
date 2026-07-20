@@ -97,6 +97,48 @@ def append_entry(
 
 
 @pytest.mark.asyncio
+async def test_losing_first_realm_floor_returns_player_to_mortal() -> None:
+    factory = FakeUnitOfWorkFactory(FakeStore())
+    login = await PlayerService(factory).login(UUID(int=8_000), "MortalRegression")
+    life_id = login.current_life.life_id
+    technique_id = UUID(int=8_009)
+    factory.store._state.life_techniques[technique_id] = technique(
+        technique_id=technique_id,
+        life_id=life_id,
+        group="qi",
+        realm="练气",
+        invested=50,
+        capacity=3_780,
+    )
+    factory.store._state.cultivation_states[life_id] = CultivationState(
+        life_id, 1, 0, 50, None, 1
+    )
+    entry = append_entry(
+        factory,
+        life_id=life_id,
+        generation=1,
+        parent=None,
+        source_level=0,
+        target_level=1,
+        source_group="qi",
+        target_group="qi",
+        source_floor=50,
+        target_baseline=50,
+    )
+
+    result = await service(factory).abandon_technique(
+        account_id=login.account.account_id,
+        life_technique_id=technique_id,
+        idempotency_key=UUID(int=8_010),
+    )
+
+    assert result.cultivation.current_level == 0
+    assert result.cultivation.realm_name == "凡人"
+    assert result.cultivation.current_progress == 0
+    assert factory.store._state.realm_entries[entry.realm_entry_id].status == "invalidated"
+
+
+@pytest.mark.asyncio
 async def test_abandonment_debits_exact_investment_and_crosses_major_realm() -> None:
     factory = FakeUnitOfWorkFactory(FakeStore())
     login = await PlayerService(factory).login(UUID(int=8_001), "Regressor")
@@ -134,12 +176,23 @@ async def test_abandonment_debits_exact_investment_and_crosses_major_realm() -> 
 
     catalog = load_realm_catalog(ROOT / "realm_catalog.json")
     totals = catalog.qi_cumulative_totals()
-    parent = None
+    parent = append_entry(
+        factory,
+        life_id=life_id,
+        generation=1,
+        parent=None,
+        source_level=0,
+        target_level=1,
+        source_group="qi",
+        target_group="qi",
+        source_floor=50,
+        target_baseline=50,
+    )
     for source_level in range(1, 10):
         parent = append_entry(
             factory,
             life_id=life_id,
-            generation=source_level,
+            generation=source_level + 1,
             parent=parent,
             source_level=source_level,
             target_level=source_level + 1,
@@ -151,7 +204,7 @@ async def test_abandonment_debits_exact_investment_and_crosses_major_realm() -> 
     breakthrough = append_entry(
         factory,
         life_id=life_id,
-        generation=10,
+        generation=11,
         parent=parent,
         source_level=10,
         target_level=14,
@@ -216,35 +269,47 @@ async def test_reentry_uses_new_generation_and_never_revives_invalidated_branch(
         life_id=life_id,
         group="qi",
         realm="练气",
-        invested=150,
-        capacity=251,
+        invested=200,
+        capacity=300,
     )
     factory.store._state.cultivation_states[life_id] = CultivationState(
-        life_id, 3, 100, 250, None, 1
+        life_id, 3, 100, 300, None, 1
     )
-    first_entry = append_entry(
+    root_entry = append_entry(
         factory,
         life_id=life_id,
         generation=1,
         parent=None,
+        source_level=0,
+        target_level=1,
+        source_group="qi",
+        target_group="qi",
+        source_floor=50,
+        target_baseline=50,
+    )
+    first_entry = append_entry(
+        factory,
+        life_id=life_id,
+        generation=2,
+        parent=root_entry,
         source_level=1,
         target_level=2,
         source_group="qi",
         target_group="qi",
-        source_floor=100,
-        target_baseline=100,
+        source_floor=150,
+        target_baseline=150,
     )
     invalidated_entry = append_entry(
         factory,
         life_id=life_id,
-        generation=2,
+        generation=3,
         parent=first_entry,
         source_level=2,
         target_level=3,
         source_group="qi",
         target_group="qi",
-        source_floor=250,
-        target_baseline=250,
+        source_floor=300,
+        target_baseline=300,
     )
     clock = MutableClock(datetime(2026, 7, 16, 8, tzinfo=UTC))
     cultivation = service(factory, clock=clock)
@@ -273,7 +338,8 @@ async def test_reentry_uses_new_generation_and_never_revives_invalidated_branch(
 
     entries = sorted(factory.store._state.realm_entries.values(), key=lambda item: item.generation)
     new_entry = entries[-1]
-    assert new_entry.generation == 3
+    assert len(entries) == 4
+    assert new_entry.generation == 4
     assert new_entry.parent_entry_id == first_entry.realm_entry_id
     assert new_entry.transition_kind == "reentry"
     assert invalidated_entry.status == "active"

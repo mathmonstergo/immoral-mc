@@ -17,7 +17,7 @@ public record CultivationSnapshot(
         if (contractVersion != 1) {
             throw new IllegalArgumentException("Unsupported cultivation contract version");
         }
-        if (currentLevel < 1 || currentLevel > 22) {
+        if (currentLevel < 0 || currentLevel > 22) {
             throw new IllegalArgumentException("currentLevel is outside supported bounds");
         }
         if (realmName == null || realmName.isBlank()) {

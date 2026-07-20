@@ -187,6 +187,7 @@ EXPECTED_CONSTRAINTS = {
         "fk_life_realm_entries_life_id_lives",
         "fk_life_realm_entries_parent",
         "fk_life_realm_entries_session",
+        "ck_life_realm_entry_root_shape",
         "uq_life_realm_entry_generation",
         "uq_life_realm_entry_identity",
         "ck_life_realm_entry_generation",

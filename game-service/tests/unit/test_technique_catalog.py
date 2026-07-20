@@ -27,7 +27,7 @@ def catalog() -> TechniqueCatalog:
 
 def test_seeded_techniques_preserve_common_identity_and_groups(catalog: TechniqueCatalog) -> None:
     expected = {
-        "GF_YinqiShu_01": ("引气术", "qi", "练气", 1, "辅助"),
+        "GF_YinqiShu_01": ("引气术", "qi", "练气", 0, "辅助"),
         "Gongfa_68726c": ("冰冻术", "qi", "练气", 7, "攻击"),
         "Gongfa_b8d7e3": ("缠绕术", "qi", "练气", 7, "控制"),
         "Gongfa_6fcf01": ("地刺术", "qi", "练气", 9, "攻击"),

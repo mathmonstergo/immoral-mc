@@ -136,6 +136,66 @@ async def test_start_and_settle_seclusion_consumes_only_retained_reserve() -> No
 
 
 @pytest.mark.asyncio
+async def test_mortal_seclusion_enters_level_one_through_ten_second_cycles() -> None:
+    factory = FakeUnitOfWorkFactory(FakeStore())
+    login = await PlayerService(factory).login(UUID(int=7_000), "Mortal")
+    life_id = login.current_life.life_id
+    technique_id = UUID(int=70_001)
+    factory.store._state.life_techniques[technique_id] = LifeTechnique(
+        life_technique_id=technique_id,
+        life_id=life_id,
+        technique_id="GF_YinqiShu_01",
+        definition_version=1,
+        group_code="qi",
+        major_realm="练气",
+        invested_amount=0,
+        max_investment=3_780,
+        current_layer=0,
+        status="active",
+    )
+    factory.store._state.cultivation_balances[life_id] = 50
+    factory.store._state.cultivation_states[life_id] = CultivationState(
+        life_id, 0, 50, 0, None, 1
+    )
+    clock = MutableClock(datetime(2026, 7, 16, 8, tzinfo=UTC))
+    service = CultivationService(
+        factory,
+        load_realm_catalog(ROOT / "realm_catalog.json"),
+        area_catalog=load_area_catalog(ROOT / "areas.json"),
+        clock=clock,
+    )
+
+    started = await service.start_seclusion(
+        account_id=login.account.account_id,
+        area_id="neutral_training_ground",
+        technique_ids=(technique_id,),
+        idempotency_key=uuid4(),
+    )
+    clock.now += timedelta(seconds=500)
+    settled = await service.settle_seclusion(
+        account_id=login.account.account_id,
+        session_id=started.session_id,
+    )
+    snapshot = await service.current_life_snapshot(login.account.account_id)
+
+    assert settled.status == "active"
+    assert settled.cumulative_generated == 50
+    assert settled.cumulative_retained == 50
+    assert snapshot.current_level == 1
+    assert snapshot.realm_name == "练气一层"
+    assert snapshot.current_progress == 0
+    assert snapshot.max_exp == 100
+    assert snapshot.realized_total == 50
+    assert snapshot.unrefined_reserve == 0
+    entries = tuple(factory.store._state.realm_entries.values())
+    assert len(entries) == 1
+    assert entries[0].source_level == 0
+    assert entries[0].target_level == 1
+    assert entries[0].source_floor == 50
+    assert entries[0].target_baseline == 50
+
+
+@pytest.mark.asyncio
 async def test_start_rejects_different_groups_within_one_major_realm() -> None:
     factory = FakeUnitOfWorkFactory(FakeStore())
     login = await PlayerService(factory).login(UUID(int=701), "Mixed")
@@ -537,13 +597,13 @@ async def test_shared_qi_settlement_advances_to_full_level_ten_and_stops() -> No
         "qi",
         "练气",
         0,
-        11_340,
+        11_343,
         0,
         "active",
     )
-    factory.store._state.cultivation_balances[life_id] = 11_293
+    factory.store._state.cultivation_balances[life_id] = 11_343
     factory.store._state.cultivation_states[life_id] = CultivationState(
-        life_id, 1, 11_293, 0, None, 1
+        life_id, 1, 11_343, 0, None, 1
     )
     clock = MutableClock(datetime(2026, 7, 16, 8, tzinfo=UTC))
     service = CultivationService(
@@ -559,7 +619,7 @@ async def test_shared_qi_settlement_advances_to_full_level_ten_and_stops() -> No
         idempotency_key=uuid4(),
     )
 
-    clock.now += timedelta(seconds=37_650)
+    clock.now += timedelta(seconds=37_810)
     settled = await service.settle_seclusion(
         account_id=login.account.account_id,
         session_id=started.session_id,
@@ -567,7 +627,7 @@ async def test_shared_qi_settlement_advances_to_full_level_ten_and_stops() -> No
     snapshot = await service.current_life_snapshot(login.account.account_id)
 
     assert settled.status == "completed"
-    assert settled.cumulative_retained == 11_293
+    assert settled.cumulative_retained == 11_343
     assert snapshot.current_level == 10
     assert snapshot.current_progress == 3_829
     assert snapshot.progress_full is True

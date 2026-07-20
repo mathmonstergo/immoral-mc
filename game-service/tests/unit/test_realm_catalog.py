@@ -22,8 +22,11 @@ def catalog() -> RealmCatalog:
     return load_realm_catalog(CATALOG_PATH)
 
 
-def test_realm_catalog_has_approved_twenty_two_levels(catalog: RealmCatalog) -> None:
+def test_realm_catalog_prepends_mortal_without_rebalancing_approved_levels(
+    catalog: RealmCatalog,
+) -> None:
     expected = {
+        0: ("凡人", "凡人", 50),
         1: ("练气一层", "练气", 100),
         2: ("练气二层", "练气", 150),
         3: ("练气三层", "练气", 225),
@@ -48,7 +51,7 @@ def test_realm_catalog_has_approved_twenty_two_levels(catalog: RealmCatalog) -> 
         22: ("元婴后期", "元婴", 116_145_360),
     }
 
-    assert len(catalog.levels) == 22
+    assert len(catalog.levels) == 23
     for level_id, (name, major_realm, max_exp) in expected.items():
         level = catalog.level(level_id)
         assert (level.name, level.major_realm, level.max_exp) == (
@@ -80,13 +83,14 @@ def test_qi_cumulative_capacity_uses_three_five_seven_nine_techniques(
 ) -> None:
     totals = catalog.qi_cumulative_totals()
 
+    assert totals[0] == 50
     assert [totals[level] for level in (10, 11, 12, 13)] == [
-        11_293,
-        16_462,
-        23_440,
-        32_860,
+        11_343,
+        16_512,
+        23_490,
+        32_910,
     ]
-    assert [ceil(totals[level] / 3_780) for level in (10, 11, 12, 13)] == [3, 5, 7, 9]
+    assert [ceil(totals[level] / 3_780) for level in (10, 11, 12, 13)] == [4, 5, 7, 9]
 
 
 def _level(
@@ -112,8 +116,8 @@ def _level(
     [
         ((_level(1), _level(1)), "Duplicate realm level"),
         ((_level(1, next_level_id=3), _level(3, next_level_id=None)), "contiguous"),
-        ((_level(0, next_level_id=None),), "1 through 22"),
-        ((_level(23, next_level_id=None),), "1 through 22"),
+        ((_level(-1, next_level_id=None),), "0 through 22"),
+        ((_level(23, next_level_id=None),), "0 through 22"),
         ((_level(1, max_exp=0, next_level_id=None),), "max_exp"),
         ((_level(1, name="", next_level_id=None),), "name"),
         ((_level(1, major_realm="", next_level_id=None),), "major_realm"),

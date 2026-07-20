@@ -38,7 +38,11 @@ def project_progress(
     group_total = group_investments.get(target_group, 0)
     baseline = 0
     if active_entry is not None and active_entry.target_level == current_level:
-        baseline = 0 if active_entry.transition_kind == "reentry" else active_entry.target_baseline
+        cross_group_reentry = (
+            active_entry.transition_kind == "reentry"
+            and active_entry.source_group != active_entry.target_group
+        )
+        baseline = 0 if cross_group_reentry else active_entry.target_baseline
     current_progress = min(max(group_total - baseline, 0), level.max_exp)
     progress_full = current_progress >= level.max_exp
     return CultivationProgressSnapshot(
@@ -62,11 +66,32 @@ def valid_active_chain(
 ) -> tuple[RealmEntry, ...]:
     valid: list[RealmEntry] = []
     expected_parent: UUID | None = None
+    expected_source_level = 0
     for entry in sorted(entries, key=lambda item: item.generation):
-        if entry.status != "active" or entry.parent_entry_id != expected_parent:
+        if (
+            entry.status != "active"
+            or entry.parent_entry_id != expected_parent
+            or entry.source_level != expected_source_level
+            or entry.source_group != group_for_level(entry.source_level)
+            or entry.target_group != group_for_level(entry.target_level)
+        ):
+            break
+        if expected_parent is None and entry.target_level != 1:
+            break
+        same_group = entry.source_group == entry.target_group
+        if entry.transition_kind in {"adjacent", "failure_advance"} and (
+            not same_group or entry.target_level != entry.source_level + 1
+        ):
+            break
+        if entry.transition_kind == "breakthrough" and same_group:
+            break
+        if entry.transition_kind == "reentry" and (
+            same_group and entry.target_level != entry.source_level + 1
+        ):
             break
         if group_investments.get(entry.source_group, 0) < entry.source_floor:
             break
         valid.append(entry)
         expected_parent = entry.realm_entry_id
+        expected_source_level = entry.target_level
     return tuple(valid)

@@ -3,7 +3,7 @@ from types import MappingProxyType
 
 CULTIVATION_CYCLE_SECONDS = 10
 MAJOR_REALM_SPEED_WEIGHTS: Mapping[str, int] = MappingProxyType(
-    {"练气": 1, "筑基": 2, "结丹": 5, "元婴": 10}
+    {"凡人": 1, "练气": 1, "筑基": 2, "结丹": 5, "元婴": 10}
 )
 FULL_MASTERY_SECONDS: Mapping[str, int] = MappingProxyType(
     {"练气": 36_000, "筑基": 72_000, "结丹": 180_000, "元婴": 360_000}

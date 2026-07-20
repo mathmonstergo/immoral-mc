@@ -33,6 +33,28 @@ class GameServiceClientCultivationTest {
             UUID.fromString("44444444-4444-4444-8444-444444444444");
 
     @Test
+    void decodesAuthoritativeMortalCultivationSnapshot() throws Exception {
+        withServer(server -> server.createContext(
+                        "/api/v1/players/" + ACCOUNT_ID + "/current-life/cultivation",
+                        exchange -> respond(exchange, 200, """
+                                {"contract_version":1,"current_level":0,"realm_name":"凡人",
+                                 "current_progress":0,"max_exp":50,"realized_total":0,
+                                 "unrefined_reserve":20,"reserve_cap":50,"revision":1,
+                                 "progress_full":false,"reserve_full":false,"can_advance":false}
+                                """)),
+                uri -> {
+                    CultivationSnapshot snapshot = client(uri)
+                            .fetchCultivation(ACCOUNT_ID)
+                            .get(2, TimeUnit.SECONDS);
+
+                    assertEquals(0, snapshot.currentLevel());
+                    assertEquals("凡人", snapshot.realmName());
+                    assertEquals(50L, snapshot.maxExp());
+                    assertEquals(0.4, snapshot.reserveRatio());
+                });
+    }
+
+    @Test
     void decodesAuthoritativeCultivationSnapshot() throws Exception {
         withServer(server -> {
             server.createContext(

@@ -82,7 +82,7 @@ async def test_default_state_creation_and_sorted_technique_locking(
         )
         await session.rollback()
 
-    assert state.current_level == 1
+    assert state.current_level == 0
     assert state.unrefined_cultivation == 0
     assert state.realized_cultivation == 0
     assert tuple(item.life_technique_id for item in techniques) == (first_id, second_id)
@@ -108,12 +108,12 @@ async def test_active_realm_chain_ignores_invalidated_history(
                     life_id=life_id,
                     generation=1,
                     parent_entry_id=None,
-                    source_level=1,
-                    target_level=2,
+                    source_level=0,
+                    target_level=1,
                     source_group="qi",
                     target_group="qi",
-                    source_floor=100,
-                    target_baseline=100,
+                    source_floor=50,
+                    target_baseline=50,
                     transition_kind="adjacent",
                     transition_session_id=None,
                     status="active",
@@ -124,12 +124,12 @@ async def test_active_realm_chain_ignores_invalidated_history(
                     life_id=life_id,
                     generation=2,
                     parent_entry_id=active_id,
-                    source_level=2,
-                    target_level=3,
+                    source_level=1,
+                    target_level=2,
                     source_group="qi",
                     target_group="qi",
-                    source_floor=250,
-                    target_baseline=250,
+                    source_floor=150,
+                    target_baseline=150,
                     transition_kind="adjacent",
                     transition_session_id=None,
                     status="invalidated",

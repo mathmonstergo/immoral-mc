@@ -639,7 +639,7 @@ class CultivationService:
             )
             valid_chain = valid_active_chain(active_chain, group_investments)
             if len(valid_chain) != len(active_chain):
-                current_level = valid_chain[-1].target_level if valid_chain else 1
+                current_level = valid_chain[-1].target_level if valid_chain else 0
                 state = await uow.cultivation.invalidate_realm_suffix(
                     life_id=life.life_id,
                     retained_entry_ids=tuple(
@@ -1031,7 +1031,7 @@ class CultivationService:
                             entry.realm_entry_id for entry in valid_chain
                         ),
                         current_level=(
-                            valid_chain[-1].target_level if valid_chain else 1
+                            valid_chain[-1].target_level if valid_chain else 0
                         ),
                         invalidated_at=now,
                     )

@@ -762,7 +762,7 @@ class FakeCultivationRepository:
         del for_update
         return self._state.cultivation_states.setdefault(
             life_id,
-            CultivationState(life_id, 1, 0, 0, None, 1),
+            CultivationState(life_id, 0, 0, 0, None, 1),
         )
 
     async def get_techniques(

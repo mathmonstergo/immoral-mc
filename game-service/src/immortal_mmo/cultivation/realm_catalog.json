@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "levels": [
+    {"level_id": 0, "name": "凡人", "major_realm": "凡人", "max_exp": 50, "next_level_id": 1},
     {"level_id": 1, "name": "练气一层", "major_realm": "练气", "max_exp": 100, "next_level_id": 2},
     {"level_id": 2, "name": "练气二层", "major_realm": "练气", "max_exp": 150, "next_level_id": 3},
     {"level_id": 3, "name": "练气三层", "major_realm": "练气", "max_exp": 225, "next_level_id": 4},

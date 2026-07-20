@@ -35,7 +35,7 @@ class LifeCultivationStateRow(Base):
             ondelete="RESTRICT",
         ),
         CheckConstraint(
-            "current_level BETWEEN 1 AND 22",
+            "current_level BETWEEN 0 AND 22",
             name=conv("ck_life_cultivation_states_level"),
         ),
         CheckConstraint(
@@ -54,7 +54,7 @@ class LifeCultivationStateRow(Base):
     current_level: Mapped[int] = mapped_column(
         SmallInteger,
         nullable=False,
-        server_default=text("1"),
+        server_default=text("0"),
     )
 
     life_id: Mapped[UUID] = mapped_column(
@@ -444,7 +444,7 @@ class CultivationSessionRow(Base):
             name=conv("ck_cultivation_session_fingerprint"),
         ),
         CheckConstraint(
-            "source_level BETWEEN 1 AND 22 AND "
+            "source_level BETWEEN 0 AND 22 AND "
             "(target_level IS NULL OR target_level BETWEEN 1 AND 22)",
             name=conv("ck_cultivation_session_levels"),
         ),
@@ -549,9 +549,13 @@ class LifeRealmEntryRow(Base):
         ),
         CheckConstraint("generation > 0", name=conv("ck_life_realm_entry_generation")),
         CheckConstraint(
-            "source_level BETWEEN 1 AND 22 AND target_level BETWEEN 1 AND 22 "
+            "source_level BETWEEN 0 AND 21 AND target_level BETWEEN 1 AND 22 "
             "AND target_level > source_level",
             name=conv("ck_life_realm_entry_levels"),
+        ),
+        CheckConstraint(
+            "(parent_entry_id IS NULL) = (source_level = 0 AND target_level = 1)",
+            name=conv("ck_life_realm_entry_root_shape"),
         ),
         CheckConstraint(
             "source_floor >= 0 AND target_baseline >= 0",

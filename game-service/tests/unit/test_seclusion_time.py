@@ -18,6 +18,7 @@ def test_base_cycle_rate_comes_from_technique_capacity_and_mastery_time() -> Non
 @pytest.mark.parametrize(
     ("player_realm", "technique_realm", "base_rate", "expected"),
     [
+        ("凡人", "练气", 1, 1),
         ("筑基", "筑基", 6, 6),
         ("筑基", "练气", 1, 2),
         ("结丹", "筑基", 6, 15),

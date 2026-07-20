@@ -42,7 +42,7 @@ def client(sessions: async_sessionmaker[AsyncSession]) -> httpx.AsyncClient:
 
 
 @pytest.mark.asyncio
-async def test_new_current_life_has_level_one_empty_cultivation_snapshot(
+async def test_new_current_life_has_mortal_empty_cultivation_snapshot(
     postgres_sessions: async_sessionmaker[AsyncSession],
     clean_postgres_data: None,
 ) -> None:
@@ -63,12 +63,12 @@ async def test_new_current_life_has_level_one_empty_cultivation_snapshot(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["current_level"] == 1
-    assert body["realm_name"] == "练气一层"
+    assert body["current_level"] == 0
+    assert body["realm_name"] == "凡人"
     assert body["current_progress"] == 0
-    assert body["max_exp"] == 100
+    assert body["max_exp"] == 50
     assert body["unrefined_reserve"] == 0
-    assert body["reserve_cap"] == 100
+    assert body["reserve_cap"] == 50
 
 
 @pytest.mark.asyncio
@@ -135,7 +135,7 @@ async def test_start_seclusion_persists_unordered_authoritative_selection(
         "technique_capacity": 109,
         "full_mastery_seconds": 36_000,
         "base_cultivation_per_cycle": 1,
-        "player_major_realm": "练气",
+        "player_major_realm": "凡人",
         "player_speed_weight": 1,
         "technique_major_realm": "练气",
         "technique_speed_weight": 1,
@@ -144,6 +144,158 @@ async def test_start_seclusion_persists_unordered_authoritative_selection(
         "cultivation_per_cycle": 1,
     }
     assert tuple(selections) == tuple(sorted(technique_ids))
+
+
+@pytest.mark.asyncio
+async def test_mortal_seclusion_settlement_persists_level_zero_to_one_atomically(
+    postgres_sessions: async_sessionmaker[AsyncSession],
+    clean_postgres_data: None,
+) -> None:
+    del clean_postgres_data
+    technique_id = UUID(int=9_001)
+    async with client(postgres_sessions) as test_client:
+        login = await test_client.post(
+            "/api/v1/players/login",
+            json={"minecraft_uuid": str(UUID(int=9_000)), "player_name": "Mortal"},
+        )
+        account_id = login.json()["account"]["account_id"]
+        life_id = UUID(login.json()["current_life"]["life_id"])
+        async with postgres_sessions() as session:
+            session.add_all(
+                [
+                    LifeCultivationStateRow(
+                        life_id=life_id,
+                        current_level=0,
+                        unrefined_cultivation=50,
+                        realized_cultivation=0,
+                        revision=1,
+                    ),
+                    LifeTechniqueRow(
+                        life_technique_id=technique_id,
+                        life_id=life_id,
+                        technique_id="GF_YinqiShu_01",
+                        definition_version=1,
+                        group_code="qi",
+                        major_realm="练气",
+                        invested_amount=0,
+                        max_investment=3_780,
+                        current_layer=0,
+                        status="active",
+                    ),
+                ]
+            )
+            await session.commit()
+
+        started = await test_client.post(
+            f"/api/v1/players/{account_id}/current-life/cultivation/seclusions",
+            headers={"Idempotency-Key": str(UUID(int=9_002))},
+            json={
+                "area_id": "neutral_training_ground",
+                "technique_ids": [str(technique_id)],
+            },
+        )
+        assert started.status_code == 200
+        session_id = UUID(started.json()["session_id"])
+
+        async with postgres_sessions() as session:
+            seclusion = await session.get(CultivationSessionRow, session_id)
+            assert seclusion is not None
+            seclusion.started_at -= timedelta(seconds=500)
+            await session.commit()
+
+        settled = await test_client.post(
+            f"/api/v1/players/{account_id}/current-life/cultivation/seclusions/"
+            f"{session_id}/settle"
+        )
+        snapshot = await test_client.get(
+            f"/api/v1/players/{account_id}/current-life/cultivation"
+        )
+
+    assert settled.status_code == 200
+    assert settled.json()["status"] == "active"
+    assert settled.json()["cumulative_generated"] == 50
+    assert settled.json()["cumulative_reserve_consumed"] == 50
+    assert settled.json()["cumulative_retained"] == 50
+    assert snapshot.status_code == 200
+    assert snapshot.json()["current_level"] == 1
+    assert snapshot.json()["realm_name"] == "练气一层"
+    assert snapshot.json()["current_progress"] == 0
+    assert snapshot.json()["max_exp"] == 100
+    assert snapshot.json()["realized_total"] == 50
+    assert snapshot.json()["unrefined_reserve"] == 0
+
+    async with postgres_sessions() as session:
+        state = await session.get(LifeCultivationStateRow, life_id)
+        technique = await session.get(LifeTechniqueRow, technique_id)
+        seclusion = await session.get(CultivationSessionRow, session_id)
+        realm_entries = (
+            await session.scalars(
+                select(LifeRealmEntryRow).where(LifeRealmEntryRow.life_id == life_id)
+            )
+        ).all()
+        technique_entries = (
+            await session.scalars(
+                select(TechniqueInvestmentEntryRow).where(
+                    TechniqueInvestmentEntryRow.session_id == session_id
+                )
+            )
+        ).all()
+        resource_entries = (
+            await session.scalars(
+                select(CultivationResourceEntryRow).where(
+                    CultivationResourceEntryRow.session_id == session_id
+                )
+            )
+        ).all()
+
+    assert state is not None
+    assert state.current_level == 1
+    assert state.unrefined_cultivation == 0
+    assert state.realized_cultivation == 50
+    assert state.active_session_id == session_id
+    assert technique is not None
+    assert technique.invested_amount == 50
+    assert seclusion is not None
+    assert seclusion.source_level == 0
+    assert seclusion.cumulative_generated == 50
+    assert seclusion.cumulative_reserve_consumed == 50
+    assert seclusion.cumulative_retained == 50
+
+    assert len(realm_entries) == 1
+    realm_entry = realm_entries[0]
+    assert realm_entry.generation == 1
+    assert realm_entry.parent_entry_id is None
+    assert realm_entry.source_level == 0
+    assert realm_entry.target_level == 1
+    assert realm_entry.source_floor == 50
+    assert realm_entry.target_baseline == 50
+    assert realm_entry.transition_kind == "adjacent"
+    assert realm_entry.transition_session_id == session_id
+    assert realm_entry.status == "active"
+
+    assert len(technique_entries) == 1
+    technique_entry = technique_entries[0]
+    assert technique_entry.entry_type == "seclusion_realization"
+    assert technique_entry.delta_amount == 50
+    assert technique_entry.balance_after == 50
+    assert len(resource_entries) == 2
+    resource_entries_by_code = {entry.resource_code: entry for entry in resource_entries}
+    assert resource_entries_by_code["realized_cultivation"].entry_type == (
+        "seclusion_realization"
+    )
+    assert resource_entries_by_code["realized_cultivation"].delta_amount == 50
+    assert resource_entries_by_code["realized_cultivation"].balance_after == 50
+    assert resource_entries_by_code["unrefined_cultivation"].entry_type == (
+        "seclusion_consumption"
+    )
+    assert resource_entries_by_code["unrefined_cultivation"].delta_amount == -50
+    assert resource_entries_by_code["unrefined_cultivation"].balance_after == 0
+    operation_ids = {
+        technique_entry.operation_id,
+        *(entry.operation_id for entry in resource_entries),
+    }
+    assert None not in operation_ids
+    assert len(operation_ids) == 1
 
 
 @pytest.mark.asyncio
@@ -333,6 +485,7 @@ async def test_regression_reentry_appends_a_new_postgres_branch(
     del clean_postgres_data
     abandoned_id = UUID(int=9_311)
     retained_id = UUID(int=9_312)
+    mortal_entry_id = UUID(int=9_320)
     first_entry_id = UUID(int=9_321)
     invalidated_entry_id = UUID(int=9_322)
     async with client(postgres_sessions) as test_client:
@@ -348,7 +501,7 @@ async def test_regression_reentry_appends_a_new_postgres_branch(
                     life_id=life_id,
                     current_level=3,
                     unrefined_cultivation=100,
-                    realized_cultivation=250,
+                    realized_cultivation=300,
                     revision=1,
                 )
             )
@@ -373,22 +526,38 @@ async def test_regression_reentry_appends_a_new_postgres_branch(
                         definition_version=1,
                         group_code="qi",
                         major_realm="练气",
-                        invested_amount=150,
-                        max_investment=251,
+                        invested_amount=200,
+                        max_investment=300,
                         current_layer=11,
                         status="active",
                     ),
                     LifeRealmEntryRow(
-                        realm_entry_id=first_entry_id,
+                        realm_entry_id=mortal_entry_id,
                         life_id=life_id,
                         generation=1,
                         parent_entry_id=None,
+                        source_level=0,
+                        target_level=1,
+                        source_group="qi",
+                        target_group="qi",
+                        source_floor=50,
+                        target_baseline=50,
+                        transition_kind="adjacent",
+                        transition_session_id=None,
+                        status="active",
+                        invalidated_at=None,
+                    ),
+                    LifeRealmEntryRow(
+                        realm_entry_id=first_entry_id,
+                        life_id=life_id,
+                        generation=2,
+                        parent_entry_id=mortal_entry_id,
                         source_level=1,
                         target_level=2,
                         source_group="qi",
                         target_group="qi",
-                        source_floor=100,
-                        target_baseline=100,
+                        source_floor=150,
+                        target_baseline=150,
                         transition_kind="adjacent",
                         transition_session_id=None,
                         status="active",
@@ -397,14 +566,14 @@ async def test_regression_reentry_appends_a_new_postgres_branch(
                     LifeRealmEntryRow(
                         realm_entry_id=invalidated_entry_id,
                         life_id=life_id,
-                        generation=2,
+                        generation=3,
                         parent_entry_id=first_entry_id,
                         source_level=2,
                         target_level=3,
                         source_group="qi",
                         target_group="qi",
-                        source_floor=250,
-                        target_baseline=250,
+                        source_floor=300,
+                        target_baseline=300,
                         transition_kind="adjacent",
                         transition_session_id=None,
                         status="active",
@@ -454,12 +623,15 @@ async def test_regression_reentry_appends_a_new_postgres_branch(
         state = await session.get(LifeCultivationStateRow, life_id)
     assert state is not None
     assert state.current_level == 3
-    assert [entry.generation for entry in entries] == [1, 2, 3]
+    assert [entry.generation for entry in entries] == [1, 2, 3, 4]
     assert entries[0].status == "active"
-    assert entries[1].status == "invalidated"
-    assert entries[2].status == "active"
-    assert entries[2].parent_entry_id == first_entry_id
-    assert entries[2].transition_kind == "reentry"
+    assert entries[1].status == "active"
+    assert entries[2].status == "invalidated"
+    assert entries[3].status == "active"
+    assert entries[3].source_level == 2
+    assert entries[3].target_level == 3
+    assert entries[3].parent_entry_id == first_entry_id
+    assert entries[3].transition_kind == "reentry"
 
 
 @pytest.mark.asyncio
@@ -469,7 +641,8 @@ async def test_foundation_breakthrough_replays_and_settles_after_app_restart(
 ) -> None:
     del clean_postgres_data
     technique_id = UUID(int=9_411)
-    entry_id = UUID(int=9_412)
+    entry_ids = tuple(UUID(int=9_420 + source_level) for source_level in range(10))
+    qi_entry_totals = (50, 150, 300, 525, 862, 1_367, 2_124, 3_259, 4_961, 7_514)
     start_key = UUID(int=9_413)
     async with client(postgres_sessions) as first_client:
         login = await first_client.post(
@@ -492,7 +665,7 @@ async def test_foundation_breakthrough_replays_and_settles_after_app_restart(
                         life_id=life_id,
                         current_level=10,
                         unrefined_cultivation=777,
-                        realized_cultivation=11_293,
+                        realized_cultivation=11_343,
                         revision=1,
                     ),
                     LifeTechniqueRow(
@@ -502,26 +675,31 @@ async def test_foundation_breakthrough_replays_and_settles_after_app_restart(
                         definition_version=1,
                         group_code="qi",
                         major_realm="练气",
-                        invested_amount=11_293,
+                        invested_amount=11_343,
                         max_investment=20_000,
                         current_layer=13,
                         status="active",
                     ),
-                    LifeRealmEntryRow(
-                        realm_entry_id=entry_id,
-                        life_id=life_id,
-                        generation=1,
-                        parent_entry_id=None,
-                        source_level=9,
-                        target_level=10,
-                        source_group="qi",
-                        target_group="qi",
-                        source_floor=7_464,
-                        target_baseline=7_464,
-                        transition_kind="adjacent",
-                        transition_session_id=None,
-                        status="active",
-                        invalidated_at=None,
+                    *(
+                        LifeRealmEntryRow(
+                            realm_entry_id=entry_ids[source_level],
+                            life_id=life_id,
+                            generation=source_level + 1,
+                            parent_entry_id=(
+                                None if source_level == 0 else entry_ids[source_level - 1]
+                            ),
+                            source_level=source_level,
+                            target_level=source_level + 1,
+                            source_group="qi",
+                            target_group="qi",
+                            source_floor=qi_entry_totals[source_level],
+                            target_baseline=qi_entry_totals[source_level],
+                            transition_kind="adjacent",
+                            transition_session_id=None,
+                            status="active",
+                            invalidated_at=None,
+                        )
+                        for source_level in range(10)
                     ),
                 ]
             )
