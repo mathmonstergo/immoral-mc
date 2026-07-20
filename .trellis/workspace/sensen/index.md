@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 22
+- **Total Sessions**: 23
 - **Last Active**: 2026-07-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~778 | Active |
+| `journal-1.md` | ~816 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 23 | 2026-07-20 | Integrate computer-B cultivation fixes | `affee96`, `96c5389`, `607e960`, `04b696e`, `fdf615e`, `719343a` | `integrate/cultivation-server-fixes` |
 | 22 | 2026-07-20 | Physical rewards and regional storage | `e3f1e25` | `feat/cultivation-progression` |
 | 21 | 2026-07-19 | Unified local startup and Java 25 baseline | `254cbc6`, `85d1736` | `feat/cultivation-progression` |
 | 20 | 2026-07-19 | Technique zero-layer curve and ten-second seclusion | `0cd1059`, `4687864` | `feat/cultivation-progression` |

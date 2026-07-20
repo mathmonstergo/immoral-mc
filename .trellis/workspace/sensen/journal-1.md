@@ -776,3 +776,41 @@ Implemented strict quest reward and turn-in contracts, generic physical item ins
 ### Next Steps
 
 - None - task complete
+
+
+## Session 23: Integrate computer-B cultivation fixes
+
+**Date**: 2026-07-20
+**Task**: Integrate computer-B cultivation fixes
+**Branch**: `integrate/cultivation-server-fixes`
+
+### Summary
+
+Integrated the computer-B baseline with native mortal cultivation, strict realm-chain invariants, quest reward transaction ordering, MythicMobs level normalization, and unified resource-pack synchronization; verified Game Service, Paper, shell, tmux, and Wiki contracts.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `affee96` | (see git log) |
+| `96c5389` | (see git log) |
+| `607e960` | (see git log) |
+| `04b696e` | (see git log) |
+| `fdf615e` | (see git log) |
+| `719343a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
