@@ -1384,6 +1384,9 @@ Administrative commands remain under `immortalmc.command`.
   owner pickup triggers a HUD refresh. Orb count depends only on mob level.
 * HUD state is keyed by player plus current life. Old-life asynchronous
   responses cannot overwrite a new life even with a higher revision.
+* Game Service and Paper cultivation DTOs accept realm level `0`. A new life
+  renders `凡人` with a 50-point bar; the normal ten-second settlement path
+  advances it to level `1` without a development-only route or state machine.
 * BetterHud/resource-pack absence disables presentation with a visible warning
   and never changes gameplay or outbox acknowledgement.
 * Paper cultivation-area cuboids resolve only a stable semantic `area-id`.
@@ -1429,6 +1432,8 @@ Administrative commands remain under `immortalmc.command`.
   failure while terminal acknowledgement still occurs.
 * Orb tests cover zero XP, ownership, wrong-player pickup, and merge prevention.
 * Projection tests cover revision monotonicity and life replacement races.
+* Projection/API tests cover the level-0 mortal snapshot and the authoritative
+  `0 -> 1` transition.
 * Resource tests assert BetterHud YAML, text font, alpha PNG dimensions, and
   soft dependency.
 * Technique DTO tests assert `attribute_codes`, display name, layer, status,
@@ -1612,13 +1617,14 @@ The public entry point is:
 ./scripts/start-local-server.sh
 ```
 
-It owns these fixed local endpoints and tmux sessions:
+It owns these local endpoints and tmux sessions:
 
 | Component | Endpoint | Session |
 |---|---|---|
 | PostgreSQL | `127.0.0.1:5432` | Docker Compose `postgres` |
 | Game Service | `http://127.0.0.1:8000` | `immortal-game-service` |
-| Resource pack | `http://127.0.0.1:8164/build.zip` | `immortal-resource-pack` |
+| Resource-pack health | `http://127.0.0.1:8164/build.zip` | `immortal-resource-pack` |
+| Resource-pack clients | `RESOURCE_PACK_PUBLIC_URL` or derived non-loopback IPv4 | same server |
 | Paper | `127.0.0.1:25549` | `immortal-paper` |
 
 The independent scripts remain available for diagnosis:
@@ -1626,20 +1632,37 @@ The independent scripts remain available for diagnosis:
 
 ### 3. Contracts
 
-* The launcher requires `docker`, `tmux`, `curl`, `python3`,
+* The launcher requires `docker`, `tmux`, `curl`, `python3`, standard property/
+  hash tooling,
   `game-service/.env`, `game-service/.venv/bin/python`, the existing Paper
   `server.properties`, the pinned Paper JAR, and BetterHud `build.zip` before
   starting any component.
+* Before starting services, the launcher validates a client-reachable
+  `http://` or `https://` URL ending in `/build.zip`, computes the ZIP SHA-1,
+  and idempotently synchronizes only `resource-pack` and
+  `resource-pack-sha1` in runtime `server.properties`. An explicit
+  `RESOURCE_PACK_PUBLIC_URL` wins; otherwise the first non-loopback IPv4 from
+  `hostname -I` is used.
 * Startup order is PostgreSQL healthy -> Game Service `/ready` -> resource
   pack `build.zip` HTTP success -> Paper TCP port open.
 * Existing exact-name sessions are reused and never killed or duplicated.
+  Before reusing `immortal-resource-pack`, the launcher requires exactly one
+  pane across the whole session and compares its `pane_start_command` with the
+  generated dedicated-directory command. The check does not assume tmux window
+  or pane indexes, accepts tmux's equivalent outer-quoted serialization, and
+  never uses a directory substring match. An old/unknown session fails visibly
+  and requires an operator restart; successful `/build.zip` health alone is not
+  proof that the serving root is safe.
 * `start-game-service.sh` only executes the prepared virtual environment and
   Uvicorn; it does not install dependencies or run Alembic.
 * `start-paper-server.sh` only executes the prepared server; it fails when
   `server.properties` is absent instead of copying runtime configuration.
 * The launcher only serves the existing resource-pack file with Python's
-  standard `http.server`; it does not build the pack, calculate SHA-1, or edit
-  `server.properties`.
+  standard `http.server` from a dedicated runtime directory containing only a
+  `build.zip` link; BetterHud configuration, user data, and directory contents
+  are never exposed. It never builds the pack or changes other Paper
+  properties. If URL/SHA changes while Paper is already running, it warns that
+  Paper must be restarted and clients must reconnect; it never kills Paper.
 * ImmortalMC's Gradle toolchain and Paper runtime require Java 25 (class-file
   major version 69). Paper startup validates the actual major version and has
   no Java 21 fallback. Mockito `5.23.0` / Byte Buddy `1.17.7` are the supported
@@ -1650,10 +1673,13 @@ The independent scripts remain available for diagnosis:
 | Condition | Expected behavior |
 |---|---|
 | Missing `.env`, prepared `.venv`, `server.properties`, Paper JAR, or `build.zip` | Fail before starting services with the missing path and setup instruction |
+| Public URL has an invalid scheme/suffix or no non-loopback IPv4 can be derived | Fail before starting services and require an explicit `RESOURCE_PACK_PUBLIC_URL` |
 | PostgreSQL Compose or health check fails | Return non-zero; do not claim the server started |
 | Game Service `/ready` times out or its session exits | Show the tmux output and do not start Paper |
 | Resource pack URL is unavailable or its session exits | Return non-zero and identify port `8164`; do not start Paper |
 | Exact tmux session already exists | Reuse it and continue readiness checks |
+| Resource-pack session has another pane/window or a different command/public root | Reject reuse and require the operator to stop the unknown session |
+| Resource-pack URL/SHA changes while Paper session exists | Update runtime properties, preserve the session, and print a restart/reconnect warning |
 | Port is occupied by an unmanaged Game Service/resource server/Paper process | Fail visibly rather than attach to or kill the unknown process |
 | Java major version is not 25 | Paper script exits before launching the JAR |
 | Startup is run twice | No second process/session is created and no existing process is stopped |
@@ -1661,21 +1687,30 @@ The independent scripts remain available for diagnosis:
 ### 5. Good/Base/Bad Cases
 
 * Good: one command starts/reuses PostgreSQL, Game Service, resource pack, and
-  Paper; the operator attaches to the three named sessions for logs.
+  Paper; the operator attaches to the three named sessions for logs, while the
+  advertised URL and SHA always match the current pack.
 * Base: database migration, Gradle build, JAR copy, and resource-pack content
   generation happen as explicit first-time/update commands before startup.
 * Bad: make daily startup run `alembic upgrade head`, `gradlew build`, `pip
-  install`, copy `server.properties`, or silently fall back to Java 21.
+  install`, overwrite unrelated Paper properties, or silently fall back to
+  Java 21.
 
 ### 6. Tests Required
 
 * Shell syntax checks cover all startup scripts; a cold local run asserts the
   four endpoints/processes and the exact three tmux sessions.
+* A temporary-properties smoke test asserts URL/SHA replacement, duplicate-key
+  cleanup, preservation of unrelated properties, byte-identical second-run
+  output, and SHA refresh after the ZIP changes.
 * A second run asserts session reuse and no duplicate listeners.
+* A tmux contract smoke accepts the generated single-pane command regardless of
+  configured base indexes, and rejects extra windows/panes, old commands, and
+  prefix-similar public directories.
 * Failure checks cover missing prerequisites, Game Service readiness timeout,
   resource-pack HTTP failure, Paper early exit, and Java 21 rejection.
 * Static review asserts the launcher contains no Alembic, Gradle, dependency
-  installation, configuration-copy, or resource-pack-build command.
+  installation, configuration-copy, resource-pack-build command, or property
+  rewrite outside `resource-pack` and `resource-pack-sha1`.
 * Wiki link/Chinese-heading validation and Java 25 Gradle `test build` must pass;
   the Mockito/Byte Buddy versions must support class-file major 69.
 
@@ -1684,13 +1719,23 @@ The independent scripts remain available for diagnosis:
 #### Wrong
 
 ```text
-one-click start -> migrate database -> build/copy plugin -> rewrite server.properties -> start Paper
+one-click start -> migrate database -> build/copy plugin -> replace arbitrary Paper settings -> start Paper
+```
+
+```bash
+tmux display-message -t session:0.0 '#{pane_start_command}'
+[[ "$command" == *"$public_dir"* ]]
 ```
 
 #### Correct
 
 ```text
-prepared files/config -> docker postgres -> Game Service -> existing build.zip HTTP -> Paper
+prepared files/config -> sync current pack URL/SHA -> docker postgres -> Game Service -> existing build.zip HTTP -> Paper
+```
+
+```bash
+tmux list-panes -s -t "=$session" -F '#{pane_start_command}'
+# Require one session-wide pane and exact generated-command identity.
 ```
 
 Daily startup is orchestration only; initialization and content changes remain

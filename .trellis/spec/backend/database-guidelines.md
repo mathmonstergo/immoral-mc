@@ -299,6 +299,11 @@ cultivation_per_cycle
 
 ### 3. Contracts
 
+* A new life starts at realm level `0` (`凡人`). The authoritative realm range
+  is `0..22`; ordinary qi settlement enters level `1` after 50 retained points
+  and appends an immutable `0 -> 1` adjacent realm entry in the same
+  transaction. Levels `1..22` retain their existing IDs and per-level
+  `max_exp` values.
 * Active technique investment is the auditable backing for realized
   cultivation; the state aggregate must equal its sum after every transaction.
 * Unrefined cultivation is a separate reserve. Accepted combat rewards add it;
@@ -310,7 +315,8 @@ cultivation_per_cycle
   `max(1, floor(capacity * 10 / full_mastery_seconds))`; final speed is
   `max(1, floor(base * player_speed_weight * speed_basis_points /
   technique_speed_weight / 10000))` and is frozen at session start.
-* Major-realm speed weights are qi/foundation/core/nascent = `1/2/5/10`.
+* Major-realm speed weights are mortal/qi/foundation/core/nascent =
+  `1/1/2/5/10`.
   They change elapsed-time speed only. Technique layer-growth ratios such as
   `3:2` or `17:10` never participate in seclusion speed and capacities/costs
   are never multiplied by the speed ratio.
@@ -335,6 +341,15 @@ cultivation_per_cycle
 * Realm entries are an immutable history. Regression invalidates an active
   suffix; re-entry appends a generation greater than all prior history and
   never revives an invalidated row.
+* Every valid active realm chain starts with an active `0 -> 1` root whose
+  `parent_entry_id` is null. Every later row points to the previous active row,
+  and its `source_level` equals that parent's `target_level`. The database
+  enforces the root shape; projection rejects missing, disconnected, or
+  group-inconsistent chains instead of treating them as partial history.
+* Same-group re-entry advances to the adjacent level and projects progress from
+  the entry's cumulative `target_baseline`. Cross-group re-entry projects from
+  zero so retained investment already present in the restored target group is
+  visible. Both cases append a new generation and never reactivate history.
 * `technique_mutation` is an explicit completed session shape used to freeze a
   request fingerprint and response for restart-safe replay. It is not disguised
   as ordinary seclusion.
@@ -355,6 +370,7 @@ cultivation_per_cycle
 | Breakthrough item debit is insufficient | Roll back session, debits, item entries, and active-session projection |
 | Technique debit invalidates a realm floor | Invalidate suffix and allow cross-major regression |
 | Reserve exceeds a lower post-regression cap | Preserve it; block new reward credit until consumed |
+| Realm history lacks `0 -> 1`, skips a source/target level, or has an invalid parent | Stop the active-chain projection at the first invalid row; do not infer compatibility history |
 
 ### 5. Good/Base/Bad Cases
 
@@ -381,7 +397,13 @@ cultivation_per_cycle
 * Start tests assert one/five selections freeze the same total speed, mixed
   group/capacity selections fail, and the complete frozen JSON shape persists.
 * Ledger sum equals active technique balances and realized aggregate.
+* A real PostgreSQL API/UoW test settles a mortal ordinary session and asserts
+  the state, technique investment, resource ledgers, session totals, and
+  `0 -> 1` realm entry commit together.
 * Regression crosses major realms and re-entry uses a new parent/generation.
+* Active-chain tests reject a missing `0 -> 1` root and disconnected levels;
+  projection tests distinguish same-group cumulative baselines from cross-group
+  retained-investment restoration.
 * Breakthrough start/settle replays across a new app/service instance.
 * Fixed entropy yields an exact per-technique debit vector.
 * Service tests force both ordinary and breakthrough session-creation races
@@ -470,6 +492,12 @@ breakthrough pills; quest delivery must not add a second stack-debit path.
   `status=owned`, `location=inventory`, and exact `item_code`, selects every
   required instance, consumes them, and completes the quest in one transaction.
   A later shortage or identity mismatch leaves every instance owned.
+* Reward persistence is parent-first inside the shared Unit of Work. Flush
+  `quest_reward_grants` before quest-backed `item_instances`, and flush
+  `quest_cultivation_reward_grants` before its cultivation ledger entry.
+  SQLAlchemy mapper ordering must not be assumed to infer raw foreign-key
+  dependencies when no ORM relationship is declared. These flushes establish
+  insert order only; the final commit remains atomic.
 
 ### 4. Validation & Error Matrix
 
@@ -483,6 +511,7 @@ breakthrough pills; quest delivery must not add a second stack-debit path.
 | One delivery type is insufficient | No instance is consumed and the quest remains active |
 | Same quest operation key and request | Frozen response replay; no second reward or consumption |
 | Same quest operation key with different inventory identities | `quest.idempotency_conflict`; no mutation |
+| Child reward row is attempted before its grant parent | Treat as an implementation defect; never retry around the foreign-key failure |
 
 ### 5. Good/Base/Bad Cases
 
@@ -499,7 +528,8 @@ breakthrough pills; quest delivery must not add a second stack-debit path.
   and head revision.
 * PostgreSQL tests cover bounded bulk increments, duplicate/replayed events,
   physical-instance ownership/location validation, multi-item shortage rollback,
-  exact consumed IDs, reward issuance, and restart reads.
+  exact consumed IDs, parent-before-child item/cultivation reward issuance, and
+  restart reads.
 * Real PostgreSQL concurrency tests prove accept-versus-kill serialization and
   stable quest-operation replay under concurrent delivery.
 * Fresh migration smoke checks exact metadata at head; disposable development
@@ -520,6 +550,21 @@ if existing_entry_for(operation_id, item_code):
 if existing_entry.identity != requested_identity:
     raise ItemOperationConflict
 return existing_entry
+```
+
+#### Wrong
+
+```python
+await items.create_pending_instances(quest_reward_grant_id=grant_id)
+await quests.insert_reward_grant(grant)
+```
+
+#### Correct
+
+```python
+await quests.insert_reward_grant(grant)  # flushes the parent
+await items.create_pending_instances(quest_reward_grant_id=grant_id)
+await uow.commit()  # both remain one atomic transaction
 ```
 
 ## Scenario: Physical Item Issuance and Regional Storage

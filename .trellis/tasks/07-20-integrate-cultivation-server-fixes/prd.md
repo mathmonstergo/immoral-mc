@@ -39,16 +39,16 @@ Preserve all development completed on computer B and safely integrate the still-
 
 ## Acceptance Criteria (Evolving)
 
-* [ ] Current `main` remains recoverable and all computer-B commits remain reachable.
-* [ ] Each of the 6 local-only commits is classified as required, already superseded, partially reusable, or obsolete.
-* [ ] Each of the 10 textual conflicts has an explicit semantic resolution rationale.
-* [ ] MythicMobs floating-point tails are normalized at the Paper boundary without relaxing downstream schemas.
-* [ ] New lives start as `凡人` and advance `0 -> 1` through the current authoritative settlement model.
-* [ ] Unified local startup advertises the configured resource-pack URL and matching SHA-1.
-* [ ] Production and development both use the same 10-second settlement path; no development seclusion route or command is introduced.
-* [ ] Integrated behavior passes relevant Game Service and Paper tests.
-* [ ] Database migrations and cultivation schemas form one clean zero-to-one baseline without compatibility shims.
-* [ ] Git history and final diff demonstrate that no computer-B feature was removed accidentally.
+* [x] Current `main` remains recoverable and all computer-B commits remain reachable.
+* [x] Each of the 6 local-only commits is classified as required, already superseded, partially reusable, or obsolete.
+* [x] Each of the 10 textual conflicts has an explicit semantic resolution rationale.
+* [x] MythicMobs floating-point tails are normalized at the Paper boundary without relaxing downstream schemas.
+* [x] New lives start as `凡人` and advance `0 -> 1` through the current authoritative settlement model.
+* [x] Unified local startup advertises the configured resource-pack URL and matching SHA-1.
+* [x] Production and development both use the same 10-second settlement path; no development seclusion route or command is introduced.
+* [x] Integrated behavior passes relevant Game Service and Paper tests.
+* [x] Database migrations and cultivation schemas form one clean zero-to-one baseline without compatibility shims.
+* [x] Git history and final diff demonstrate that no computer-B feature was removed accidentally.
 
 ## Definition of Done
 
