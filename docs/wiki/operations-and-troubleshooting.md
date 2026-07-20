@@ -9,7 +9,8 @@
 ```
 
 该命令启动 PostgreSQL、Game Service、现有 BetterHud 资源包的 HTTP 服务和 Paper。
-它不执行数据库迁移、插件/资源包构建或配置改写。
+它不执行数据库迁移或插件/资源包构建；启动前会自动计算当前 ZIP SHA-1，并且只幂等
+同步 runtime `server.properties` 中的 `resource-pack` 和 `resource-pack-sha1`。
 
 脚本启动失败时，按以下顺序检查：
 
@@ -17,7 +18,15 @@
 2. Alembic 数据库结构是否已经由独立迁移步骤升级到最新修订；
 3. Game Service 是否通过 `/ready`；
 4. Paper JAR 和已安装插件是否存在；
-5. `immortal-resource-pack` 会话和 `http://127.0.0.1:8164/build.zip` 是否可用。
+5. `immortal-resource-pack` 会话和本机健康检查 URL
+   `http://127.0.0.1:8164/build.zip` 是否可用；
+6. 脚本输出的客户端 URL 是否能从 Minecraft 所在机器访问，并与
+   `server.properties` 中的 `resource-pack` 一致；
+7. `resource-pack-sha1` 是否与当前 `build.zip` 的 `sha1sum` 一致。
+
+可通过 `RESOURCE_PACK_PUBLIC_URL` 显式设置客户端地址。若脚本提示资源包属性在 Paper
+运行期间发生变化，应正常停止并重启 Paper，再让玩家重新连接；Paper 不会动态重读
+这些属性。
 
 相关命令见[快速开始](getting-started.md)。
 

@@ -19,7 +19,9 @@ ImmortalMC 适配器和当前固定的 BetterHud `2.0.0` 都以 Java 25 为基�
 
 该命令启动 PostgreSQL、Game Service、现有 BetterHud 资源包的 HTTP 服务和 Paper。
 三个进程分别运行在 `immortal-game-service`、`immortal-resource-pack`、
-`immortal-paper` tmux 会话中。它不会执行迁移、构建插件/资源包或修改服务器配置。
+`immortal-paper` tmux 会话中。它不会执行迁移或构建插件/资源包；会自动计算当前
+`build.zip` 的 SHA-1，并且只同步 runtime `server.properties` 中的 `resource-pack`
+和 `resource-pack-sha1`。客户端地址可通过 `RESOURCE_PACK_PUBLIC_URL` 显式设置。
 
 重新进入控制台：
 

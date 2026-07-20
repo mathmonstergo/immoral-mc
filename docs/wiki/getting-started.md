@@ -74,18 +74,26 @@ cp minecraft-nodes/main-server/server.properties.example \
 完成首次准备后，在仓库根目录只需执行：
 
 ```bash
+export RESOURCE_PACK_PUBLIC_URL=http://<wsl-ip>:8164/build.zip
 ./scripts/start-local-server.sh
 ```
+
+`RESOURCE_PACK_PUBLIC_URL` 应填写 Minecraft 客户端可访问的地址。未设置时，脚本会从
+`hostname -I` 自动选择第一个非回环 IPv4；存在 Docker、VPN、多网卡或端口转发时，
+建议始终显式设置。
 
 该命令按顺序完成以下四件事：
 
 1. 启动并等待 PostgreSQL；
 2. 在 `immortal-game-service` tmux 会话中启动 Game Service，并等待 `/ready`；
-3. 在 `immortal-resource-pack` tmux 会话中托管现有 BetterHud `build.zip`；
+3. 计算现有 BetterHud `build.zip` 的 SHA-1，只同步 `server.properties` 中的
+   `resource-pack` 和 `resource-pack-sha1`，并在 `immortal-resource-pack` tmux
+   会话中托管该文件；
 4. 在 `immortal-paper` tmux 会话中启动 Paper。
 
 重复执行时会复用已经存在的 tmux 会话，不会重复启动或终止服务。它不会执行数据库
-迁移，不会构建或复制插件/资源包，也不会修改 `server.properties`。
+迁移，也不会构建或复制插件/资源包。除上述两个资源包属性外，它不会修改其他 Paper
+配置。若属性变化时 Paper 已在运行，脚本会提示手动重启 Paper 并重新连接客户端。
 
 启动完成后可检查：
 
