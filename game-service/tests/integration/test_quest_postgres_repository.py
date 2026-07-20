@@ -362,20 +362,19 @@ async def test_turn_in_operation_id_is_bound_to_exact_inventory_item_ids(
         operation_id,
         inventory_item_instance_ids=(first_id,),
     )
-    rejected = await service.turn_in(
-        account_id,
-        quest.quest_id,
-        provider.provider_id,
-        operation_id,
-        inventory_item_instance_ids=(second_id,),
-    )
+    with pytest.raises(QuestIdempotencyConflictError):
+        await service.turn_in(
+            account_id,
+            quest.quest_id,
+            provider.provider_id,
+            operation_id,
+            inventory_item_instance_ids=(second_id,),
+        )
 
     async with postgres_sessions() as session:
         first = await session.get(ItemInstanceRow, first_id)
         second = await session.get(ItemInstanceRow, second_id)
     assert completed.status_code == 200
-    assert rejected.status_code == 409
-    assert body(rejected)["error"]["code"] == QuestIdempotencyConflictError.code
     assert first is not None and first.status == "consumed"
     assert second is not None and second.status == "owned"
     assert second.location == "inventory"

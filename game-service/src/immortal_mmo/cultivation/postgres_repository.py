@@ -270,6 +270,7 @@ class PostgresCultivationRepository:
             created_at=occurred_at,
         )
         self._session.add(row)
+        await self._session.flush()
         if credited_amount > 0:
             self._session.add(
                 CultivationResourceEntryRow(
@@ -286,7 +287,7 @@ class PostgresCultivationRepository:
                     created_at=occurred_at,
                 )
             )
-        await self._session.flush()
+            await self._session.flush()
         return _quest_reward_grant(row)
 
     async def get_or_create_state(self, life_id: UUID, *, for_update: bool) -> CultivationState:

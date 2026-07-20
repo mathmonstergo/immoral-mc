@@ -443,16 +443,6 @@ class QuestService:
                     uuid5(grant_id, f"item:{ordinal}")
                     for ordinal in range(reward.quantity)
                 )
-                await uow.items.create_pending_instances(
-                    life_id=life_id,
-                    issuance_id=grant_id,
-                    quest_reward_grant_id=grant_id,
-                    item_code=reward.item_code,
-                    definition_version=1,
-                    technique_id=reward.technique_id,
-                    item_instance_ids=item_instance_ids,
-                    created_at=occurred_at,
-                )
                 grant = QuestRewardGrant(
                     grant_id=grant_id,
                     life_id=life_id,
@@ -468,6 +458,16 @@ class QuestService:
                     created_at=occurred_at,
                 )
                 await uow.quests.insert_reward_grant(grant)
+                await uow.items.create_pending_instances(
+                    life_id=life_id,
+                    issuance_id=grant_id,
+                    quest_reward_grant_id=grant_id,
+                    item_code=reward.item_code,
+                    definition_version=1,
+                    technique_id=reward.technique_id,
+                    item_instance_ids=item_instance_ids,
+                    created_at=occurred_at,
+                )
                 results.append(
                     QuestRewardResult(
                         grant_id=grant_id,
@@ -623,10 +623,14 @@ class QuestService:
             for objective in quest.objectives
             if isinstance(objective, ItemDeliveryObjectiveDefinition)
         }
-        inventory_items = await uow.items.get_inventory_instances(
-            facts.life_id,
-            item_codes,
-            for_update=lock_items,
+        inventory_items = (
+            await uow.items.get_inventory_instances(
+                facts.life_id,
+                item_codes,
+                for_update=lock_items,
+            )
+            if item_codes
+            else ()
         )
         item_quantities: dict[str, int] = {item_code: 0 for item_code in item_codes}
         for item in inventory_items:
