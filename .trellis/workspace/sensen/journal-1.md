@@ -814,3 +814,48 @@ Integrated the computer-B baseline with native mortal cultivation, strict realm-
 ### Next Steps
 
 - None - task complete
+
+
+## Session 24: NPC quest GUI and proximity speech
+
+**Date**: 2026-07-21
+**Task**: NPC quest GUI and proximity speech
+**Branch**: `main`
+
+### Summary
+
+Completed the authoritative six-row NPC quest GUI, preserved and extended current-life fact-based proximity speech without life-ID rule matching, added expected-life mutation fencing and async generation guards, updated Wiki/spec contracts, and passed Java 294 plus Python 497 tests.
+
+### Main Changes
+
+- Added the six-row authoritative NPC quest list/detail GUI and read-only item
+  objective preview, replacing the old second-right-click offer confirmation.
+- Preserved outside-to-inside NPC speech and moved selection to typed Game
+  Service rules over current-life quest state and realm facts; life ID is not a
+  rule condition.
+- Added `expected_life_id` mutation fencing plus entry/revision/generation guards
+  so old GUI requests and late async responses cannot affect a newer life or
+  restore stale bark state.
+- Updated public Chinese Wiki pages, backend specs, task acceptance records,
+  and cross-language regression coverage.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `84adee1` | (see git log) |
+
+### Testing
+
+- [OK] Java 25 Gradle clean test/build: 294 tests, 0 failures/errors/skips.
+- [OK] Game Service pytest: 497 passed; Ruff clean.
+- [OK] Wiki links/Chinese headings, Trellis context validation, AST call-site
+  audit, and `git diff --check` passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

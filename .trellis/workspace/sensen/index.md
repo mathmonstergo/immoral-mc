@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 23
-- **Last Active**: 2026-07-20
+- **Total Sessions**: 24
+- **Last Active**: 2026-07-21
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~816 | Active |
+| `journal-1.md` | ~849 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 24 | 2026-07-21 | NPC quest GUI and proximity speech | `84adee1` | `main` |
 | 23 | 2026-07-20 | Integrate computer-B cultivation fixes | `affee96`, `96c5389`, `607e960`, `04b696e`, `fdf615e`, `719343a` | `integrate/cultivation-server-fixes` |
 | 22 | 2026-07-20 | Physical rewards and regional storage | `e3f1e25` | `feat/cultivation-progression` |
 | 21 | 2026-07-19 | Unified local startup and Java 25 baseline | `254cbc6`, `85d1736` | `feat/cultivation-progression` |
