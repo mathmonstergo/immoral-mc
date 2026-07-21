@@ -37,13 +37,41 @@ PUT  /api/v1/players/{account_id}/current-life/quests/{quest_id}/turn-in
 交互状态接口接收去重后的 `provider_ids` 列表，最多包含 32 项。接取和交付任务时
 必须提供：
 
+- `Idempotency-Key: <UUID>` 请求头；
+- 请求界面打开时观察到的当前人生 ID：`expected_life_id`；
+- 当前任务提供者 ID：`provider_id`；
+- 交付任务时还要提供去重后的 `inventory_item_instance_ids`。
+
+`expected_life_id` 只是一道写入保护，不是靠近 NPC 说话的规则条件。服务端在锁定账号和
+当前人生后进行比较；如果玩家已经转生，旧界面的接取/提交请求返回 HTTP 409 和
+`quest.stale_life`，不会把旧人生的点击写到新人生。任意新人生只要其当前权威任务状态、
+境界等事实满足靠近规则，仍然可以触发同一句话。
+
+当前交互状态响应使用 `contract_version: 2`。每个 `providers[].quests[]` 项包含
+`description`、`state`、当前提供者对应的 `action`、`objectives` 和 `reward_previews`：
+
+- 每个目标包含准确的 `objective_type`；物品交付目标还包含非空 `item_code`，其他目标的
+  `item_code` 为 `null`；
+- 每个奖励预览包含 `reward_id` 和 `kind`。`fixed_item` 使用 `item_code` 与 `quantity`，
+  `unrefined_cultivation` 使用 `cultivation_amount`；
+- `revision.objectives` 是当前人生目标输入的单调修订。实体物品从背包移除、放回或以相同
+  数量替换时也会推进该修订；当提供者靠近规则依赖境界时，权威 cultivation revision 也会
+  纳入该分量。因此客户端必须按完整修订向量丢弃过期响应，不能按物品总数或本地等级推测
+  新旧；
+- `providers[].proximity_bark` 是可空的已解析结果。命中规则时包含稳定 `key`、非空
+  `speaker`、非空 `text` 和正整数 `cooldown_seconds`；规则、优先级和玩家条件不会下发给
+  Paper。没有配置或没有命中时返回 `null`，客户端不得创建兜底任务话语。
+
 ```http
 Idempotency-Key: <UUID>
 Content-Type: application/json
 ```
 
 ```json
-{"provider_id": "old-man"}
+{
+  "provider_id": "old-man",
+  "expected_life_id": "20000000-0000-0000-0000-000000000001"
+}
 ```
 
 交付任务使用独立请求体，并且必须显式提交玩家背包中扫描到的实体物品 ID；没有物品目标时
@@ -52,6 +80,7 @@ Content-Type: application/json
 ```json
 {
   "provider_id": "old-man",
+  "expected_life_id": "20000000-0000-0000-0000-000000000001",
   "inventory_item_instance_ids": []
 }
 ```

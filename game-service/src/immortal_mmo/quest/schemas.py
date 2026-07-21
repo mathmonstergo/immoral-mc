@@ -3,7 +3,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from immortal_mmo.quest.models import QuestCategory
+from immortal_mmo.quest.models import (
+    MAX_PROXIMITY_BARK_KEY_LENGTH,
+    QuestCategory,
+    QuestObjectiveType,
+)
 
 QuestState = Literal[
     "unavailable",
@@ -31,12 +35,14 @@ class QuestProviderRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider_id: str
+    expected_life_id: UUID
 
 
 class QuestTurnInRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider_id: str
+    expected_life_id: UUID
     inventory_item_instance_ids: list[UUID] = Field(max_length=256)
 
     @field_validator("inventory_item_instance_ids")
@@ -56,27 +62,75 @@ class QuestRevisionVector(BaseModel):
 
 class QuestObjectiveProjection(BaseModel):
     objective_id: str
+    objective_type: QuestObjectiveType
     title: str
+    item_code: str | None
     current: int
     required: int
     completed: bool
+
+    @model_validator(mode="after")
+    def validate_objective_shape(self) -> "QuestObjectiveProjection":
+        if self.objective_type is QuestObjectiveType.ITEM_DELIVERY:
+            if not self.item_code:
+                raise ValueError("item-delivery objective must expose item_code")
+        elif self.item_code is not None:
+            raise ValueError("non-item objective must not expose item_code")
+        return self
+
+
+class QuestRewardPreview(BaseModel):
+    reward_id: str
+    kind: Literal["fixed_item", "unrefined_cultivation"]
+    item_code: str | None
+    quantity: int | None
+    cultivation_amount: int | None
+
+    @model_validator(mode="after")
+    def validate_reward_shape(self) -> "QuestRewardPreview":
+        if self.kind == "fixed_item":
+            if (
+                not self.item_code
+                or self.quantity is None
+                or self.quantity <= 0
+                or self.cultivation_amount is not None
+            ):
+                raise ValueError("fixed item reward preview shape is invalid")
+            return self
+        if (
+            self.item_code is not None
+            or self.quantity is not None
+            or self.cultivation_amount is None
+            or self.cultivation_amount <= 0
+        ):
+            raise ValueError("cultivation reward preview shape is invalid")
+        return self
 
 
 class ProviderQuestState(BaseModel):
     quest_id: str
     title: str
+    description: str
     category: QuestCategory
     state: QuestState
     action: QuestAction
     dialogue_key: str | None
     objectives: list[QuestObjectiveProjection]
+    reward_previews: list[QuestRewardPreview]
 
 
 class ProximityBark(BaseModel):
-    key: str
-    speaker: str
-    text: str
-    cooldown_seconds: int
+    key: str = Field(min_length=1, max_length=MAX_PROXIMITY_BARK_KEY_LENGTH)
+    speaker: str = Field(min_length=1, max_length=128)
+    text: str = Field(min_length=1, max_length=512)
+    cooldown_seconds: int = Field(ge=1, le=86_400)
+
+    @field_validator("key", "speaker", "text")
+    @classmethod
+    def require_trimmed_text(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError("proximity bark text fields must be trimmed")
+        return value
 
 
 class QuestProviderProjection(BaseModel):
@@ -97,7 +151,7 @@ class TrackedQuest(BaseModel):
 
 
 class QuestInteractionState(BaseModel):
-    contract_version: Literal[1] = 1
+    contract_version: Literal[2] = 2
     account_id: UUID
     life_id: UUID
     revision: QuestRevisionVector

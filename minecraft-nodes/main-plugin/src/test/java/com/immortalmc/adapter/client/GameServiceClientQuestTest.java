@@ -83,7 +83,7 @@ class GameServiceClientQuestTest {
 
                     assertEquals("POST", method.get());
                     assertEquals("{\"provider_ids\":[\"old-man\",\"village-chief\"]}", body.get());
-                    assertEquals(1, result.contractVersion());
+                    assertEquals(2, result.contractVersion());
                     assertEquals(ACCOUNT_ID, result.accountId());
                     assertEquals(LIFE_ID, result.lifeId());
                     assertEquals(2, result.revision().player());
@@ -93,10 +93,20 @@ class GameServiceClientQuestTest {
                     assertEquals(2000, result.cacheTtlMs());
                     assertEquals("first-steps:ready_to_turn_in", result.providers().getFirst().stateKey());
                     assertEquals("first-steps", result.providers().getFirst().directActionQuestId());
+                    assertEquals(
+                            "old-man:first-steps-ready",
+                            result.providers().getFirst().proximityBark().key());
                     assertEquals("老村民", result.providers().getFirst().proximityBark().speaker());
                     assertEquals("看来你已经有所收获。", result.providers().getFirst().proximityBark().text());
-                    assertEquals("ready_to_turn_in", result.providers().getFirst().quests().getFirst().state());
-                    assertEquals("first-steps.ready", result.providers().getFirst().quests().getFirst().dialogueKey());
+                    ProviderQuestSnapshot quest = result.providers().getFirst().quests().getFirst();
+                    assertEquals("ready_to_turn_in", quest.state());
+                    assertEquals("first-steps.ready", quest.dialogueKey());
+                    assertEquals("检测你的灵根资质。", quest.description());
+                    assertEquals(
+                            "current_life_spirit_root_present",
+                            quest.objectives().getFirst().objectiveType());
+                    assertEquals("cultivation-50", quest.rewardPreviews().getFirst().rewardId());
+                    assertEquals(50, quest.rewardPreviews().getFirst().cultivationAmount());
                     assertEquals(1, result.trackedQuest().objectives().getFirst().current());
                     assertEquals("返回老村民处", result.trackedQuest().nextActionHint());
                 });
@@ -113,6 +123,64 @@ class GameServiceClientQuestTest {
     }
 
     @Test
+    void proximityBarkSnapshotRejectsInvalidResolvedWireFields() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new QuestProviderSnapshot.ProximityBarkSnapshot("", "老村民", "话语", 60));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new QuestProviderSnapshot.ProximityBarkSnapshot("rule", " ", "话语", 60));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new QuestProviderSnapshot.ProximityBarkSnapshot("rule", "老村民", " 话语", 60));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new QuestProviderSnapshot.ProximityBarkSnapshot("rule", "老村民", "话语", 0));
+    }
+
+    @Test
+    void questObjectiveSnapshotWhitelistsAuthoritativeObjectiveTypes() {
+        List.of(
+                        "current_life_spirit_root_present",
+                        "mythicmob_kill_count",
+                        "technique_layer_reached",
+                        "realm_level_reached")
+                .forEach(type -> assertEquals(
+                        type,
+                        new QuestObjectiveSnapshot("objective", type, "目标", null, 0, 1, false)
+                                .objectiveType()));
+        assertEquals(
+                "item_delivery",
+                new QuestObjectiveSnapshot(
+                                "objective", "item_delivery", "目标", "foundation_pill", 0, 1, false)
+                        .objectiveType());
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new QuestObjectiveSnapshot("objective", "future_objective", "目标", null, 0, 1, false));
+    }
+
+    @Test
+    void fetchQuestInteractionStateRejectsUnknownObjectiveTypeFromWire() throws Exception {
+        withServer(server -> server.createContext(
+                        "/api/v1/players/" + ACCOUNT_ID + "/current-life/quest-interaction-state",
+                        exchange -> respond(
+                                exchange,
+                                200,
+                                interactionJson("active", 0, false)
+                                        .replace("current_life_spirit_root_present", "future_objective"))),
+                uri -> {
+                    GameServiceClient client = new GameServiceClient(uri, HttpClient.newHttpClient());
+
+                    ExecutionException failure = assertThrows(
+                            ExecutionException.class,
+                            () -> client.fetchQuestInteractionState(ACCOUNT_ID, List.of("old-man"))
+                                    .get(2, TimeUnit.SECONDS));
+                    GameServiceException error = assertInstanceOf(GameServiceException.class, failure.getCause());
+                    assertEquals("Game Service quest interaction state response was invalid", error.getMessage());
+                });
+    }
+
+    @Test
     void domainErrorEnvelopeBecomesNonRetryableGameServiceException() throws Exception {
         withServer(server -> server.createContext(
                         "/api/v1/players/" + ACCOUNT_ID + "/current-life/quests/first-steps/accept",
@@ -124,7 +192,12 @@ class GameServiceClientQuestTest {
 
                     ExecutionException failure = assertThrows(
                             ExecutionException.class,
-                            () -> client.acceptQuest(ACCOUNT_ID, "first-steps", "old-man", OPERATION_ID)
+                            () -> client.acceptQuest(
+                                            ACCOUNT_ID,
+                                            LIFE_ID,
+                                            "first-steps",
+                                            "old-man",
+                                            OPERATION_ID)
                                     .get(2, TimeUnit.SECONDS));
                     GameServiceException error = assertInstanceOf(GameServiceException.class, failure.getCause());
 
@@ -176,10 +249,16 @@ class GameServiceClientQuestTest {
                     GameServiceClient client = new GameServiceClient(uri, HttpClient.newHttpClient());
 
                     QuestMutationResult result = operation.equals("accept")
-                            ? client.acceptQuest(ACCOUNT_ID, "first-steps", "old-man", OPERATION_ID)
+                            ? client.acceptQuest(
+                                            ACCOUNT_ID,
+                                            LIFE_ID,
+                                            "first-steps",
+                                            "old-man",
+                                            OPERATION_ID)
                                     .get(2, TimeUnit.SECONDS)
                             : client.turnInQuest(
                                             ACCOUNT_ID,
+                                            LIFE_ID,
                                             "first-steps",
                                             "old-man",
                                             OPERATION_ID,
@@ -189,8 +268,12 @@ class GameServiceClientQuestTest {
                     assertEquals("PUT", method.get());
                     assertEquals(
                             operation.equals("accept")
-                                    ? "{\"provider_id\":\"old-man\"}"
-                                    : "{\"provider_id\":\"old-man\",\"inventory_item_instance_ids\":[\""
+                                    ? "{\"provider_id\":\"old-man\",\"expected_life_id\":\""
+                                            + LIFE_ID
+                                            + "\"}"
+                                    : "{\"provider_id\":\"old-man\",\"expected_life_id\":\""
+                                            + LIFE_ID
+                                            + "\",\"inventory_item_instance_ids\":[\""
                                             + ITEM_INSTANCE_ID
                                             + "\"]}",
                             body.get());
@@ -224,11 +307,11 @@ class GameServiceClientQuestTest {
                   """.formatted(state, objectiveJson(current, completed), current == 0 ? "前往鉴灵师处" : "返回老村民处")
                 : "null";
         String bark = state.equals("ready_to_turn_in")
-                ? "{\"key\":\"first-steps:ready_to_turn_in\",\"speaker\":\"老村民\",\"text\":\"看来你已经有所收获。\",\"cooldown_seconds\":60}"
+                ? "{\"key\":\"old-man:first-steps-ready\",\"speaker\":\"老村民\",\"text\":\"看来你已经有所收获。\",\"cooldown_seconds\":60}"
                 : "null";
         return """
                 {
-                  "contract_version":1,
+                  "contract_version":2,
                   "account_id":"%s",
                   "life_id":"%s",
                   "revision":{"player":2,"quest":3,"objectives":4,"definitions":"sha256:definitions"},
@@ -255,14 +338,18 @@ class GameServiceClientQuestTest {
         };
         String dialogue = state.equals("ready_to_turn_in") ? "first-steps.ready" : "first-steps." + state;
         return """
-                {"quest_id":"first-steps","title":"初入凡尘","category":"main","state":"%s","action":"%s",\
-                "dialogue_key":"%s","objectives":[%s]}
+                {"quest_id":"first-steps","title":"初入凡尘","description":"检测你的灵根资质。",\
+                "category":"main","state":"%s","action":"%s",\
+                "dialogue_key":"%s","objectives":[%s],\
+                "reward_previews":[{"reward_id":"cultivation-50","kind":"unrefined_cultivation",\
+                "item_code":null,"quantity":null,"cultivation_amount":50}]}
                 """.formatted(state, action, dialogue, objectiveJson(current, current == 1));
     }
 
     private static String objectiveJson(int current, boolean completed) {
         return """
-                {"objective_id":"detect-spirit-root","title":"灵根检测","current":%d,"required":1,"completed":%s}
+                {"objective_id":"detect-spirit-root","objective_type":"current_life_spirit_root_present",\
+                "title":"灵根检测","item_code":null,"current":%d,"required":1,"completed":%s}
                 """.formatted(current, completed);
     }
 

@@ -108,6 +108,11 @@ DATABASE_URL=postgresql+asyncpg://immortal:immortal_dev_only@127.0.0.1:5432/immo
 
 以下操作会永久删除本地 PostgreSQL 中的全部数据：
 
+当前项目仍处于可丢弃数据的零到一开发阶段。若本地数据库在
+`life_inventory_states` 加入前已经应用过开发修订
+`20260719_004_quest_rewards_and_physical_items`，仅运行 `alembic upgrade head` 不会重新执行
+同一个修订；必须使用下面的流程重建本地开发库。全新数据库会直接得到当前目标结构。
+
 ```bash
 docker compose down -v
 docker compose up -d --wait postgres
@@ -173,6 +178,11 @@ sqlite3 minecraft-nodes/main-server/plugins/ImmortalMC/combat-outbox.sqlite3 \
 ### 任务进度看起来没有更新
 
 - 确认玩家当前仍是同一人生；
+- 接取或提交返回 `quest.stale_life`：玩家在任务界面打开后已经切换人生。关闭旧界面并重新
+  右键 NPC；该错误不可重试，服务端也不会为这次旧请求预留任务操作或修改新人生。
+- `expected_life_id` 只保护接取/提交写入，不限制靠近话语。新人生满足对应任务状态或境界
+  条件时仍然会说话；若没有说话，检查提供者规则、当前权威状态以及是否真正离开后重新进入
+  范围。
 - 触发或重试相关的权威状态变更，或者重新进入任务提供者的交互范围；
 - 确认 Game Service 与 Paper 使用相同的任务目录修订版本；
 - 查看 Paper 日志中的刷新警告；

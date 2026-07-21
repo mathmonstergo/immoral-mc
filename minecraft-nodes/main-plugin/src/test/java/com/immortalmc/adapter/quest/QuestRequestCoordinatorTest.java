@@ -258,6 +258,7 @@ class QuestRequestCoordinatorTest {
         assertEquals(acceptedState, result.interactionState());
         assertEquals(2, gateway.acceptCalls.get());
         assertEquals(List.of(OPERATION_ID, OPERATION_ID), gateway.acceptOperationIds);
+        assertEquals(List.of(LIFE_ID, LIFE_ID), gateway.acceptLifeIds);
     }
 
     @Test
@@ -311,6 +312,7 @@ class QuestRequestCoordinatorTest {
                 .getFirst()
                 .state());
         assertEquals(List.of(inventoryItemIds), gateway.turnInItemIds);
+        assertEquals(List.of(LIFE_ID), gateway.turnInLifeIds);
     }
 
     @Test
@@ -434,11 +436,11 @@ class QuestRequestCoordinatorTest {
     private static QuestInteractionState state(
             long playerRevision, long questRevision, String questState, UUID lifeId) {
         ProviderQuestSnapshot quest = new ProviderQuestSnapshot(
-                "first-steps", "初入凡尘", "main", questState, "remind", null, List.of());
+                "first-steps", "初入凡尘", "去村口看看。", "main", questState, "remind", null, List.of(), List.of());
         QuestProviderSnapshot provider = new QuestProviderSnapshot(
                 "old-man", "first-steps:" + questState, List.of(quest), List.of("first-steps"), "first-steps", null);
         return new QuestInteractionState(
-                1,
+                2,
                 ACCOUNT_ID,
                 lifeId,
                 new QuestRevisionVector(playerRevision, questRevision, 0, "sha256:definitions"),
@@ -464,7 +466,9 @@ class QuestRequestCoordinatorTest {
         private final AtomicInteger acceptCalls = new AtomicInteger();
         private final AtomicInteger turnInCalls = new AtomicInteger();
         private final List<UUID> acceptOperationIds = new ArrayList<>();
+        private final List<UUID> acceptLifeIds = new ArrayList<>();
         private final List<List<UUID>> turnInItemIds = new ArrayList<>();
+        private final List<UUID> turnInLifeIds = new ArrayList<>();
         private final Queue<CompletableFuture<QuestInteractionState>> refreshes = new ArrayDeque<>();
         private final Queue<CompletableFuture<QuestMutationResult>> accepts = new ArrayDeque<>();
         private final Queue<CompletableFuture<QuestMutationResult>> turnIns = new ArrayDeque<>();
@@ -478,21 +482,28 @@ class QuestRequestCoordinatorTest {
 
         @Override
         public CompletableFuture<QuestMutationResult> acceptQuest(
-                UUID accountId, String questId, String providerId, UUID operationId) {
+                UUID accountId,
+                UUID expectedLifeId,
+                String questId,
+                String providerId,
+                UUID operationId) {
             acceptCalls.incrementAndGet();
             acceptOperationIds.add(operationId);
+            acceptLifeIds.add(expectedLifeId);
             return accepts.remove();
         }
 
         @Override
         public CompletableFuture<QuestMutationResult> turnInQuest(
                 UUID accountId,
+                UUID expectedLifeId,
                 String questId,
                 String providerId,
                 UUID operationId,
                 List<UUID> inventoryItemInstanceIds) {
             turnInCalls.incrementAndGet();
             turnInItemIds.add(List.copyOf(inventoryItemInstanceIds));
+            turnInLifeIds.add(expectedLifeId);
             return turnIns.remove();
         }
     }

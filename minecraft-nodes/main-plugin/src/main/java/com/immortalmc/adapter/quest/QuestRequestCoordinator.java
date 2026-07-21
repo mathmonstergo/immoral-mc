@@ -118,7 +118,11 @@ public final class QuestRequestCoordinator implements QuestInteractionService {
                 providerId,
                 operationId,
                 List.of());
-        return mutate(playerId, identity, () -> gateway.acceptQuest(accountId, questId, providerId, operationId));
+        return mutate(
+                playerId,
+                identity,
+                () -> gateway.acceptQuest(
+                        accountId, expectedLifeId, questId, providerId, operationId));
     }
 
     @Override
@@ -143,7 +147,13 @@ public final class QuestRequestCoordinator implements QuestInteractionService {
         return mutate(
                 playerId,
                 identity,
-                () -> gateway.turnInQuest(accountId, questId, providerId, operationId, itemInstanceIds));
+                () -> gateway.turnInQuest(
+                        accountId,
+                        expectedLifeId,
+                        questId,
+                        providerId,
+                        operationId,
+                        itemInstanceIds));
     }
 
     public void clearPlayer(UUID playerId) {
@@ -386,10 +396,15 @@ public final class QuestRequestCoordinator implements QuestInteractionService {
                 UUID accountId, List<String> providerIds);
 
         CompletableFuture<QuestMutationResult> acceptQuest(
-                UUID accountId, String questId, String providerId, UUID operationId);
+                UUID accountId,
+                UUID expectedLifeId,
+                String questId,
+                String providerId,
+                UUID operationId);
 
         CompletableFuture<QuestMutationResult> turnInQuest(
                 UUID accountId,
+                UUID expectedLifeId,
                 String questId,
                 String providerId,
                 UUID operationId,
@@ -510,19 +525,26 @@ public final class QuestRequestCoordinator implements QuestInteractionService {
 
         @Override
         public CompletableFuture<QuestMutationResult> acceptQuest(
-                UUID accountId, String questId, String providerId, UUID operationId) {
-            return client.acceptQuest(accountId, questId, providerId, operationId);
+                UUID accountId,
+                UUID expectedLifeId,
+                String questId,
+                String providerId,
+                UUID operationId) {
+            return client.acceptQuest(
+                    accountId, expectedLifeId, questId, providerId, operationId);
         }
 
         @Override
         public CompletableFuture<QuestMutationResult> turnInQuest(
                 UUID accountId,
+                UUID expectedLifeId,
                 String questId,
                 String providerId,
                 UUID operationId,
                 List<UUID> inventoryItemInstanceIds) {
             return client.turnInQuest(
                     accountId,
+                    expectedLifeId,
                     questId,
                     providerId,
                     operationId,

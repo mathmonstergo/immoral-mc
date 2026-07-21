@@ -40,11 +40,13 @@ class PhysicalItemReconcilerTest {
                 CompletableFuture.completedFuture(list(pending(PENDING_ID))),
                 CompletableFuture.completedFuture(list(ownedInventory(OWNED_ID))));
         RecordingAdapterLogger logger = new RecordingAdapterLogger();
+        List<UUID> questRefreshes = new ArrayList<>();
         PhysicalItemReconciler reconciler = new PhysicalItemReconciler(
                 gateway,
                 sessions,
                 inventory,
                 ignored -> player,
+                questRefreshes::add,
                 Runnable::run,
                 logger);
 
@@ -53,6 +55,7 @@ class PhysicalItemReconcilerTest {
         assertEquals(Set.of(OWNED_ID, PENDING_ID), inventory.authoritativeIds);
         assertEquals(List.of(OWNED_ID, PENDING_ID), inventory.addedIds);
         assertEquals(List.of(PENDING_ID), gateway.confirmedIds);
+        assertEquals(List.of(PLAYER_ID), questRefreshes);
         assertTrue(logger.messagesAt("info").getFirst().contains("removed=1 restored=1 confirmations=1"));
     }
 
@@ -69,6 +72,7 @@ class PhysicalItemReconcilerTest {
                 sessions,
                 inventory,
                 ignored -> player,
+                ignored -> {},
                 Runnable::run,
                 new RecordingAdapterLogger());
 
@@ -79,6 +83,32 @@ class PhysicalItemReconcilerTest {
 
         assertTrue(inventory.addedIds.isEmpty());
         assertTrue(gateway.confirmedIds.isEmpty());
+    }
+
+    @Test
+    void failedDeliveryConfirmationDoesNotRefreshTrackedQuest() {
+        PlayerSessionCache sessions = sessions();
+        Player player = player();
+        RecordingGateway gateway = new RecordingGateway(
+                CompletableFuture.completedFuture(list(pending(PENDING_ID))),
+                CompletableFuture.completedFuture(list(ownedInventory(OWNED_ID))),
+                new IllegalStateException("confirmation failed"));
+        List<UUID> questRefreshes = new ArrayList<>();
+        RecordingAdapterLogger logger = new RecordingAdapterLogger();
+        PhysicalItemReconciler reconciler = new PhysicalItemReconciler(
+                gateway,
+                sessions,
+                new RecordingInventory(),
+                ignored -> player,
+                questRefreshes::add,
+                Runnable::run,
+                logger);
+
+        reconciler.reconcile(PLAYER_ID);
+
+        assertTrue(questRefreshes.isEmpty());
+        assertTrue(logger.messagesAt("warn").stream()
+                .anyMatch(message -> message.startsWith("physical_item_delivery_confirmation_failed")));
     }
 
     private static PlayerSessionCache sessions() {
@@ -114,13 +144,22 @@ class PhysicalItemReconcilerTest {
     private static final class RecordingGateway implements PhysicalItemGateway {
         private final CompletableFuture<ItemInstancesSnapshot> pending;
         private final CompletableFuture<ItemInstancesSnapshot> owned;
+        private final RuntimeException confirmationError;
         private final List<UUID> confirmedIds = new ArrayList<>();
 
         private RecordingGateway(
                 CompletableFuture<ItemInstancesSnapshot> pending,
                 CompletableFuture<ItemInstancesSnapshot> owned) {
+            this(pending, owned, null);
+        }
+
+        private RecordingGateway(
+                CompletableFuture<ItemInstancesSnapshot> pending,
+                CompletableFuture<ItemInstancesSnapshot> owned,
+                RuntimeException confirmationError) {
             this.pending = pending;
             this.owned = owned;
+            this.confirmationError = confirmationError;
         }
 
         @Override
@@ -138,6 +177,9 @@ class PhysicalItemReconcilerTest {
                 UUID accountId,
                 UUID itemInstanceId) {
             confirmedIds.add(itemInstanceId);
+            if (confirmationError != null) {
+                return CompletableFuture.failedFuture(confirmationError);
+            }
             return CompletableFuture.completedFuture(
                     new ItemDeliveryConfirmationSnapshot(1, ownedInventory(itemInstanceId)));
         }

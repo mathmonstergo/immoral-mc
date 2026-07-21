@@ -1,174 +1,89 @@
 package com.immortalmc.adapter.gameplay;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.immortalmc.adapter.client.AccountSnapshot;
-import com.immortalmc.adapter.client.LifeSnapshot;
-import com.immortalmc.adapter.client.PlayerLoginResult;
-import com.immortalmc.adapter.client.ProviderQuestSnapshot;
-import com.immortalmc.adapter.client.QuestInteractionState;
-import com.immortalmc.adapter.client.QuestMutationResult;
-import com.immortalmc.adapter.client.QuestProviderSnapshot;
-import com.immortalmc.adapter.client.QuestRevisionVector;
-import com.immortalmc.adapter.client.TrackedQuestSnapshot;
 import com.immortalmc.adapter.content.EntityBinding;
 import com.immortalmc.adapter.content.EntityInteractionDefinition;
-import com.immortalmc.adapter.dialogue.NpcDialogueAudience;
-import com.immortalmc.adapter.dialogue.NpcDialogueDefinition;
-import com.immortalmc.adapter.dialogue.NpcDialoguePresenter;
-import com.immortalmc.adapter.dialogue.NpcDialogueRegistry;
-import com.immortalmc.adapter.dialogue.NpcDialogueScheduler;
 import com.immortalmc.adapter.interaction.BukkitEntityInteractionContext;
-import com.immortalmc.adapter.quest.QuestInteractionService;
-import com.immortalmc.adapter.quest.QuestOfferLabel;
-import com.immortalmc.adapter.quest.QuestOfferLabelPresenter;
-import com.immortalmc.adapter.quest.QuestOfferSession;
-import com.immortalmc.adapter.quest.QuestOfferSessionStore;
-import com.immortalmc.adapter.session.PlayerSessionCache;
 import com.immortalmc.adapter.testsupport.RecordingAdapterLogger;
 import java.lang.reflect.Proxy;
-import java.time.Clock;
-import java.time.Instant;
-import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import org.bukkit.Location;
-import org.bukkit.World;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.junit.jupiter.api.Test;
 
 class QuestProviderInteractionActionTest {
     private static final UUID PLAYER_ID = UUID.fromString("00000000-0000-0000-0000-000000000010");
-    private static final UUID ACCOUNT_ID = UUID.fromString("10000000-0000-0000-0000-000000000001");
-    private static final UUID LIFE_ID = UUID.fromString("20000000-0000-0000-0000-000000000001");
-    private static final UUID WORLD_ID = UUID.fromString("30000000-0000-0000-0000-000000000001");
+    private static final UUID ENTITY_ID = UUID.fromString("30000000-0000-0000-0000-000000000001");
     private static final UUID NPC_ID = UUID.fromString("40000000-0000-0000-0000-000000000001");
 
     @Test
-    void firstClickPlaysOfferAndSecondClickAcceptsAuthoritatively() {
-        PlayerSessionCache playerSessions = new PlayerSessionCache();
-        playerSessions.store(new PlayerLoginResult(
-                new AccountSnapshot(ACCOUNT_ID, PLAYER_ID, "Sensen"),
-                new LifeSnapshot(LIFE_ID, ACCOUNT_ID, 1, "alive", null)));
-        FakeQuestService quests = new FakeQuestService("available");
-        RecordingScheduler scheduler = new RecordingScheduler();
-        NpcDialogueRegistry dialogues = new NpcDialogueRegistry(() -> Map.of(
-                "first-steps.available",
-                new NpcDialogueDefinition(
-                        "first-steps.available",
-                        "初入凡尘",
-                        "老村民",
-                        List.of("opening"),
-                        List.of("offer"),
-                        10,
-                        "entity.villager.ambient",
-                        1.0f)));
-        dialogues.reload();
-        QuestOfferSessionStore offerSessions = new QuestOfferSessionStore();
-        RecordingLabel label = new RecordingLabel();
-        AtomicReference<QuestInteractionState> published = new AtomicReference<>();
+    void validBindingOpensQuestGuiOnceWithStableIdentity() {
+        AtomicInteger opens = new AtomicInteger();
+        AtomicReference<UUID> openedNpc = new AtomicReference<>();
         QuestProviderInteractionAction action = new QuestProviderInteractionAction(
-                playerSessions,
-                quests,
-                dialogues,
-                new NpcDialoguePresenter(scheduler),
-                offerSessions,
-                (player, npc) -> label,
-                (playerId, state) -> published.set(state),
-                new RecordingAdapterLogger(),
-                ignored -> new RecordingAudience(),
-                ignored -> List.of(),
-                ignored -> {},
-                ignored -> {},
-                Clock.fixed(Instant.parse("2026-07-13T12:00:00Z"), ZoneOffset.UTC));
-        EntityInteractionDefinition definition = definition();
-        BukkitEntityInteractionContext context = new BukkitEntityInteractionContext(player(), npc());
+                (player, interactionId, npcId, providerId) -> {
+                    opens.incrementAndGet();
+                    assertEquals("old-man-quests", interactionId);
+                    assertEquals("old-man", providerId);
+                    openedNpc.set(npcId);
+                },
+                new RecordingAdapterLogger());
 
-        action.handle(definition, context);
+        action.handle(definition(Map.of(
+                        QuestProviderInteractionAction.PROVIDER_ID_KEY, "old-man",
+                        QuestProviderInteractionAction.CITIZENS_NPC_UUID_KEY, NPC_ID.toString())),
+                context());
 
-        assertEquals(1, quests.refreshCalls.get());
-        assertEquals(0, quests.acceptCalls.get());
-        assertEquals(QuestOfferSession.Phase.PLAYING_OFFER, offerSessions.find(PLAYER_ID).orElseThrow().phase());
-
-        scheduler.runAll();
-        assertEquals(QuestOfferSession.Phase.AWAITING_CONFIRMATION, offerSessions.find(PLAYER_ID).orElseThrow().phase());
-        assertEquals(1, label.awaiting.get());
-
-        action.handle(definition, context);
-
-        assertEquals(1, quests.acceptCalls.get());
-        assertTrue(offerSessions.find(PLAYER_ID).isEmpty());
-        assertEquals(1, label.removals.get());
-        assertEquals("first-steps", published.get().trackedQuest().questId());
+        assertEquals(1, opens.get());
+        assertEquals(NPC_ID, openedNpc.get());
     }
 
     @Test
-    void turnInScansPhysicalInventoryThenReconcilesItemsAndCultivation() {
-        PlayerSessionCache playerSessions = new PlayerSessionCache();
-        playerSessions.store(new PlayerLoginResult(
-                new AccountSnapshot(ACCOUNT_ID, PLAYER_ID, "Sensen"),
-                new LifeSnapshot(LIFE_ID, ACCOUNT_ID, 1, "alive", null)));
-        UUID itemId = UUID.fromString("50000000-0000-0000-0000-000000000001");
-        FakeQuestService quests = new FakeQuestService("ready_to_turn_in");
-        AtomicInteger reconciled = new AtomicInteger();
-        AtomicInteger cultivationRefreshes = new AtomicInteger();
-        AtomicReference<QuestInteractionState> published = new AtomicReference<>();
+    void missingProviderIdDoesNotOpenGui() {
+        AtomicInteger opens = new AtomicInteger();
         QuestProviderInteractionAction action = new QuestProviderInteractionAction(
-                playerSessions,
-                quests,
-                new NpcDialogueRegistry(Map::of),
-                new NpcDialoguePresenter(new RecordingScheduler()),
-                new QuestOfferSessionStore(),
-                (player, npc) -> new RecordingLabel(),
-                (playerId, state) -> published.set(state),
-                new RecordingAdapterLogger(),
-                ignored -> new RecordingAudience(),
-                ignored -> List.of(itemId),
-                ignored -> reconciled.incrementAndGet(),
-                ignored -> cultivationRefreshes.incrementAndGet(),
-                Clock.fixed(Instant.parse("2026-07-13T12:00:00Z"), ZoneOffset.UTC));
+                (player, interactionId, npcId, providerId) -> opens.incrementAndGet(),
+                new RecordingAdapterLogger());
 
-        action.handle(definition(), new BukkitEntityInteractionContext(player(), npc()));
+        action.handle(definition(Map.of()), context());
 
-        assertEquals(1, quests.turnInCalls.get());
-        assertEquals(List.of(itemId), quests.turnInItemIds.get());
-        assertEquals(1, reconciled.get());
-        assertEquals(1, cultivationRefreshes.get());
-        assertEquals("completed", published.get().providers().getFirst().quests().getFirst().state());
+        assertEquals(0, opens.get());
     }
 
-    private static EntityInteractionDefinition definition() {
+    @Test
+    void invalidCitizensUuidDoesNotOpenGui() {
+        AtomicInteger opens = new AtomicInteger();
+        QuestProviderInteractionAction action = new QuestProviderInteractionAction(
+                (player, interactionId, npcId, providerId) -> opens.incrementAndGet(),
+                new RecordingAdapterLogger());
+
+        action.handle(definition(Map.of(
+                        QuestProviderInteractionAction.PROVIDER_ID_KEY, "old-man",
+                        QuestProviderInteractionAction.CITIZENS_NPC_UUID_KEY, "not-a-uuid")),
+                context());
+
+        assertEquals(0, opens.get());
+    }
+
+    private static EntityInteractionDefinition definition(Map<String, String> metadata) {
         return new EntityInteractionDefinition(
                 "old-man-quests",
                 QuestProviderInteractionAction.ACTION,
-                new EntityBinding("world", NPC_ID),
+                new EntityBinding("world", ENTITY_ID),
                 "PLAYER",
                 true,
                 false,
-                Map.of(
-                        QuestProviderInteractionAction.PROVIDER_ID_KEY, "old-man",
-                        QuestProviderInteractionAction.CITIZENS_NPC_UUID_KEY, NPC_ID.toString()));
+                metadata);
     }
 
-    private static Player player() {
-        return proxy(Player.class, Map.of("getUniqueId", PLAYER_ID));
-    }
-
-    private static Entity npc() {
-        World world = proxy(World.class, Map.of("getUID", WORLD_ID, "getName", "world"));
-        return proxy(
-                Entity.class,
-                Map.of(
-                        "getUniqueId", NPC_ID,
-                        "getWorld", world,
-                        "getLocation", new Location(world, 1, 2, 3)));
+    private static BukkitEntityInteractionContext context() {
+        return new BukkitEntityInteractionContext(
+                proxy(Player.class, Map.of("getUniqueId", PLAYER_ID)),
+                proxy(Entity.class, Map.of("getUniqueId", ENTITY_ID)));
     }
 
     @SuppressWarnings("unchecked")
@@ -189,138 +104,5 @@ class QuestProviderInteractionActionTest {
             return false;
         }
         return 0;
-    }
-
-    private static final class FakeQuestService implements QuestInteractionService {
-        private final String refreshState;
-        private final AtomicInteger refreshCalls = new AtomicInteger();
-        private final AtomicInteger acceptCalls = new AtomicInteger();
-        private final AtomicInteger turnInCalls = new AtomicInteger();
-        private final AtomicReference<List<UUID>> turnInItemIds = new AtomicReference<>();
-
-        private FakeQuestService(String refreshState) {
-            this.refreshState = refreshState;
-        }
-
-        @Override
-        public CompletableFuture<QuestInteractionState> refresh(
-                UUID playerId, UUID accountId, UUID lifeId, String providerId) {
-            refreshCalls.incrementAndGet();
-            return CompletableFuture.completedFuture(state(refreshState, null));
-        }
-
-        @Override
-        public CompletableFuture<QuestMutationResult> accept(
-                UUID playerId,
-                UUID accountId,
-                UUID lifeId,
-                String questId,
-                String providerId,
-                UUID operationId) {
-            acceptCalls.incrementAndGet();
-            QuestInteractionState state = state(
-                    "active",
-                    new TrackedQuestSnapshot("first-steps", "初入凡尘", "active", List.of(), "前往鉴灵师处"));
-            return CompletableFuture.completedFuture(
-                    new QuestMutationResult(
-                            operationId,
-                            true,
-                            state.providers().getFirst().quests().getFirst(),
-                            state,
-                            List.of(),
-                            List.of()));
-        }
-
-        @Override
-        public CompletableFuture<QuestMutationResult> turnIn(
-                UUID playerId,
-                UUID accountId,
-                UUID lifeId,
-                String questId,
-                String providerId,
-                UUID operationId,
-                List<UUID> inventoryItemInstanceIds) {
-            turnInCalls.incrementAndGet();
-            turnInItemIds.set(List.copyOf(inventoryItemInstanceIds));
-            QuestInteractionState state = state("completed", null);
-            return CompletableFuture.completedFuture(new QuestMutationResult(
-                    operationId,
-                    true,
-                    state.providers().getFirst().quests().getFirst(),
-                    state,
-                    List.of(),
-                    inventoryItemInstanceIds));
-        }
-
-        private static QuestInteractionState state(String questState, TrackedQuestSnapshot tracked) {
-            String action = switch (questState) {
-                case "available" -> "offer";
-                case "ready_to_turn_in" -> "turn_in";
-                default -> "remind";
-            };
-            ProviderQuestSnapshot quest = new ProviderQuestSnapshot(
-                    "first-steps",
-                    "初入凡尘",
-                    "main",
-                    questState,
-                    action,
-                    "first-steps.available",
-                    List.of());
-            QuestProviderSnapshot provider = new QuestProviderSnapshot(
-                    "old-man",
-                    "first-steps:" + questState,
-                    List.of(quest),
-                    List.of("first-steps"),
-                    "first-steps",
-                    null);
-            return new QuestInteractionState(
-                    1,
-                    ACCOUNT_ID,
-                    LIFE_ID,
-                    new QuestRevisionVector(
-                            1,
-                            questState.equals("available") ? 0 : 1,
-                            0,
-                            "sha256:definitions"),
-                    List.of(provider),
-                    tracked,
-                    2000);
-        }
-    }
-
-    private static final class RecordingScheduler implements NpcDialogueScheduler {
-        private final List<Runnable> tasks = new ArrayList<>();
-
-        @Override
-        public void runLater(int delayTicks, Runnable task) {
-            tasks.add(task);
-        }
-
-        void runAll() {
-            List.copyOf(tasks).forEach(Runnable::run);
-        }
-    }
-
-    private static final class RecordingLabel implements QuestOfferLabel {
-        private final AtomicInteger awaiting = new AtomicInteger();
-        private final AtomicInteger removals = new AtomicInteger();
-
-        @Override
-        public void showAwaitingConfirmation() {
-            awaiting.incrementAndGet();
-        }
-
-        @Override
-        public void remove() {
-            removals.incrementAndGet();
-        }
-    }
-
-    private static final class RecordingAudience implements NpcDialogueAudience {
-        @Override
-        public void sendMessage(String message) {}
-
-        @Override
-        public void playSound(String sound, float volume, float pitch) {}
     }
 }

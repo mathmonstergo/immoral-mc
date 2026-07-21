@@ -86,6 +86,34 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "life_inventory_states",
+        sa.Column("life_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column(
+            "revision",
+            sa.BigInteger(),
+            server_default=sa.text("0"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.PrimaryKeyConstraint("life_id", name="pk_life_inventory_states"),
+        sa.ForeignKeyConstraint(
+            ["life_id"],
+            ["lives.life_id"],
+            name="fk_life_inventory_states_life_id_lives",
+            ondelete="RESTRICT",
+        ),
+        sa.CheckConstraint(
+            "revision >= 0",
+            name=op.f("ck_life_inventory_states_revision_nonnegative"),
+        ),
+    )
+
+    op.create_table(
         "item_instances",
         sa.Column("item_instance_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("life_id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -370,5 +398,6 @@ def downgrade() -> None:
     op.drop_table("quest_cultivation_reward_grants")
     op.drop_index("ix_item_instances_life_status", table_name="item_instances")
     op.drop_table("item_instances")
+    op.drop_table("life_inventory_states")
     op.drop_index("ix_quest_reward_grants_life_status", table_name="quest_reward_grants")
     op.drop_table("quest_reward_grants")

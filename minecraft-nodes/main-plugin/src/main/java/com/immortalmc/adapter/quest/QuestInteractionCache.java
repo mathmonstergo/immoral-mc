@@ -5,9 +5,11 @@ import com.immortalmc.adapter.client.QuestRevisionVector;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -83,6 +85,22 @@ public final class QuestInteractionCache {
         return Optional.of(entry);
     }
 
+    public synchronized void invalidateSuperseded(
+            UUID playerId, QuestInteractionState authoritativeState) {
+        Objects.requireNonNull(playerId, "playerId");
+        Objects.requireNonNull(authoritativeState, "authoritativeState");
+        Set<Key> invalidatedKeys = new HashSet<>();
+        currentGenerations.keySet().stream()
+                .filter(key -> key.playerId().equals(playerId))
+                .filter(key -> {
+                    Entry entry = entries.get(key);
+                    return entry == null || isSuperseded(entry.state(), authoritativeState);
+                })
+                .forEach(invalidatedKeys::add);
+        invalidatedKeys.forEach(entries::remove);
+        invalidatedKeys.forEach(currentGenerations::remove);
+    }
+
     public synchronized void clearPlayer(UUID playerId) {
         Objects.requireNonNull(playerId, "playerId");
         entries.keySet().removeIf(key -> key.playerId().equals(playerId));
@@ -99,9 +117,14 @@ public final class QuestInteractionCache {
     }
 
     private static boolean isRevisionOlder(QuestRevisionVector candidate, QuestRevisionVector current) {
-        return candidate.player() < current.player()
-                || candidate.quest() < current.quest()
-                || candidate.objectives() < current.objectives();
+        return candidate.isOlderThan(current);
+    }
+
+    private static boolean isSuperseded(
+            QuestInteractionState cached, QuestInteractionState authoritative) {
+        return !cached.accountId().equals(authoritative.accountId())
+                || !cached.lifeId().equals(authoritative.lifeId())
+                || cached.revision().isSupersededBy(authoritative.revision());
     }
 
     public record Entry(QuestInteractionState state, Instant fetchedAt, Generation generation) {

@@ -473,6 +473,10 @@ Physical delivery uses `item_instances` with stable `item_instance_id`, status,
 and location. Logical `life_item_stacks` remain for quantity resources such as
 breakthrough pills; quest delivery must not add a second stack-debit path.
 
+```text
+life_inventory_states(life_id primary key, revision >= 0)
+```
+
 ### 3. Contracts
 
 * Only MythicMobs event objectives have durable progress rows. Rows are created
@@ -492,6 +496,11 @@ breakthrough pills; quest delivery must not add a second stack-debit path.
   `status=owned`, `location=inventory`, and exact `item_code`, selects every
   required instance, consumes them, and completes the quest in one transaction.
   A later shortage or identity mismatch leaves every instance owned.
+* `life_inventory_states.revision` is the monotonic per-life input revision for
+  physical item objectives. Increment it in the same transaction whenever an
+  item enters, leaves, or is consumed from `owned/inventory`; pending delivery
+  creation alone is not inventory input. Projection reads must retry a bounded
+  stable read or re-read under the revision-row lock.
 * Reward persistence is parent-first inside the shared Unit of Work. Flush
   `quest_reward_grants` before quest-backed `item_instances`, and flush
   `quest_cultivation_reward_grants` before its cultivation ledger entry.
@@ -509,6 +518,7 @@ breakthrough pills; quest delivery must not add a second stack-debit path.
 | Rewardable combat fact has no matching source life | `current_life_unavailable`; no reward, lifetime counter, or quest progress |
 | Presented item ID is duplicated, missing, stored, consumed, or belongs to another life | `quest.not_ready` or stable conflict; no instance is consumed |
 | One delivery type is insufficient | No instance is consumed and the quest remains active |
+| Inventory quantity decreases or an equal-count instance is replaced | Inventory revision increases; a newer projection may contain lower progress |
 | Same quest operation key and request | Frozen response replay; no second reward or consumption |
 | Same quest operation key with different inventory identities | `quest.idempotency_conflict`; no mutation |
 | Child reward row is attempted before its grant parent | Treat as an implementation defect; never retry around the foreign-key failure |
@@ -528,8 +538,8 @@ breakthrough pills; quest delivery must not add a second stack-debit path.
   and head revision.
 * PostgreSQL tests cover bounded bulk increments, duplicate/replayed events,
   physical-instance ownership/location validation, multi-item shortage rollback,
-  exact consumed IDs, parent-before-child item/cultivation reward issuance, and
-  restart reads.
+  exact consumed IDs, inventory revision on removal/same-count replacement,
+  parent-before-child item/cultivation reward issuance, and restart reads.
 * Real PostgreSQL concurrency tests prove accept-versus-kill serialization and
   stable quest-operation replay under concurrent delivery.
 * Fresh migration smoke checks exact metadata at head; disposable development

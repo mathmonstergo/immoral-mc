@@ -143,7 +143,13 @@ async def test_new_combat_fact_advances_kill_quest_but_duplicate_does_not() -> N
         factory,
         quest_catalog,
         clock=lambda: datetime(2026, 7, 14, tzinfo=UTC),
-    ).accept(login.account.account_id, "first-steps", "old-man", UUID(int=33_001))
+    ).accept(
+        login.account.account_id,
+        "first-steps",
+        "old-man",
+        UUID(int=33_001),
+        expected_life_id=login.current_life.life_id,
+    )
     service = CombatRewardService(
         factory,
         catalog(),

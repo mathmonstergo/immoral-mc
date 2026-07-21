@@ -23,6 +23,36 @@ from sqlalchemy.schema import conv
 from immortal_mmo.db.base import Base
 
 
+class LifeInventoryStateRow(Base):
+    __tablename__ = "life_inventory_states"
+    __table_args__ = (
+        PrimaryKeyConstraint("life_id", name=conv("pk_life_inventory_states")),
+        CheckConstraint(
+            "revision >= 0",
+            name=conv("ck_life_inventory_states_revision_nonnegative"),
+        ),
+    )
+
+    life_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey(
+            "lives.life_id",
+            name=conv("fk_life_inventory_states_life_id_lives"),
+            ondelete="RESTRICT",
+        ),
+    )
+    revision: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("0"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
 class LifeItemStackRow(Base):
     __tablename__ = "life_item_stacks"
     __table_args__ = (

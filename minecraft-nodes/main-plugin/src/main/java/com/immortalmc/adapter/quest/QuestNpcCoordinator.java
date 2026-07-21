@@ -3,6 +3,7 @@ package com.immortalmc.adapter.quest;
 import com.immortalmc.adapter.client.QuestInteractionState;
 import com.immortalmc.adapter.client.QuestProviderSnapshot;
 import com.immortalmc.adapter.dialogue.NpcDialogueText;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -20,12 +21,14 @@ public final class QuestNpcCoordinator {
     private final QuestInteractionCache cache;
     private final Refresher refresher;
     private final BarkSink barkSink;
-    private final QuestOfferSessionStore sessions;
+    private final Clock clock;
     private final double radiusSquared;
     private final Duration fallbackCooldown;
     private final int maxPlayersPerTick;
     private final Map<UUID, Set<UUID>> insideNpcIdsByPlayer = new HashMap<>();
+    private final Map<EntryKey, Long> activeEntryEpochs = new HashMap<>();
     private final Map<CooldownKey, Instant> cooldowns = new HashMap<>();
+    private long entryEpochSequence;
     private int playerCursor;
 
     public QuestNpcCoordinator(
@@ -33,15 +36,34 @@ public final class QuestNpcCoordinator {
             QuestInteractionCache cache,
             Refresher refresher,
             BarkSink barkSink,
-            QuestOfferSessionStore sessions,
             double radius,
             Duration fallbackCooldown,
             int maxPlayersPerTick) {
+        this(
+                index,
+                cache,
+                refresher,
+                barkSink,
+                radius,
+                fallbackCooldown,
+                maxPlayersPerTick,
+                Clock.systemUTC());
+    }
+
+    QuestNpcCoordinator(
+            QuestNpcChunkIndex index,
+            QuestInteractionCache cache,
+            Refresher refresher,
+            BarkSink barkSink,
+            double radius,
+            Duration fallbackCooldown,
+            int maxPlayersPerTick,
+            Clock clock) {
         this.index = Objects.requireNonNull(index, "index");
         this.cache = Objects.requireNonNull(cache, "cache");
         this.refresher = Objects.requireNonNull(refresher, "refresher");
         this.barkSink = Objects.requireNonNull(barkSink, "barkSink");
-        this.sessions = Objects.requireNonNull(sessions, "sessions");
+        this.clock = Objects.requireNonNull(clock, "clock");
         if (radius <= 0) {
             throw new IllegalArgumentException("radius must be positive");
         }
@@ -56,10 +78,10 @@ public final class QuestNpcCoordinator {
     public ScanStats tick(List<QuestPlayerPosition> onlinePlayers, Instant now) {
         Objects.requireNonNull(now, "now");
         List<QuestPlayerPosition> players = List.copyOf(onlinePlayers);
-        validateSessions(players, now);
         if (players.isEmpty()) {
             playerCursor = 0;
             insideNpcIdsByPlayer.clear();
+            activeEntryEpochs.clear();
             return new ScanStats(0, 0);
         }
 
@@ -97,19 +119,25 @@ public final class QuestNpcCoordinator {
         } else {
             insideNpcIdsByPlayer.put(player.playerId(), Set.copyOf(current));
         }
+        previous.stream()
+                .filter(npcId -> !current.contains(npcId))
+                .forEach(npcId -> activeEntryEpochs.remove(new EntryKey(player.playerId(), npcId)));
         entered.forEach(npc -> onEnter(player, npc, now));
     }
 
     private void onEnter(QuestPlayerPosition player, QuestNpcPosition npc, Instant now) {
+        EntryKey entryKey = new EntryKey(player.playerId(), npc.npcId());
+        long entryEpoch = ++entryEpochSequence;
+        activeEntryEpochs.put(entryKey, entryEpoch);
         QuestInteractionCache.Entry entry = cache.findFresh(player.playerId(), npc.providerId(), now).orElse(null);
-        if (entry == null) {
+        if (entry == null || !matchesIdentity(entry.state(), player)) {
             refresher.refresh(player.playerId(), player.accountId(), player.lifeId(), npc.providerId())
                     .whenComplete((state, error) -> {
                         if (error == null
                                 && state != null
-                                && state.lifeId().equals(player.lifeId())
-                                && isInside(player.playerId(), npc.npcId())) {
-                            sendBark(player.playerId(), npc, state, now);
+                                && matchesIdentity(state, player)
+                                && isCurrentEntry(entryKey, entryEpoch)) {
+                            sendBark(player.playerId(), npc, state, clock.instant());
                         }
                     });
             return;
@@ -138,43 +166,32 @@ public final class QuestNpcCoordinator {
         barkSink.send(playerId, NpcDialogueText.formatSpeakerLine(bark.speaker(), bark.text()));
     }
 
-    private boolean isInside(UUID playerId, UUID npcId) {
-        return insideNpcIdsByPlayer.getOrDefault(playerId, Set.of()).contains(npcId);
+    private boolean isCurrentEntry(EntryKey entryKey, long entryEpoch) {
+        return Long.valueOf(entryEpoch).equals(activeEntryEpochs.get(entryKey));
     }
 
-    private void validateSessions(List<QuestPlayerPosition> players, Instant now) {
-        Map<UUID, QuestPlayerPosition> playersById = new HashMap<>();
-        players.forEach(player -> playersById.put(player.playerId(), player));
-        for (QuestOfferSession session : sessions.sessions()) {
-            QuestPlayerPosition player = playersById.get(session.playerId());
-            boolean invalid = player == null
-                    || !index.contains(session.npcId())
-                    || !player.worldId().equals(session.worldId())
-                    || distanceSquared(player, session.x(), session.y(), session.z()) > radiusSquared
-                    || (session.expiresAt() != null && !now.isBefore(session.expiresAt()));
-            if (invalid) {
-                sessions.cancel(session.token());
-            }
-        }
+    private static boolean matchesIdentity(QuestInteractionState state, QuestPlayerPosition player) {
+        return state.accountId().equals(player.accountId()) && state.lifeId().equals(player.lifeId());
     }
 
     private void pruneOffline(List<QuestPlayerPosition> players) {
         Set<UUID> online = new HashSet<>();
         players.forEach(player -> online.add(player.playerId()));
         insideNpcIdsByPlayer.keySet().removeIf(playerId -> !online.contains(playerId));
+        activeEntryEpochs.keySet().removeIf(key -> !online.contains(key.playerId()));
         cooldowns.keySet().removeIf(key -> !online.contains(key.playerId()));
     }
 
     public void clearPlayer(UUID playerId) {
         insideNpcIdsByPlayer.remove(playerId);
+        activeEntryEpochs.keySet().removeIf(key -> key.playerId().equals(playerId));
         cooldowns.keySet().removeIf(key -> key.playerId().equals(playerId));
-        sessions.clearPlayer(playerId);
     }
 
     public void clear() {
         insideNpcIdsByPlayer.clear();
+        activeEntryEpochs.clear();
         cooldowns.clear();
-        sessions.clear();
         playerCursor = 0;
     }
 
@@ -209,6 +226,8 @@ public final class QuestNpcCoordinator {
     }
 
     public record ScanStats(int playersProcessed, int candidateChecks) {}
+
+    private record EntryKey(UUID playerId, UUID npcId) {}
 
     private record CooldownKey(UUID playerId, UUID npcId, String stateKey) {}
 }

@@ -53,13 +53,17 @@ async def test_first_steps_reward_manual_can_be_learned_once(
         await client.put(
             f"{base}/quests/first-steps/accept",
             headers={"Idempotency-Key": str(UUID(int=9_002))},
-            json={"provider_id": "old-man"},
+            json={"provider_id": "old-man", "expected_life_id": str(life_id)},
         )
         await client.post(f"{base}/spirit-root")
         turn_in = await client.put(
             f"{base}/quests/first-steps/turn-in",
             headers={"Idempotency-Key": str(UUID(int=9_003))},
-            json={"provider_id": "old-man", "inventory_item_instance_ids": []},
+            json={
+                "provider_id": "old-man",
+                "expected_life_id": str(life_id),
+                "inventory_item_instance_ids": [],
+            },
         )
         item_reward = turn_in.json()["rewards"][0]
         cultivation_reward = turn_in.json()["rewards"][1]
@@ -124,17 +128,22 @@ async def test_reward_manual_round_trips_through_regional_storage(
             json={"minecraft_uuid": str(UUID(int=9_201)), "player_name": "StorageLoop"},
         )
         account_id = login.json()["account"]["account_id"]
+        life_id = UUID(login.json()["current_life"]["life_id"])
         base = f"/api/v1/players/{account_id}/current-life"
         await client.put(
             f"{base}/quests/first-steps/accept",
             headers={"Idempotency-Key": str(UUID(int=9_202))},
-            json={"provider_id": "old-man"},
+            json={"provider_id": "old-man", "expected_life_id": str(life_id)},
         )
         await client.post(f"{base}/spirit-root")
         turn_in = await client.put(
             f"{base}/quests/first-steps/turn-in",
             headers={"Idempotency-Key": str(UUID(int=9_203))},
-            json={"provider_id": "old-man", "inventory_item_instance_ids": []},
+            json={
+                "provider_id": "old-man",
+                "expected_life_id": str(life_id),
+                "inventory_item_instance_ids": [],
+            },
         )
         item_instance_id = turn_in.json()["rewards"][0]["item_instance_ids"][0]
         await client.put(f"{base}/items/{item_instance_id}/delivery-confirmation")
@@ -217,13 +226,17 @@ async def test_full_reserve_reward_is_pending_and_claimable_after_capacity_retur
         await client.put(
             f"{base}/quests/first-steps/accept",
             headers={"Idempotency-Key": str(UUID(int=9_102))},
-            json={"provider_id": "old-man"},
+            json={"provider_id": "old-man", "expected_life_id": str(life_id)},
         )
         await client.post(f"{base}/spirit-root")
         turn_in = await client.put(
             f"{base}/quests/first-steps/turn-in",
             headers={"Idempotency-Key": str(UUID(int=9_103))},
-            json={"provider_id": "old-man", "inventory_item_instance_ids": []},
+            json={
+                "provider_id": "old-man",
+                "expected_life_id": str(life_id),
+                "inventory_item_instance_ids": [],
+            },
         )
         reward = turn_in.json()["rewards"][1]
         async with postgres_sessions() as session:

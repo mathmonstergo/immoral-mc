@@ -25,9 +25,9 @@ class QuestScoreboardRendererTest {
         assertEquals(
                 List.of(
                         "quest:初入凡尘",
-                        "objectives:[灵根检测  0/1]",
+                        "objectives:[灵根检测 0 / 1]",
                         "hint:前往鉴灵师处",
-                        "objectives:[灵根检测  1/1]",
+                        "objectives:[灵根检测 1 / 1]",
                         "hint:返回老村民处"),
                 factory.view.writes);
     }
@@ -53,24 +53,25 @@ class QuestScoreboardRendererTest {
                 "试炼",
                 "active",
                 List.of(
-                        new QuestObjectiveSnapshot("item", "交付", 1, 2, false),
-                        new QuestObjectiveSnapshot("kill", "击杀", 3, 5, false),
-                        new QuestObjectiveSnapshot("technique", "功法", 6, 7, false),
-                        new QuestObjectiveSnapshot("realm", "境界", 13, 14, false)),
+                        new QuestObjectiveSnapshot("item", "item_delivery", "玄铁", "mystic_iron", 20, 15, true),
+                        new QuestObjectiveSnapshot("kill", "mythicmob_kill_count", "击杀", null, 3, 5, false),
+                        new QuestObjectiveSnapshot(
+                                "technique", "technique_layer_reached", "功法", null, 6, 7, false),
+                        new QuestObjectiveSnapshot("realm", "realm_level_reached", "境界", null, 13, 14, false)),
                 "继续修炼");
         TrackedQuestSnapshot oneObjective = new TrackedQuestSnapshot(
                 "mixed",
                 "试炼",
                 "active",
-                List.of(new QuestObjectiveSnapshot("realm", "境界", 14, 14, true)),
+                List.of(new QuestObjectiveSnapshot("realm", "realm_level_reached", "境界", null, 14, 14, true)),
                 "返回执事处");
 
         renderer.render(PLAYER_ID, fourObjectives);
         renderer.render(PLAYER_ID, oneObjective);
 
         assertTrue(factory.view.writes.contains(
-                "objectives:[交付  1/2, 击杀  3/5, 功法  6/7, 境界  13/14]"));
-        assertTrue(factory.view.writes.contains("objectives:[境界  14/14]"));
+                "objectives:[玄铁 20 / 15, 击杀 3 / 5, 功法 6 / 7, 境界 13 / 14]"));
+        assertTrue(factory.view.writes.contains("objectives:[境界 14 / 14]"));
     }
 
     private static TrackedQuestSnapshot tracked(int current, String hint) {
@@ -78,7 +79,14 @@ class QuestScoreboardRendererTest {
                 "first-steps",
                 "初入凡尘",
                 current == 0 ? "active" : "ready_to_turn_in",
-                List.of(new QuestObjectiveSnapshot("detect-spirit-root", "灵根检测", current, 1, current == 1)),
+                List.of(new QuestObjectiveSnapshot(
+                        "detect-spirit-root",
+                        "current_life_spirit_root_present",
+                        "灵根检测",
+                        null,
+                        current,
+                        1,
+                        current == 1)),
                 hint);
     }
 

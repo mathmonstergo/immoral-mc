@@ -10,10 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from tests.support.fakes import processing_operation
 
 from immortal_mmo.combat.postgres_repository import PostgresCombatRepository
-from immortal_mmo.cultivation.db_models import LifeCultivationStateRow, LifeTechniqueRow
+from immortal_mmo.cultivation.db_models import (
+    LifeCultivationStateRow,
+    LifeTechniqueRow,
+    QuestCultivationRewardGrantRow,
+)
 from immortal_mmo.cultivation.postgres_repository import PostgresCultivationRepository
 from immortal_mmo.db.uow import SqlAlchemyUnitOfWorkFactory
 from immortal_mmo.item.db_models import ItemInstanceRow
+from immortal_mmo.item.models import ItemLocation
 from immortal_mmo.item.postgres_repository import PostgresItemRepository
 from immortal_mmo.player.db_models import LifeRow
 from immortal_mmo.player.postgres_repository import PostgresPlayerRepository
@@ -26,6 +31,7 @@ from immortal_mmo.quest.db_models import (
     LifeQuestStateRow,
     QuestOperationRow,
     QuestProgressRow,
+    QuestRewardGrantRow,
 )
 from immortal_mmo.quest.definitions import QUEST_CATALOG, QuestDefinitionCatalog
 from immortal_mmo.quest.models import (
@@ -48,6 +54,7 @@ from immortal_mmo.quest.service import (
     QuestDefinitionVersionMismatchError,
     QuestIdempotencyConflictError,
     QuestService,
+    QuestStaleLifeError,
 )
 
 
@@ -183,6 +190,7 @@ async def test_postgres_mixed_objective_quest_completes_and_consumes_delivery(
         quest.quest_id,
         provider.provider_id,
         UUID(int=98_002),
+        expected_life_id=life_id,
     )
     assert body(accepted)["quest"]["state"] == "active"
     async with factory() as uow:
@@ -201,6 +209,7 @@ async def test_postgres_mixed_objective_quest_completes_and_consumes_delivery(
         quest.quest_id,
         provider.provider_id,
         UUID(int=98_003),
+        expected_life_id=life_id,
         inventory_item_instance_ids=(delivered_item_id,),
     )
     completed_body = body(completed)
@@ -273,6 +282,7 @@ async def test_postgres_multi_item_shortage_leaves_every_delivery_stack_unchange
         quest.quest_id,
         provider.provider_id,
         UUID(int=121_001),
+        expected_life_id=life_id,
     )
     operation_id = UUID(int=121_002)
     rejected = await service.turn_in(
@@ -280,6 +290,7 @@ async def test_postgres_multi_item_shortage_leaves_every_delivery_stack_unchange
         quest.quest_id,
         provider.provider_id,
         operation_id,
+        expected_life_id=life_id,
         inventory_item_instance_ids=alpha_ids,
     )
 
@@ -354,12 +365,14 @@ async def test_turn_in_operation_id_is_bound_to_exact_inventory_item_ids(
         quest.quest_id,
         provider.provider_id,
         UUID(int=123_003),
+        expected_life_id=life_id,
     )
     completed = await service.turn_in(
         account_id,
         quest.quest_id,
         provider.provider_id,
         operation_id,
+        expected_life_id=life_id,
         inventory_item_instance_ids=(first_id,),
     )
     with pytest.raises(QuestIdempotencyConflictError):
@@ -368,6 +381,7 @@ async def test_turn_in_operation_id_is_bound_to_exact_inventory_item_ids(
             quest.quest_id,
             provider.provider_id,
             operation_id,
+            expected_life_id=life_id,
             inventory_item_instance_ids=(second_id,),
         )
 
@@ -432,12 +446,14 @@ async def test_turn_in_rejects_matching_item_that_is_not_in_player_inventory(
         quest.quest_id,
         provider.provider_id,
         UUID(int=122_002),
+        expected_life_id=life_id,
     )
     rejected = await service.turn_in(
         account_id,
         quest.quest_id,
         provider.provider_id,
         UUID(int=122_003),
+        expected_life_id=life_id,
         inventory_item_instance_ids=(item_id,),
     )
 
@@ -452,6 +468,100 @@ async def test_turn_in_rejects_matching_item_that_is_not_in_player_inventory(
     assert item is not None and item.status == "owned"
     assert item.location == "storage"
     assert progress is not None and progress.status == "active"
+
+
+@pytest.mark.asyncio
+async def test_item_objective_revision_advances_for_same_count_inventory_replacement(
+    postgres_sessions: async_sessionmaker[AsyncSession],
+    clean_postgres_data: None,
+) -> None:
+    del clean_postgres_data
+    now = datetime(2026, 7, 20, 8, tzinfo=UTC)
+    _, _, account_id, life_id = await logged_in(postgres_sessions, 125)
+    template = QUEST_CATALOG.get_quest("first-steps")
+    quest = replace(
+        template,
+        quest_id="inventory-replacement",
+        provider_ids=("objective-master",),
+        turn_in_provider_ids=("objective-master",),
+        objectives=(
+            ItemDeliveryObjectiveDefinition("alpha", "玄铁", "item_alpha", 1),
+            ItemDeliveryObjectiveDefinition("beta", "灵草", "item_beta", 1),
+        ),
+    )
+    provider = QuestProviderDefinition(
+        provider_id="objective-master",
+        display_name="任务执事",
+        main_quest_ids=(quest.quest_id,),
+        side_quest_ids=(),
+    )
+    catalog = QuestDefinitionCatalog(quests=(quest,), providers=(provider,))
+    factory = SqlAlchemyUnitOfWorkFactory(
+        postgres_sessions,
+        PostgresPlayerRepository,
+        PostgresQuestRepository,
+        PostgresCombatRepository,
+        PostgresCultivationRepository,
+        PostgresItemRepository,
+    )
+    service = QuestService(factory, catalog, clock=lambda: now)
+    alpha_id = UUID(int=125_010)
+    beta_id = UUID(int=125_011)
+    async with postgres_sessions() as session:
+        session.add_all(
+            [
+                inventory_item(
+                    life_id=life_id,
+                    item_instance_id=alpha_id,
+                    item_code="item_alpha",
+                    issuance_id=UUID(int=125_020),
+                    delivered_at=now,
+                ),
+                inventory_item(
+                    life_id=life_id,
+                    item_instance_id=beta_id,
+                    item_code="item_beta",
+                    issuance_id=UUID(int=125_021),
+                    delivered_at=now,
+                    location="storage",
+                ),
+            ]
+        )
+        await session.commit()
+
+    await service.accept(
+        account_id,
+        quest.quest_id,
+        provider.provider_id,
+        UUID(int=125_001),
+        expected_life_id=life_id,
+    )
+    before = await service.get_interaction_state(account_id, [provider.provider_id])
+    async with factory() as uow:
+        await uow.items.set_instance_location(
+            item_instance_id=alpha_id,
+            life_id=life_id,
+            expected=ItemLocation.INVENTORY,
+            destination=ItemLocation.STORAGE,
+        )
+        await uow.items.set_instance_location(
+            item_instance_id=beta_id,
+            life_id=life_id,
+            expected=ItemLocation.STORAGE,
+            destination=ItemLocation.INVENTORY,
+        )
+        await uow.commit()
+    after = await service.get_interaction_state(account_id, [provider.provider_id])
+
+    assert after.revision.objectives > before.revision.objectives
+    assert [objective.current for objective in before.providers[0].quests[0].objectives] == [
+        1,
+        0,
+    ]
+    assert [objective.current for objective in after.providers[0].quests[0].objectives] == [
+        0,
+        1,
+    ]
 
 
 @pytest.mark.asyncio
@@ -614,6 +724,7 @@ async def test_kill_waits_for_concurrent_accept_and_counts_after_accept_commits(
                 quest.quest_id,
                 provider.provider_id,
                 UUID(int=124_001),
+                expected_life_id=life_id,
             )
         )
         await asyncio.wait_for(accept_holds_revision.wait(), timeout=2)
@@ -746,8 +857,20 @@ async def test_same_operation_accept_concurrently_mutates_once_and_replays_exact
     operation_id = uuid4()
 
     first, second = await asyncio.gather(
-        quests.accept(account_id, "first-steps", "old-man", operation_id),
-        quests.accept(account_id, "first-steps", "old-man", operation_id),
+        quests.accept(
+            account_id,
+            "first-steps",
+            "old-man",
+            operation_id,
+            expected_life_id=life_id,
+        ),
+        quests.accept(
+            account_id,
+            "first-steps",
+            "old-man",
+            operation_id,
+            expected_life_id=life_id,
+        ),
     )
 
     assert (first.status_code, first.content_type, first.body) == (
@@ -755,7 +878,7 @@ async def test_same_operation_accept_concurrently_mutates_once_and_replays_exact
         second.content_type,
         second.body,
     )
-    assert first.contract_version == second.contract_version == 1
+    assert first.contract_version == second.contract_version == 2
     async with postgres_sessions() as session:
         assert await session.scalar(select(func.count()).select_from(QuestProgressRow)) == 1
         assert await session.scalar(
@@ -769,7 +892,7 @@ async def test_same_operation_domain_failure_concurrently_replays_exact_bytes(
     clean_postgres_data: None,
 ) -> None:
     del clean_postgres_data
-    _, quests, account_id, _ = await logged_in(postgres_sessions, 102)
+    _, quests, account_id, life_id = await logged_in(postgres_sessions, 102)
     operation_id = uuid4()
 
     first, second = await asyncio.gather(
@@ -778,6 +901,7 @@ async def test_same_operation_domain_failure_concurrently_replays_exact_bytes(
             "first-steps",
             "old-man",
             operation_id,
+            expected_life_id=life_id,
             inventory_item_instance_ids=(),
         ),
         quests.turn_in(
@@ -785,6 +909,7 @@ async def test_same_operation_domain_failure_concurrently_replays_exact_bytes(
             "first-steps",
             "old-man",
             operation_id,
+            expected_life_id=life_id,
             inventory_item_instance_ids=(),
         ),
     )
@@ -801,7 +926,13 @@ async def test_same_operation_turn_in_concurrently_completes_once_and_replays_ex
 ) -> None:
     del clean_postgres_data
     players, quests, account_id, life_id = await logged_in(postgres_sessions, 116)
-    await quests.accept(account_id, "first-steps", "old-man", uuid4())
+    await quests.accept(
+        account_id,
+        "first-steps",
+        "old-man",
+        uuid4(),
+        expected_life_id=life_id,
+    )
     await players.detect_current_life_spirit_root(account_id)
     operation_id = uuid4()
 
@@ -811,6 +942,7 @@ async def test_same_operation_turn_in_concurrently_completes_once_and_replays_ex
             "first-steps",
             "old-man",
             operation_id,
+            expected_life_id=life_id,
             inventory_item_instance_ids=(),
         ),
         quests.turn_in(
@@ -818,6 +950,7 @@ async def test_same_operation_turn_in_concurrently_completes_once_and_replays_ex
             "first-steps",
             "old-man",
             operation_id,
+            expected_life_id=life_id,
             inventory_item_instance_ids=(),
         ),
     )
@@ -825,7 +958,7 @@ async def test_same_operation_turn_in_concurrently_completes_once_and_replays_ex
     assert first.status_code == second.status_code == 200
     assert first.content_type == second.content_type == "application/json"
     assert first.body == second.body
-    assert first.contract_version == second.contract_version == 1
+    assert first.contract_version == second.contract_version == 2
     assert body(first)["changed"] is True
 
     _, restarted = services(postgres_sessions)
@@ -834,6 +967,7 @@ async def test_same_operation_turn_in_concurrently_completes_once_and_replays_ex
         "first-steps",
         "old-man",
         operation_id,
+        expected_life_id=life_id,
         inventory_item_instance_ids=(),
     )
     assert (replayed.status_code, replayed.content_type, replayed.body) == (
@@ -858,13 +992,25 @@ async def test_same_operation_concurrent_different_accounts_exposes_committed_wi
     clean_postgres_data: None,
 ) -> None:
     del clean_postgres_data
-    _, quests, first_account_id, _ = await logged_in(postgres_sessions, 113)
-    _, _, second_account_id, _ = await logged_in(postgres_sessions, 114)
+    _, quests, first_account_id, first_life_id = await logged_in(postgres_sessions, 113)
+    _, _, second_account_id, second_life_id = await logged_in(postgres_sessions, 114)
     operation_id = uuid4()
 
     results = await asyncio.gather(
-        quests.accept(first_account_id, "first-steps", "old-man", operation_id),
-        quests.accept(second_account_id, "first-steps", "old-man", operation_id),
+        quests.accept(
+            first_account_id,
+            "first-steps",
+            "old-man",
+            operation_id,
+            expected_life_id=first_life_id,
+        ),
+        quests.accept(
+            second_account_id,
+            "first-steps",
+            "old-man",
+            operation_id,
+            expected_life_id=second_life_id,
+        ),
         return_exceptions=True,
     )
 
@@ -888,8 +1034,20 @@ async def test_different_operation_accepts_change_once_and_increment_revision_on
     _, quests, account_id, life_id = await logged_in(postgres_sessions, 103)
 
     accepts = await asyncio.gather(
-        quests.accept(account_id, "first-steps", "old-man", uuid4()),
-        quests.accept(account_id, "first-steps", "old-man", uuid4()),
+        quests.accept(
+            account_id,
+            "first-steps",
+            "old-man",
+            uuid4(),
+            expected_life_id=life_id,
+        ),
+        quests.accept(
+            account_id,
+            "first-steps",
+            "old-man",
+            uuid4(),
+            expected_life_id=life_id,
+        ),
     )
     assert sorted(body(response)["changed"] for response in accepts) == [False, True]
     assert {body(response)["interaction_state"]["revision"]["quest"] for response in accepts} == {
@@ -912,7 +1070,13 @@ async def test_different_operation_turn_ins_change_once_and_increment_revision_o
 ) -> None:
     del clean_postgres_data
     players, quests, account_id, life_id = await logged_in(postgres_sessions, 117)
-    await quests.accept(account_id, "first-steps", "old-man", uuid4())
+    await quests.accept(
+        account_id,
+        "first-steps",
+        "old-man",
+        uuid4(),
+        expected_life_id=life_id,
+    )
 
     await players.detect_current_life_spirit_root(account_id)
     turn_ins = await asyncio.gather(
@@ -921,6 +1085,7 @@ async def test_different_operation_turn_ins_change_once_and_increment_revision_o
             "first-steps",
             "old-man",
             uuid4(),
+            expected_life_id=life_id,
             inventory_item_instance_ids=(),
         ),
         quests.turn_in(
@@ -928,6 +1093,7 @@ async def test_different_operation_turn_ins_change_once_and_increment_revision_o
             "first-steps",
             "old-man",
             uuid4(),
+            expected_life_id=life_id,
             inventory_item_instance_ids=(),
         ),
     )
@@ -940,12 +1106,14 @@ async def test_different_operation_turn_ins_change_once_and_increment_revision_o
         "first-steps",
         "old-man",
         uuid4(),
+        expected_life_id=life_id,
     )
     completed_turn_in = await quests.turn_in(
         account_id,
         "first-steps",
         "old-man",
         uuid4(),
+        expected_life_id=life_id,
         inventory_item_instance_ids=(),
     )
     assert body(completed_accept)["changed"] is False
@@ -971,12 +1139,19 @@ async def test_restart_and_new_life_still_replay_old_global_success_and_failure(
     _, quests, account_id, old_life_id = await logged_in(postgres_sessions, 104)
     success_id = uuid4()
     failure_id = uuid4()
-    success = await quests.accept(account_id, "first-steps", "old-man", success_id)
+    success = await quests.accept(
+        account_id,
+        "first-steps",
+        "old-man",
+        success_id,
+        expected_life_id=old_life_id,
+    )
     failure = await quests.turn_in(
         account_id,
         "first-steps",
         "old-man",
         failure_id,
+        expected_life_id=old_life_id,
         inventory_item_instance_ids=(),
     )
 
@@ -1004,13 +1179,18 @@ async def test_restart_and_new_life_still_replay_old_global_success_and_failure(
 
     _, restarted = services(postgres_sessions)
     replayed_success = await restarted.accept(
-        account_id, "first-steps", "old-man", success_id
+        account_id,
+        "first-steps",
+        "old-man",
+        success_id,
+        expected_life_id=old_life_id,
     )
     replayed_failure = await restarted.turn_in(
         account_id,
         "first-steps",
         "old-man",
         failure_id,
+        expected_life_id=old_life_id,
         inventory_item_instance_ids=(),
     )
     state = await restarted.get_interaction_state(account_id, ["old-man"])
@@ -1019,6 +1199,29 @@ async def test_restart_and_new_life_still_replay_old_global_success_and_failure(
     assert replayed_failure == failure
     assert state.life_id == new_life_id
     assert state.revision.quest == 0
+
+    stale_operation_id = uuid4()
+    with pytest.raises(QuestStaleLifeError):
+        await restarted.accept(
+            account_id,
+            "first-steps",
+            "old-man",
+            stale_operation_id,
+            expected_life_id=old_life_id,
+        )
+    async with postgres_sessions() as session:
+        assert await session.get(QuestOperationRow, stale_operation_id) is None
+        assert await session.get(QuestProgressRow, (new_life_id, "first-steps")) is None
+
+    fresh = await restarted.accept(
+        account_id,
+        "first-steps",
+        "old-man",
+        uuid4(),
+        expected_life_id=new_life_id,
+    )
+    assert body(fresh)["interaction_state"]["life_id"] == str(new_life_id)
+    assert body(fresh)["changed"] is True
 
 
 class ExplodingQuestRepository(PostgresQuestRepository):
@@ -1042,12 +1245,101 @@ async def test_failure_after_reservation_rolls_back_operation_progress_and_revis
             "first-steps",
             "old-man",
             uuid4(),
+            expected_life_id=login.current_life.life_id,
         )
 
     async with postgres_sessions() as session:
         assert await session.scalar(select(func.count()).select_from(QuestOperationRow)) == 0
         assert await session.scalar(select(func.count()).select_from(QuestProgressRow)) == 0
         assert await session.scalar(select(func.count()).select_from(LifeQuestStateRow)) == 0
+
+
+@pytest.mark.asyncio
+async def test_turn_in_finalize_failure_rolls_back_items_rewards_progress_and_revision(
+    postgres_sessions: async_sessionmaker[AsyncSession],
+    clean_postgres_data: None,
+) -> None:
+    del clean_postgres_data
+    now = datetime(2026, 7, 20, 8, tzinfo=UTC)
+    _, _, account_id, life_id = await logged_in(postgres_sessions, 126)
+    quest = replace(
+        QUEST_CATALOG.get_quest("first-steps"),
+        quest_id="rollback-delivery",
+        provider_ids=("objective-master",),
+        turn_in_provider_ids=("objective-master",),
+        objectives=(ItemDeliveryObjectiveDefinition("ore", "玄铁", "mystic_iron", 1),),
+    )
+    provider = QuestProviderDefinition(
+        provider_id="objective-master",
+        display_name="任务执事",
+        main_quest_ids=(quest.quest_id,),
+        side_quest_ids=(),
+    )
+    catalog = QuestDefinitionCatalog(quests=(quest,), providers=(provider,))
+    normal_factory = SqlAlchemyUnitOfWorkFactory(
+        postgres_sessions,
+        PostgresPlayerRepository,
+        PostgresQuestRepository,
+        PostgresCombatRepository,
+        PostgresCultivationRepository,
+        PostgresItemRepository,
+    )
+    item_id = UUID(int=126_010)
+    async with postgres_sessions() as session:
+        session.add(
+            inventory_item(
+                life_id=life_id,
+                item_instance_id=item_id,
+                item_code="mystic_iron",
+                issuance_id=UUID(int=126_011),
+                delivered_at=now,
+            )
+        )
+        await session.commit()
+    await QuestService(normal_factory, catalog, clock=lambda: now).accept(
+        account_id,
+        quest.quest_id,
+        provider.provider_id,
+        UUID(int=126_001),
+        expected_life_id=life_id,
+    )
+
+    exploding_factory = SqlAlchemyUnitOfWorkFactory(
+        postgres_sessions,
+        PostgresPlayerRepository,
+        ExplodingQuestRepository,
+        PostgresCombatRepository,
+        PostgresCultivationRepository,
+        PostgresItemRepository,
+    )
+    turn_in_operation_id = UUID(int=126_002)
+    with pytest.raises(RuntimeError, match="injected finalize failure"):
+        await QuestService(exploding_factory, catalog, clock=lambda: now).turn_in(
+            account_id,
+            quest.quest_id,
+            provider.provider_id,
+            turn_in_operation_id,
+            expected_life_id=life_id,
+            inventory_item_instance_ids=(item_id,),
+        )
+
+    async with postgres_sessions() as session:
+        item = await session.get(ItemInstanceRow, item_id)
+        progress = await session.get(QuestProgressRow, (life_id, quest.quest_id))
+        state = await session.get(LifeQuestStateRow, life_id)
+        operation = await session.get(QuestOperationRow, turn_in_operation_id)
+        reward_grants = await session.scalar(
+            select(func.count()).select_from(QuestRewardGrantRow)
+        )
+        cultivation_grants = await session.scalar(
+            select(func.count()).select_from(QuestCultivationRewardGrantRow)
+        )
+    assert item is not None and item.status == "owned" and item.location == "inventory"
+    assert progress is not None and progress.status == "active"
+    assert state is not None and state.revision == 1
+    assert operation is None
+    assert reward_grants == 0
+    assert cultivation_grants == 0
 
 
 @pytest.mark.asyncio
@@ -1059,7 +1351,13 @@ async def test_account_and_lifecycle_errors_happen_before_operation_reservation(
     _, quests, account_id, life_id = await logged_in(postgres_sessions, 115)
 
     with pytest.raises(PlayerAccountNotFoundError):
-        await quests.accept(uuid4(), "first-steps", "old-man", uuid4())
+        await quests.accept(
+            uuid4(),
+            "first-steps",
+            "old-man",
+            uuid4(),
+            expected_life_id=uuid4(),
+        )
 
     async with postgres_sessions.begin() as session:
         await session.execute(
@@ -1074,7 +1372,13 @@ async def test_account_and_lifecycle_errors_happen_before_operation_reservation(
             {"life_id": life_id},
         )
     with pytest.raises(PlayerLifecycleError):
-        await quests.accept(account_id, "first-steps", "old-man", uuid4())
+        await quests.accept(
+            account_id,
+            "first-steps",
+            "old-man",
+            uuid4(),
+            expected_life_id=life_id,
+        )
 
     async with postgres_sessions() as session:
         assert await session.scalar(select(func.count()).select_from(QuestOperationRow)) == 0
@@ -1083,7 +1387,7 @@ async def test_account_and_lifecycle_errors_happen_before_operation_reservation(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "changed_identity",
-    ["account", "command", "quest", "provider", "fingerprint"],
+    ["account", "life", "command", "quest", "provider", "fingerprint"],
 )
 async def test_reusing_operation_id_with_any_changed_identity_conflicts_without_rewrite(
     changed_identity: str,
@@ -1092,10 +1396,16 @@ async def test_reusing_operation_id_with_any_changed_identity_conflicts_without_
     clean_postgres_data: None,
 ) -> None:
     del clean_postgres_data
-    _, quests, account_id, _ = await logged_in(postgres_sessions, 106)
-    _, _, other_account_id, _ = await logged_in(postgres_sessions, 107)
+    _, quests, account_id, life_id = await logged_in(postgres_sessions, 106)
+    _, _, other_account_id, other_life_id = await logged_in(postgres_sessions, 107)
     operation_id = uuid4()
-    original = await quests.accept(account_id, "first-steps", "old-man", operation_id)
+    original = await quests.accept(
+        account_id,
+        "first-steps",
+        "old-man",
+        operation_id,
+        expected_life_id=life_id,
+    )
 
     async with postgres_sessions() as session:
         row = await session.get(QuestOperationRow, operation_id)
@@ -1118,6 +1428,7 @@ async def test_reusing_operation_id_with_any_changed_identity_conflicts_without_
         )
 
     request_account = other_account_id if changed_identity == "account" else account_id
+    request_life = other_life_id if changed_identity == "life" else life_id
     request_quest = "different-quest" if changed_identity == "quest" else "first-steps"
     request_provider = "different-provider" if changed_identity == "provider" else "old-man"
     if changed_identity == "fingerprint":
@@ -1134,6 +1445,7 @@ async def test_reusing_operation_id_with_any_changed_identity_conflicts_without_
                 request_quest,
                 request_provider,
                 operation_id,
+                expected_life_id=request_life,
                 inventory_item_instance_ids=(),
             )
         else:
@@ -1142,6 +1454,7 @@ async def test_reusing_operation_id_with_any_changed_identity_conflicts_without_
                 request_quest,
                 request_provider,
                 operation_id,
+                expected_life_id=request_life,
             )
     async with postgres_sessions() as session:
         row = await session.get(QuestOperationRow, operation_id)
@@ -1189,8 +1502,20 @@ async def test_real_postgres_definition_mismatch_fails_fast_and_is_frozen(
         )
 
     operation_id = uuid4()
-    first = await quests.accept(account_id, "first-steps", "old-man", operation_id)
-    replayed = await quests.accept(account_id, "first-steps", "old-man", operation_id)
+    first = await quests.accept(
+        account_id,
+        "first-steps",
+        "old-man",
+        operation_id,
+        expected_life_id=life_id,
+    )
+    replayed = await quests.accept(
+        account_id,
+        "first-steps",
+        "old-man",
+        operation_id,
+        expected_life_id=life_id,
+    )
 
     assert first.status_code == 409
     assert body(first)["error"]["code"] == QuestDefinitionVersionMismatchError.code
@@ -1212,15 +1537,23 @@ async def test_restart_reads_completed_progress_revision_and_exact_success_failu
         "first-steps",
         "old-man",
         failure_id,
+        expected_life_id=life_id,
         inventory_item_instance_ids=(),
     )
-    accepted = await quests.accept(account_id, "first-steps", "old-man", accept_id)
+    accepted = await quests.accept(
+        account_id,
+        "first-steps",
+        "old-man",
+        accept_id,
+        expected_life_id=life_id,
+    )
     await players.detect_current_life_spirit_root(account_id)
     completed = await quests.turn_in(
         account_id,
         "first-steps",
         "old-man",
         turn_in_id,
+        expected_life_id=life_id,
         inventory_item_instance_ids=(),
     )
 
@@ -1231,14 +1564,22 @@ async def test_restart_reads_completed_progress_revision_and_exact_success_failu
         "first-steps",
         "old-man",
         failure_id,
+        expected_life_id=life_id,
         inventory_item_instance_ids=(),
     )
-    replayed_accept = await restarted.accept(account_id, "first-steps", "old-man", accept_id)
+    replayed_accept = await restarted.accept(
+        account_id,
+        "first-steps",
+        "old-man",
+        accept_id,
+        expected_life_id=life_id,
+    )
     replayed_turn_in = await restarted.turn_in(
         account_id,
         "first-steps",
         "old-man",
         turn_in_id,
+        expected_life_id=life_id,
         inventory_item_instance_ids=(),
     )
 

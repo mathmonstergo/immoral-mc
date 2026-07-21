@@ -22,6 +22,7 @@ public final class TrackedQuestRefreshCoordinator {
     private final PlayerSessionCache sessions;
     private final MainThreadDispatcher dispatcher;
     private final BiConsumer<UUID, TrackedQuestSnapshot> renderer;
+    private final BiConsumer<UUID, QuestInteractionState> stateObserver;
     private final AdapterLogger logger;
     private final Map<UUID, RefreshState> states = new HashMap<>();
     private final AtomicLong generationSequence = new AtomicLong();
@@ -31,12 +32,14 @@ public final class TrackedQuestRefreshCoordinator {
             PlayerSessionCache sessions,
             MainThreadDispatcher dispatcher,
             BiConsumer<UUID, TrackedQuestSnapshot> renderer,
+            BiConsumer<UUID, QuestInteractionState> stateObserver,
             AdapterLogger logger) {
         this(
                 accountId -> client.fetchQuestInteractionState(accountId, List.of()),
                 sessions,
                 dispatcher,
                 renderer,
+                stateObserver,
                 logger);
     }
 
@@ -45,11 +48,13 @@ public final class TrackedQuestRefreshCoordinator {
             PlayerSessionCache sessions,
             MainThreadDispatcher dispatcher,
             BiConsumer<UUID, TrackedQuestSnapshot> renderer,
+            BiConsumer<UUID, QuestInteractionState> stateObserver,
             AdapterLogger logger) {
         this.gateway = Objects.requireNonNull(gateway, "gateway");
         this.sessions = Objects.requireNonNull(sessions, "sessions");
         this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher");
         this.renderer = Objects.requireNonNull(renderer, "renderer");
+        this.stateObserver = Objects.requireNonNull(stateObserver, "stateObserver");
         this.logger = Objects.requireNonNull(logger, "logger");
     }
 
@@ -163,6 +168,7 @@ public final class TrackedQuestRefreshCoordinator {
         if (failure != null) {
             logger.warn("quest_tracked_refresh_failed minecraft_uuid=" + playerId + " reason=" + failure);
         } else if (publish) {
+            stateObserver.accept(playerId, response);
             renderer.accept(playerId, trackedQuest);
         }
         if (trailing) {
@@ -177,6 +183,7 @@ public final class TrackedQuestRefreshCoordinator {
                 || !response.lifeId().equals(session.currentLife().lifeId())) {
             return;
         }
+        boolean trailing = false;
         synchronized (lock) {
             RefreshState state = states.get(playerId);
             if (state == null
@@ -187,9 +194,21 @@ public final class TrackedQuestRefreshCoordinator {
             if (isOlder(response.revision(), state.lastRevision)) {
                 return;
             }
+            boolean advancesRevision = state.lastRevision == null
+                    || state.lastRevision.isSupersededBy(response.revision());
+            if (advancesRevision && state.inFlight) {
+                state.generation = generationSequence.incrementAndGet();
+                state.inFlight = false;
+                trailing = state.dirty;
+                state.dirty = false;
+            }
             state.lastRevision = response.revision();
         }
+        stateObserver.accept(playerId, response);
         renderer.accept(playerId, response.trackedQuest());
+        if (trailing) {
+            refresh(playerId);
+        }
     }
 
     private void dispatchRefreshCompletion(
@@ -238,10 +257,7 @@ public final class TrackedQuestRefreshCoordinator {
     }
 
     private static boolean isOlder(QuestRevisionVector candidate, QuestRevisionVector current) {
-        return current != null
-                && (candidate.player() < current.player()
-                        || candidate.quest() < current.quest()
-                        || candidate.objectives() < current.objectives());
+        return current != null && candidate.isOlderThan(current);
     }
 
     private static String message(Throwable error) {

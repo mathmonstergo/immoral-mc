@@ -7,12 +7,14 @@ from typing import Any
 from immortal_mmo.quest.models import (
     CurrentLifeSpiritRootObjectiveDefinition,
     FixedItemRewardDefinition,
+    ProximityBarkRule,
     QuestCategory,
     QuestDefinition,
     QuestDialogueKeys,
     QuestPresentationHints,
     QuestProviderDefinition,
     QuestRepeatability,
+    QuestStateCondition,
     UnrefinedCultivationRewardDefinition,
     objective_target_key,
 )
@@ -123,6 +125,17 @@ class QuestDefinitionCatalog:
                 raise ValueError(
                     f"Unknown quest ID in provider {provider.provider_id}: {unknown_ids}"
                 )
+            unknown_bark_quest_ids = {
+                condition.quest_id
+                for rule in provider.proximity_bark_rules
+                for condition in rule.conditions
+                if isinstance(condition, QuestStateCondition)
+            } - known_quest_ids
+            if unknown_bark_quest_ids:
+                raise ValueError(
+                    f"Unknown proximity bark quest ID for provider {provider.provider_id}: "
+                    f"{unknown_bark_quest_ids}"
+                )
 
         quests_by_id = {quest.quest_id: quest for quest in quests}
         providers_by_id = {provider.provider_id: provider for provider in providers}
@@ -169,6 +182,7 @@ FIRST_STEPS = QuestDefinition(
     quest_id="first-steps",
     version=1,
     title="初入凡尘",
+    description="完成灵根检测，踏出修行之路的第一步。",
     category=QuestCategory.MAIN,
     repeatability=QuestRepeatability.ONCE_PER_LIFE,
     prerequisites=(),
@@ -189,9 +203,6 @@ FIRST_STEPS = QuestDefinition(
     presentation=QuestPresentationHints(
         active_next_action="前往鉴灵师处",
         ready_next_action="返回老村民处",
-        available_proximity_text="最近太不太平了...",
-        active_proximity_text="去找鉴灵师看看吧。",
-        ready_proximity_text="看来你已经有所收获。",
     ),
     rewards=(
         FixedItemRewardDefinition(
@@ -212,6 +223,23 @@ OLD_MAN = QuestProviderDefinition(
     display_name="老村民",
     main_quest_ids=("first-steps",),
     side_quest_ids=(),
+    proximity_bark_rules=(
+        ProximityBarkRule(
+            rule_id="first-steps-available",
+            text="最近太不太平了...",
+            conditions=(QuestStateCondition("first-steps", ("available",)),),
+        ),
+        ProximityBarkRule(
+            rule_id="first-steps-active",
+            text="去找鉴灵师看看吧。",
+            conditions=(QuestStateCondition("first-steps", ("active",)),),
+        ),
+        ProximityBarkRule(
+            rule_id="first-steps-ready",
+            text="看来你已经有所收获。",
+            conditions=(QuestStateCondition("first-steps", ("ready_to_turn_in",)),),
+        ),
+    ),
 )
 
 QUEST_CATALOG = QuestDefinitionCatalog(

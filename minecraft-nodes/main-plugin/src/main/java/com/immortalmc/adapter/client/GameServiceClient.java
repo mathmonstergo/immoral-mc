@@ -112,18 +112,23 @@ public final class GameServiceClient
     }
 
     public CompletableFuture<QuestMutationResult> acceptQuest(
-            UUID accountId, String questId, String providerId, UUID operationId) {
+            UUID accountId,
+            UUID expectedLifeId,
+            String questId,
+            String providerId,
+            UUID operationId) {
         return mutateQuest(
                 accountId,
                 questId,
                 providerId,
                 operationId,
                 "accept",
-                new QuestProviderRequest(providerId));
+                new QuestProviderRequest(providerId, expectedLifeId));
     }
 
     public CompletableFuture<QuestMutationResult> turnInQuest(
             UUID accountId,
+            UUID expectedLifeId,
             String questId,
             String providerId,
             UUID operationId,
@@ -136,6 +141,7 @@ public final class GameServiceClient
                 "turn-in",
                 new QuestTurnInRequest(
                         providerId,
+                        expectedLifeId,
                         List.copyOf(Objects.requireNonNull(
                                 inventoryItemInstanceIds,
                                 "inventoryItemInstanceIds"))));
@@ -520,9 +526,24 @@ public final class GameServiceClient
 
     private record QuestInteractionStateRequest(List<String> providerIds) {}
 
-    private record QuestProviderRequest(String providerId) {}
+    private record QuestProviderRequest(String providerId, UUID expectedLifeId) {
+        private QuestProviderRequest {
+            requireText(providerId, "providerId");
+            Objects.requireNonNull(expectedLifeId, "expectedLifeId");
+        }
+    }
 
-    private record QuestTurnInRequest(String providerId, List<UUID> inventoryItemInstanceIds) {}
+    private record QuestTurnInRequest(
+            String providerId,
+            UUID expectedLifeId,
+            List<UUID> inventoryItemInstanceIds) {
+        private QuestTurnInRequest {
+            requireText(providerId, "providerId");
+            Objects.requireNonNull(expectedLifeId, "expectedLifeId");
+            inventoryItemInstanceIds = List.copyOf(
+                    Objects.requireNonNull(inventoryItemInstanceIds, "inventoryItemInstanceIds"));
+        }
+    }
 
     private record LearnTechniqueRequest(UUID itemInstanceId) {}
 

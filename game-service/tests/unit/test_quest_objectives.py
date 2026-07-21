@@ -1,6 +1,7 @@
 import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -92,7 +93,7 @@ def grant_inventory_items(
 @pytest.mark.asyncio
 async def test_state_objectives_use_current_authoritative_targets() -> None:
     catalog = typed_catalog(
-        ItemDeliveryObjectiveDefinition("deliver", "交付筑基丹", "foundation_pill", 3),
+        ItemDeliveryObjectiveDefinition("deliver", "筑基丹", "foundation_pill", 3),
         TechniqueLayerObjectiveDefinition("technique", "冰冻术七层", "Gongfa_68726c", 7),
         RealmLevelObjectiveDefinition("realm", "筑基初期", 14),
     )
@@ -138,13 +139,35 @@ async def test_state_objectives_use_current_authoritative_targets() -> None:
         "typed-objectives",
         "objective-master",
         UUID(int=18_002),
+        expected_life_id=life_id,
     )
     objectives = response_body(accepted)["quest"]["objectives"]
 
     assert [(item["current"], item["required"], item["completed"]) for item in objectives] == [
-        (3, 3, True),
+        (8, 3, True),
         (6, 7, False),
         (14, 14, True),
+    ]
+    assert objectives[0]["objective_type"] == "item_delivery"
+    assert objectives[0]["item_code"] == "foundation_pill"
+    assert objectives[1]["item_code"] is None
+    payload = response_body(accepted)["quest"]
+    assert payload["description"] == QUEST_CATALOG.get_quest("first-steps").description
+    assert payload["reward_previews"] == [
+        {
+            "reward_id": "starter-technique-manual",
+            "kind": "fixed_item",
+            "item_code": "technique_manual:GF_YinqiShu_01",
+            "quantity": 1,
+            "cultivation_amount": None,
+        },
+        {
+            "reward_id": "starter-cultivation",
+            "kind": "unrefined_cultivation",
+            "item_code": None,
+            "quantity": None,
+            "cultivation_amount": 50,
+        },
     ]
 
     factory.store._state.life_techniques[target_instance] = replace(
@@ -161,6 +184,112 @@ async def test_state_objectives_use_current_authoritative_targets() -> None:
     state = await quests.get_interaction_state(account_id, ["objective-master"])
     assert state.providers[0].quests[0].state == "active"
     assert state.providers[0].quests[0].objectives[1].current == 0
+
+
+@pytest.mark.asyncio
+async def test_inventory_objective_revision_advances_when_same_count_items_swap() -> None:
+    catalog = typed_catalog(
+        ItemDeliveryObjectiveDefinition("alpha", "玄铁", "item_alpha", 1),
+        ItemDeliveryObjectiveDefinition("beta", "灵草", "item_beta", 1),
+    )
+    quests, factory, account_id, life_id = await setup_services(catalog)
+    alpha_id = grant_inventory_items(factory, life_id, "item_alpha", 1, 18_500)[0]
+    beta_id = grant_inventory_items(factory, life_id, "item_beta", 1, 18_510)[0]
+    factory.store._state.item_instances[beta_id] = replace(
+        factory.store._state.item_instances[beta_id],
+        location=ItemLocation.STORAGE,
+    )
+    await quests.accept(
+        account_id,
+        "typed-objectives",
+        "objective-master",
+        UUID(int=18_050),
+        expected_life_id=life_id,
+    )
+    before = await quests.get_interaction_state(account_id, ["objective-master"])
+
+    async with factory() as uow:
+        await uow.items.set_instance_location(
+            item_instance_id=alpha_id,
+            life_id=life_id,
+            expected=ItemLocation.INVENTORY,
+            destination=ItemLocation.STORAGE,
+        )
+        await uow.items.set_instance_location(
+            item_instance_id=beta_id,
+            life_id=life_id,
+            expected=ItemLocation.STORAGE,
+            destination=ItemLocation.INVENTORY,
+        )
+        await uow.commit()
+
+    after = await quests.get_interaction_state(account_id, ["objective-master"])
+
+    assert after.revision.objectives > before.revision.objectives
+    assert [objective.current for objective in before.providers[0].quests[0].objectives] == [
+        1,
+        0,
+    ]
+    assert [objective.current for objective in after.providers[0].quests[0].objectives] == [
+        0,
+        1,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_nonlocking_inventory_projection_retries_changed_revision() -> None:
+    life_id = UUID(int=18_520)
+    old_item = ItemInstance(
+        item_instance_id=UUID(int=18_521),
+        life_id=life_id,
+        item_code="item_alpha",
+        definition_version=1,
+        technique_id=None,
+        issuance_id=UUID(int=18_522),
+        issuance_ordinal=0,
+        quest_reward_grant_id=None,
+        status=ItemInstanceStatus.OWNED,
+        created_at=NOW,
+        delivered_at=NOW,
+        consumed_at=None,
+        location=ItemLocation.INVENTORY,
+    )
+    new_item = replace(old_item, item_instance_id=UUID(int=18_523))
+
+    class ChangingInventory:
+        def __init__(self) -> None:
+            self.revisions = iter((0, 1, 1, 1))
+            self.inventory_reads = 0
+
+        async def get_inventory_revision(self, requested_life_id, *, for_update):
+            assert requested_life_id == life_id
+            assert for_update is False
+            return next(self.revisions)
+
+        async def get_inventory_instances(
+            self,
+            requested_life_id,
+            item_codes=(),
+            *,
+            for_update,
+        ):
+            assert requested_life_id == life_id
+            assert set(item_codes) == {"item_alpha"}
+            assert for_update is False
+            self.inventory_reads += 1
+            return (old_item,) if self.inventory_reads == 1 else (new_item,)
+
+    items = ChangingInventory()
+    inventory, revision = await QuestService._load_inventory_objective_inputs(
+        SimpleNamespace(items=items),
+        life_id,
+        {"item_alpha"},
+        lock_items=False,
+    )
+
+    assert inventory == (new_item,)
+    assert revision == 1
+    assert items.inventory_reads == 2
 
 
 @pytest.mark.asyncio
@@ -195,6 +324,7 @@ async def test_technique_objective_tracks_layer_gain_and_loss_from_investment() 
         "typed-objectives",
         "objective-master",
         UUID(int=18_006),
+        expected_life_id=life_id,
     )
 
     async with factory() as uow:
@@ -248,6 +378,7 @@ async def test_kills_before_acceptance_do_not_advance_persisted_progress() -> No
         "typed-objectives",
         "objective-master",
         UUID(int=18_010),
+        expected_life_id=life_id,
     )
     async with factory() as uow:
         changed = await progression.record_mythicmob_kill(
@@ -290,6 +421,7 @@ async def test_item_delivery_validates_all_stacks_before_atomic_consumption() ->
         "typed-objectives",
         "objective-master",
         UUID(int=18_020),
+        expected_life_id=life_id,
     )
 
     rejected = await quests.turn_in(
@@ -297,6 +429,7 @@ async def test_item_delivery_validates_all_stacks_before_atomic_consumption() ->
         "typed-objectives",
         "objective-master",
         UUID(int=18_021),
+        expected_life_id=life_id,
         inventory_item_instance_ids=(),
     )
     assert rejected.status_code == 409
@@ -313,6 +446,7 @@ async def test_item_delivery_validates_all_stacks_before_atomic_consumption() ->
         "typed-objectives",
         "objective-master",
         operation_id,
+        expected_life_id=life_id,
         inventory_item_instance_ids=pill_ids + token_ids,
     )
     replayed = await quests.turn_in(
@@ -320,6 +454,7 @@ async def test_item_delivery_validates_all_stacks_before_atomic_consumption() ->
         "typed-objectives",
         "objective-master",
         operation_id,
+        expected_life_id=life_id,
         inventory_item_instance_ids=pill_ids + token_ids,
     )
 
@@ -369,6 +504,7 @@ async def test_mixed_objectives_require_every_type() -> None:
         "typed-objectives",
         "objective-master",
         UUID(int=18_030),
+        expected_life_id=life_id,
     )
 
     state = await quests.get_interaction_state(account_id, ["objective-master"])

@@ -13,6 +13,9 @@ public record QuestInteractionState(
         TrackedQuestSnapshot trackedQuest,
         long cacheTtlMs) {
     public QuestInteractionState {
+        if (contractVersion != 2) {
+            throw new IllegalArgumentException("Unsupported quest interaction contract version");
+        }
         Objects.requireNonNull(accountId, "accountId");
         Objects.requireNonNull(lifeId, "lifeId");
         Objects.requireNonNull(revision, "revision");

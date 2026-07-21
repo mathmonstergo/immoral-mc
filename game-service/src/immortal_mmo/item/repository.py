@@ -14,6 +14,8 @@ from immortal_mmo.item.models import (
 
 
 class ItemRepository(Protocol):
+    async def get_inventory_revision(self, life_id: UUID, *, for_update: bool) -> int: ...
+
     async def get_pending_instances(self, life_id: UUID) -> tuple[ItemInstance, ...]: ...
 
     async def count_pending_quest_reward_instances(

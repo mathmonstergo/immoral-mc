@@ -10,11 +10,13 @@ import com.immortalmc.adapter.item.PhysicalItemIdentity;
 import com.immortalmc.adapter.item.PhysicalInventoryAccess;
 import com.immortalmc.adapter.logging.AdapterLogger;
 import com.immortalmc.adapter.session.PlayerSessionCache;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -27,6 +29,7 @@ import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -39,14 +42,17 @@ public final class RegionalStorageInventoryController implements Listener, AutoC
     private static final int CLOSE_SLOT = 50;
     private static final int NEXT_PAGE_SLOT = 53;
 
-    private final JavaPlugin plugin;
     private final RegionalStorageGateway gateway;
     private final PlayerSessionCache sessions;
     private final RegionalStorageAccessPolicy accessPolicy;
     private final CultivationAreaResolver areas;
     private final PhysicalInventoryAccess physicalInventory;
     private final Consumer<UUID> reconcile;
+    private final Consumer<UUID> refreshTrackedQuest;
     private final Consumer<Runnable> mainThread;
+    private final Function<UUID, Player> playerLookup;
+    private final InventoryFactory inventoryFactory;
+    private final MenuItemFactory menuItemFactory;
     private final AdapterLogger logger;
     private final Map<UUID, UUID> generations = new ConcurrentHashMap<>();
     private final Map<UUID, RegionalStorageInventoryHolder> openStorages = new ConcurrentHashMap<>();
@@ -58,16 +64,47 @@ public final class RegionalStorageInventoryController implements Listener, AutoC
             CultivationAreaResolver areas,
             PhysicalInventoryAccess physicalInventory,
             Consumer<UUID> reconcile,
+            Consumer<UUID> refreshTrackedQuest,
             Consumer<Runnable> mainThread,
             AdapterLogger logger) {
-        this.plugin = Objects.requireNonNull(plugin, "plugin");
+        this(
+                gateway,
+                sessions,
+                areas,
+                physicalInventory,
+                reconcile,
+                refreshTrackedQuest,
+                mainThread,
+                Bukkit::getPlayer,
+                (holder, size, title) -> Bukkit.createInventory(holder, size, title),
+                RegionalStorageInventoryController::menuItem,
+                logger);
+        Objects.requireNonNull(plugin, "plugin");
+    }
+
+    RegionalStorageInventoryController(
+            RegionalStorageGateway gateway,
+            PlayerSessionCache sessions,
+            CultivationAreaResolver areas,
+            PhysicalInventoryAccess physicalInventory,
+            Consumer<UUID> reconcile,
+            Consumer<UUID> refreshTrackedQuest,
+            Consumer<Runnable> mainThread,
+            Function<UUID, Player> playerLookup,
+            InventoryFactory inventoryFactory,
+            MenuItemFactory menuItemFactory,
+            AdapterLogger logger) {
         this.gateway = Objects.requireNonNull(gateway, "gateway");
         this.sessions = Objects.requireNonNull(sessions, "sessions");
         this.accessPolicy = new RegionalStorageAccessPolicy(sessions);
         this.areas = Objects.requireNonNull(areas, "areas");
         this.physicalInventory = Objects.requireNonNull(physicalInventory, "physicalInventory");
         this.reconcile = Objects.requireNonNull(reconcile, "reconcile");
+        this.refreshTrackedQuest = Objects.requireNonNull(refreshTrackedQuest, "refreshTrackedQuest");
         this.mainThread = Objects.requireNonNull(mainThread, "mainThread");
+        this.playerLookup = Objects.requireNonNull(playerLookup, "playerLookup");
+        this.inventoryFactory = Objects.requireNonNull(inventoryFactory, "inventoryFactory");
+        this.menuItemFactory = Objects.requireNonNull(menuItemFactory, "menuItemFactory");
         this.logger = Objects.requireNonNull(logger, "logger");
     }
 
@@ -178,7 +215,7 @@ public final class RegionalStorageInventoryController implements Listener, AutoC
         Objects.requireNonNull(playerId, "playerId");
         generations.remove(playerId);
         RegionalStorageInventoryHolder holder = openStorages.remove(playerId);
-        Player player = Bukkit.getPlayer(playerId);
+        Player player = playerLookup.apply(playerId);
         if (holder != null
                 && player != null
                 && player.getOpenInventory().getTopInventory().getHolder() == holder) {
@@ -201,7 +238,7 @@ public final class RegionalStorageInventoryController implements Listener, AutoC
                 session.currentLife().lifeId(),
                 areaId,
                 snapshot);
-        Inventory inventory = Bukkit.createInventory(
+        Inventory inventory = inventoryFactory.create(
                 holder,
                 INVENTORY_SIZE,
                 Component.text("地区仓库 · " + areaId));
@@ -354,23 +391,40 @@ public final class RegionalStorageInventoryController implements Listener, AutoC
             Throwable error) {
         holder.finishOperation();
         reconcile.accept(holder.playerId());
-        if (!isCurrent(holder) || !player.isOnline()) {
-            return;
-        }
         if (error != null
                 || result == null
-                || !operationId.equals(result.operationId())) {
-            player.sendMessage("§e仓库操作结果未确认，正在读取权威快照。");
-            if (error != null) {
-                logFailure("regional_storage_move_failed", player, holder.areaId(), error);
+                || !operationId.equals(result.operationId())
+                || result.snapshot() == null) {
+            Throwable failure = error != null
+                    ? error
+                    : new IllegalStateException("storage mutation response identity does not match request");
+            logFailure("regional_storage_move_failed", player, holder.areaId(), failure);
+            if (isCurrent(holder) && player.isOnline()) {
+                player.sendMessage("§e仓库操作结果未确认，正在读取权威快照。");
+                fetchPage(player, holder, holder.snapshot().page());
             }
-            fetchPage(player, holder, holder.snapshot().page());
+            return;
+        }
+        StorageSnapshot snapshot = result.snapshot();
+        if (!holder.lifeId().equals(snapshot.lifeId())
+                || !holder.areaId().equals(snapshot.areaId())) {
+            logFailure(
+                    "regional_storage_move_rejected",
+                    player,
+                    holder.areaId(),
+                    new IllegalStateException("storage mutation response belongs to another life or area"));
+            return;
+        }
+        if (player.isOnline() && sameSession(holder)) {
+            refreshTrackedQuest.accept(holder.playerId());
+        }
+        if (!isCurrent(holder) || !player.isOnline()) {
             return;
         }
         if (!validateAccess(player, holder)) {
             return;
         }
-        holder.update(result.snapshot());
+        holder.update(snapshot);
         render(holder);
     }
 
@@ -423,6 +477,13 @@ public final class RegionalStorageInventoryController implements Listener, AutoC
                 && current.currentLife().lifeId().equals(expected.currentLife().lifeId());
     }
 
+    private boolean sameSession(RegionalStorageInventoryHolder holder) {
+        PlayerLoginResult current = sessions.findByMinecraftUuid(holder.playerId()).orElse(null);
+        return current != null
+                && current.account().accountId().equals(holder.accountId())
+                && current.currentLife().lifeId().equals(holder.lifeId());
+    }
+
     private String currentArea(Player player) {
         var location = player.getLocation();
         return areas.resolve(
@@ -448,41 +509,41 @@ public final class RegionalStorageInventoryController implements Listener, AutoC
         }
         inventory.setItem(
                 PREVIOUS_PAGE_SLOT,
-                button(
+                menuItemFactory.create(
                         snapshot.page() > 1 ? Material.ARROW : Material.GRAY_DYE,
-                        "上一页"));
-        inventory.setItem(REFRESH_SLOT, button(Material.CLOCK, "刷新"));
+                        "上一页",
+                        List.of()));
+        inventory.setItem(REFRESH_SLOT, menuItemFactory.create(Material.CLOCK, "刷新", List.of()));
         inventory.setItem(
                 STATUS_SLOT,
-                statusButton(holder));
-        inventory.setItem(CLOSE_SLOT, button(Material.BARRIER, "关闭"));
+                menuItemFactory.create(
+                        holder.busy() ? Material.YELLOW_STAINED_GLASS_PANE : Material.CHEST,
+                        holder.busy() ? "同步中" : "地区仓库",
+                        List.of(
+                                Component.text("地区：" + snapshot.areaId()),
+                                Component.text("页码：" + snapshot.page() + "/" + snapshot.pageCount()),
+                                Component.text("修订：" + snapshot.revision()))));
+        inventory.setItem(CLOSE_SLOT, menuItemFactory.create(Material.BARRIER, "关闭", List.of()));
         inventory.setItem(
                 NEXT_PAGE_SLOT,
-                button(
+                menuItemFactory.create(
                         snapshot.page() < snapshot.pageCount() ? Material.ARROW : Material.GRAY_DYE,
-                        "下一页"));
+                        "下一页",
+                        List.of()));
         for (int slot : new int[] {46, 47, 51, 52}) {
-            inventory.setItem(slot, button(Material.GRAY_STAINED_GLASS_PANE, " "));
+            inventory.setItem(
+                    slot,
+                    menuItemFactory.create(Material.GRAY_STAINED_GLASS_PANE, " ", List.of()));
         }
     }
 
-    private static ItemStack statusButton(RegionalStorageInventoryHolder holder) {
-        StorageSnapshot snapshot = holder.snapshot();
-        ItemStack item = new ItemStack(holder.busy() ? Material.YELLOW_STAINED_GLASS_PANE : Material.CHEST);
-        ItemMeta meta = item.getItemMeta();
-        meta.displayName(Component.text(holder.busy() ? "同步中" : "地区仓库"));
-        meta.lore(java.util.List.of(
-                Component.text("地区：" + snapshot.areaId()),
-                Component.text("页码：" + snapshot.page() + "/" + snapshot.pageCount()),
-                Component.text("修订：" + snapshot.revision())));
-        item.setItemMeta(meta);
-        return item;
-    }
-
-    private static ItemStack button(Material material, String name) {
+    private static ItemStack menuItem(Material material, String name, List<Component> lore) {
         ItemStack item = new ItemStack(material);
         ItemMeta meta = item.getItemMeta();
         meta.displayName(Component.text(name));
+        if (!lore.isEmpty()) {
+            meta.lore(lore);
+        }
         item.setItemMeta(meta);
         return item;
     }
@@ -520,5 +581,15 @@ public final class RegionalStorageInventoryController implements Listener, AutoC
         generations.clear();
         openStorages.clear();
         HandlerList.unregisterAll(this);
+    }
+
+    @FunctionalInterface
+    interface InventoryFactory {
+        Inventory create(InventoryHolder holder, int size, Component title);
+    }
+
+    @FunctionalInterface
+    interface MenuItemFactory {
+        ItemStack create(Material material, String name, List<Component> lore);
     }
 }

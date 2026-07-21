@@ -59,7 +59,13 @@ async def accept_quest(
     idempotency_key: Annotated[UUID, idempotency_key_header],
     service: QuestService = quest_service_dependency,
 ) -> Response:
-    frozen = await service.accept(account_id, quest_id, body.provider_id, idempotency_key)
+    frozen = await service.accept(
+        account_id,
+        quest_id,
+        body.provider_id,
+        idempotency_key,
+        expected_life_id=body.expected_life_id,
+    )
     return Response(
         content=frozen.body,
         status_code=frozen.status_code,
@@ -83,6 +89,7 @@ async def turn_in_quest(
         quest_id,
         body.provider_id,
         idempotency_key,
+        expected_life_id=body.expected_life_id,
         inventory_item_instance_ids=tuple(body.inventory_item_instance_ids),
     )
     return Response(

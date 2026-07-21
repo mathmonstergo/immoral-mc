@@ -39,6 +39,7 @@ import com.immortalmc.adapter.event.ImmortalPlayerJoinListener;
 import com.immortalmc.adapter.event.ImmortalPlayerLifecycleListener;
 import com.immortalmc.adapter.event.PlayerJoinLoginService;
 import com.immortalmc.adapter.gameplay.NpcDialogueInteractionAction;
+import com.immortalmc.adapter.gameplay.QuestProviderBindingGuard;
 import com.immortalmc.adapter.gameplay.QuestProviderInteractionAction;
 import com.immortalmc.adapter.gameplay.SpiritRootDetectionInteractionAction;
 import com.immortalmc.adapter.gameplay.SpiritRootDetectionUseCase;
@@ -56,7 +57,6 @@ import com.immortalmc.adapter.mythicmobs.MythicMobsIntegrationLoader;
 import com.immortalmc.adapter.outbox.OutboxDeliveryPolicy;
 import com.immortalmc.adapter.outbox.OutboxDeliveryWorker;
 import com.immortalmc.adapter.outbox.SqliteKillOutbox;
-import com.immortalmc.adapter.presentation.BukkitQuestOfferLabelPresenter;
 import com.immortalmc.adapter.presentation.BukkitQuestScoreboardView;
 import com.immortalmc.adapter.presentation.BukkitCultivationRewardPresenter;
 import com.immortalmc.adapter.presentation.BukkitSpiritRootParticlePresenter;
@@ -69,9 +69,9 @@ import com.immortalmc.adapter.quest.QuestInteractionCache;
 import com.immortalmc.adapter.quest.QuestNpcChunkIndex;
 import com.immortalmc.adapter.quest.QuestNpcCoordinator;
 import com.immortalmc.adapter.quest.QuestNpcSource;
-import com.immortalmc.adapter.quest.QuestOfferSessionStore;
 import com.immortalmc.adapter.quest.QuestPlayerPosition;
 import com.immortalmc.adapter.quest.QuestProviderCatalogCache;
+import com.immortalmc.adapter.quest.QuestProviderInventoryController;
 import com.immortalmc.adapter.quest.QuestRequestCoordinator;
 import com.immortalmc.adapter.quest.TrackedQuestRefreshCoordinator;
 import com.immortalmc.adapter.session.PlayerSessionCache;
@@ -117,15 +117,12 @@ public final class ImmortalMainPlugin extends JavaPlugin {
     private PhysicalItemReconciler physicalItems;
     private PhysicalTechniqueListener techniqueManuals;
     private RegionalStorageInventoryController storageInventory;
+    private QuestProviderInventoryController questProviderMenus;
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
         saveDialogueIfMissing("old-man.yml");
-        saveDialogueIfMissing("first-steps.available.yml");
-        saveDialogueIfMissing("first-steps.active.yml");
-        saveDialogueIfMissing("first-steps.ready_to_turn_in.yml");
-        saveDialogueIfMissing("first-steps.completed.yml");
 
         PluginSettings settings = PluginSettings.from(
                 getConfig().getString("game-service.base-url", "http://127.0.0.1:8000"));
@@ -147,6 +144,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 sessionCache,
                 task -> getServer().getScheduler().runTask(this, task),
                 questScoreboards::render,
+                questCache::invalidateSuperseded,
                 adapterLogger);
         cultivationProjections = new CultivationProjectionStore();
         cultivationHud = BetterHudCultivationIntegration.create(this, cultivationProjections, adapterLogger);
@@ -168,6 +166,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 sessionCache,
                 physicalInventory,
                 getServer()::getPlayer,
+                trackedQuestRefreshes::refresh,
                 task -> getServer().getScheduler().runTask(this, task),
                 adapterLogger);
         techniqueManuals = new PhysicalTechniqueListener(
@@ -186,6 +185,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 cultivationAreas,
                 physicalInventory,
                 physicalItems::reconcile,
+                trackedQuestRefreshes::refresh,
                 task -> getServer().getScheduler().runTask(this, task),
                 adapterLogger);
         seclusionInventory = new SeclusionInventoryController(
@@ -235,8 +235,6 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                 snapshot -> combatOutbox.append(CombatKillEventRequest.fromSnapshot(snapshot)),
                 adapterLogger,
                 Clock.systemUTC());
-        QuestOfferSessionStore questOfferSessions = new QuestOfferSessionStore();
-
         EntityInteractionRegistry entityInteractionRegistry = new EntityInteractionRegistry(
                 new BukkitConfigEntityInteractionRepository(this));
         int loadedInteractions = entityInteractionRegistry.reload();
@@ -294,7 +292,17 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         BukkitSpiritRootParticlePresenter spiritRootParticlePresenter =
                 new BukkitSpiritRootParticlePresenter(new SpiritRootParticlePlanner());
         BukkitSpiritRootTitlePresenter spiritRootTitlePresenter = new BukkitSpiritRootTitlePresenter();
-        BukkitQuestOfferLabelPresenter questOfferLabelPresenter = new BukkitQuestOfferLabelPresenter(this);
+        questProviderMenus = new QuestProviderInventoryController(
+                sessionCache,
+                questRequests,
+                new QuestProviderBindingGuard(
+                        () -> entityInteractionRegistry.listByAction(QuestProviderInteractionAction.ACTION)),
+                player -> physicalInventory.instanceIds(player.getInventory()),
+                trackedQuestRefreshes::publish,
+                physicalItems::reconcile,
+                playerId -> refreshCultivation(playerId, gameServiceClient, adapterLogger),
+                task -> getServer().getScheduler().runTask(this, task),
+                adapterLogger);
         NpcDialoguePresenter npcDialoguePresenter = new NpcDialoguePresenter(
                 (delayTicks, task) -> getServer().getScheduler().runTaskLater(this, task, delayTicks));
 
@@ -307,20 +315,7 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                                 spiritRootTitlePresenter,
                                 trackedQuestRefreshes::refresh),
                         QuestProviderInteractionAction.ACTION,
-                        new QuestProviderInteractionAction(
-                                sessionCache,
-                                questRequests,
-                                npcDialogueRegistry,
-                                npcDialoguePresenter,
-                                questOfferSessions,
-                                questOfferLabelPresenter,
-                                trackedQuestRefreshes::publish,
-                                adapterLogger,
-                                this::dialogueAudience,
-                                player -> physicalInventory.instanceIds(player.getInventory()),
-                                physicalItems::reconcile,
-                                playerId -> refreshCultivation(playerId, gameServiceClient, adapterLogger),
-                                Clock.systemUTC()),
+                        new QuestProviderInteractionAction(questProviderMenus, adapterLogger),
                         NpcDialogueInteractionAction.ACTION,
                         new NpcDialogueInteractionAction(
                                 npcDialogueRegistry,
@@ -370,7 +365,6 @@ public final class ImmortalMainPlugin extends JavaPlugin {
                         player.sendMessage(text);
                     }
                 },
-                questOfferSessions,
                 questProximityRadius,
                 Duration.ofSeconds(60),
                 maxPlayersPerScan);
@@ -394,12 +388,14 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(seclusionInventory, this);
         getServer().getPluginManager().registerEvents(techniqueManuals, this);
         getServer().getPluginManager().registerEvents(storageInventory, this);
+        getServer().getPluginManager().registerEvents(questProviderMenus, this);
         getServer().getPluginManager().registerEvents(
                 new ImmortalPlayerLifecycleListener(
                         this::cleanupPlayer,
                         playerId -> {
                             questNpcCoordinator.clearPlayer(playerId);
                             storageInventory.clearPlayer(playerId);
+                            questProviderMenus.clearPlayer(playerId);
                         }),
                 this);
         getServer().getPluginManager().registerEvents(
@@ -436,6 +432,10 @@ public final class ImmortalMainPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (questProviderMenus != null) {
+            questProviderMenus.close();
+            questProviderMenus = null;
+        }
         if (storageInventory != null) {
             storageInventory.close();
             storageInventory = null;
@@ -561,6 +561,9 @@ public final class ImmortalMainPlugin extends JavaPlugin {
         }
         if (storageInventory != null) {
             storageInventory.clearPlayer(playerId);
+        }
+        if (questProviderMenus != null) {
+            questProviderMenus.clearPlayer(playerId);
         }
         sessionCache.remove(playerId);
         questRequests.clearPlayer(playerId);

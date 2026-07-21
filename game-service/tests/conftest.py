@@ -48,6 +48,7 @@ async def clean_postgres_data(postgres_engine: AsyncEngine) -> AsyncIterator[Non
             quest_cultivation_reward_claims,
             item_resource_entries,
             life_item_stacks,
+            life_inventory_states,
             breakthrough_technique_debits,
             technique_investment_entries,
             cultivation_session_techniques,

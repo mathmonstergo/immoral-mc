@@ -47,6 +47,44 @@ class QuestInteractionCacheTest {
     }
 
     @Test
+    void acceptsNewerObjectiveFactsAndRejectsLatePreRealmChangeProjection() {
+        QuestInteractionCache cache = new QuestInteractionCache();
+        QuestInteractionCache.Generation initial =
+                cache.nextGeneration(PLAYER_ID, "old-man", LIFE_ID);
+        assertTrue(cache.publish(
+                PLAYER_ID,
+                "old-man",
+                initial,
+                state(2, 3, 4, "available"),
+                FETCHED_AT));
+
+        QuestInteractionCache.Generation afterRealmChange =
+                cache.nextGeneration(PLAYER_ID, "old-man", LIFE_ID);
+        assertTrue(cache.publish(
+                PLAYER_ID,
+                "old-man",
+                afterRealmChange,
+                state(2, 3, 5, "available"),
+                FETCHED_AT.plusMillis(100)));
+
+        QuestInteractionCache.Generation lateOldProjection =
+                cache.nextGeneration(PLAYER_ID, "old-man", LIFE_ID);
+        assertFalse(cache.publish(
+                PLAYER_ID,
+                "old-man",
+                lateOldProjection,
+                state(2, 3, 4, "available"),
+                FETCHED_AT.plusMillis(200)));
+        assertEquals(
+                5,
+                cache.findLastConfirmed(PLAYER_ID, "old-man")
+                        .orElseThrow()
+                        .state()
+                        .revision()
+                        .objectives());
+    }
+
+    @Test
     void clearPlayerRemovesEveryProviderAndInvalidatesPendingGenerations() {
         QuestInteractionCache cache = new QuestInteractionCache();
         QuestInteractionCache.Generation oldManGeneration = cache.nextGeneration(PLAYER_ID, "old-man", LIFE_ID);
@@ -98,26 +136,135 @@ class QuestInteractionCacheTest {
                 FETCHED_AT.plusSeconds(1)));
     }
 
+    @Test
+    void differentDefinitionsStartANewRevisionEpoch() {
+        QuestInteractionCache cache = new QuestInteractionCache();
+        QuestInteractionCache.Generation oldGeneration =
+                cache.nextGeneration(PLAYER_ID, "old-man", LIFE_ID);
+        assertTrue(cache.publish(
+                PLAYER_ID,
+                "old-man",
+                oldGeneration,
+                state(9, 9, 9, "active", "old-man", LIFE_ID, "sha256:old"),
+                FETCHED_AT));
+
+        QuestInteractionCache.Generation newGeneration =
+                cache.nextGeneration(PLAYER_ID, "old-man", LIFE_ID);
+        assertTrue(cache.publish(
+                PLAYER_ID,
+                "old-man",
+                newGeneration,
+                state(1, 1, 1, "available", "old-man", LIFE_ID, "sha256:new"),
+                FETCHED_AT.plusMillis(1)));
+
+        assertEquals(
+                "sha256:new",
+                cache.findLastConfirmed(PLAYER_ID, "old-man")
+                        .orElseThrow()
+                        .state()
+                        .revision()
+                        .definitions());
+    }
+
+    @Test
+    void newerAuthoritativeFactsInvalidateOnlySupersededProviderEntries() {
+        QuestInteractionCache cache = new QuestInteractionCache(Duration.ofMinutes(1));
+        QuestInteractionCache.Generation generation =
+                cache.nextGeneration(PLAYER_ID, "old-man", LIFE_ID);
+        QuestInteractionState cached = state(2, 3, 4, "active");
+        assertTrue(cache.publish(PLAYER_ID, "old-man", generation, cached, FETCHED_AT));
+
+        cache.invalidateSuperseded(PLAYER_ID, cached);
+        assertTrue(cache.findFresh(PLAYER_ID, "old-man", FETCHED_AT.plusSeconds(1)).isPresent());
+
+        cache.invalidateSuperseded(
+                PLAYER_ID,
+                state(2, 3, 5, "active"));
+        assertTrue(cache.findFresh(PLAYER_ID, "old-man", FETCHED_AT.plusSeconds(1)).isEmpty());
+    }
+
+    @Test
+    void authoritativeFactsFenceAProviderRefreshThatStartedBeforeAnyCacheEntry() {
+        QuestInteractionCache cache = new QuestInteractionCache(Duration.ofMinutes(1));
+        QuestInteractionCache.Generation oldRefresh =
+                cache.nextGeneration(PLAYER_ID, "old-man", LIFE_ID);
+
+        cache.invalidateSuperseded(
+                PLAYER_ID,
+                state(2, 3, 5, "active"));
+
+        assertFalse(cache.publish(
+                PLAYER_ID,
+                "old-man",
+                oldRefresh,
+                state(2, 3, 4, "available"),
+                FETCHED_AT.plusSeconds(1)));
+        assertTrue(cache.findLastConfirmed(PLAYER_ID, "old-man").isEmpty());
+    }
+
     private static QuestInteractionState state(long playerRevision, long questRevision, String questState) {
-        return state(playerRevision, questRevision, questState, "old-man");
+        return state(playerRevision, questRevision, 0, questState, "old-man", LIFE_ID);
+    }
+
+    private static QuestInteractionState state(
+            long playerRevision,
+            long questRevision,
+            long objectiveRevision,
+            String questState) {
+        return state(
+                playerRevision,
+                questRevision,
+                objectiveRevision,
+                questState,
+                "old-man",
+                LIFE_ID);
     }
 
     private static QuestInteractionState state(
             long playerRevision, long questRevision, String questState, String providerId) {
-        return state(playerRevision, questRevision, questState, providerId, LIFE_ID);
+        return state(playerRevision, questRevision, 0, questState, providerId, LIFE_ID);
     }
 
     private static QuestInteractionState state(
             long playerRevision, long questRevision, String questState, String providerId, UUID lifeId) {
+        return state(playerRevision, questRevision, 0, questState, providerId, lifeId);
+    }
+
+    private static QuestInteractionState state(
+            long playerRevision,
+            long questRevision,
+            long objectiveRevision,
+            String questState,
+            String providerId,
+            UUID lifeId) {
+        return state(
+                playerRevision,
+                questRevision,
+                objectiveRevision,
+                questState,
+                providerId,
+                lifeId,
+                "sha256:definitions");
+    }
+
+    private static QuestInteractionState state(
+            long playerRevision,
+            long questRevision,
+            long objectiveRevision,
+            String questState,
+            String providerId,
+            UUID lifeId,
+            String definitions) {
         ProviderQuestSnapshot quest = new ProviderQuestSnapshot(
-                "first-steps", "初入凡尘", "main", questState, "remind", null, List.of());
+                "first-steps", "初入凡尘", "去村口看看。", "main", questState, "remind", null, List.of(), List.of());
         QuestProviderSnapshot provider = new QuestProviderSnapshot(
                 providerId, "first-steps:" + questState, List.of(quest), List.of("first-steps"), "first-steps", null);
         return new QuestInteractionState(
-                1,
+                2,
                 UUID.fromString("10000000-0000-0000-0000-000000000001"),
                 lifeId,
-                new QuestRevisionVector(playerRevision, questRevision, 0, "sha256:definitions"),
+                new QuestRevisionVector(
+                        playerRevision, questRevision, objectiveRevision, definitions),
                 List.of(provider),
                 null,
                 2000);

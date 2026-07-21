@@ -131,6 +131,72 @@ class TrackedQuestRefreshCoordinatorTest {
     }
 
     @Test
+    void definitionsChangeStartsANewTrackedRevisionEpoch() {
+        PlayerSessionCache sessions = sessions(LIFE_ID);
+        RecordingGateway gateway = new RecordingGateway();
+        List<String> rendered = new ArrayList<>();
+        TrackedQuestRefreshCoordinator coordinator = coordinator(gateway, sessions, rendered);
+
+        coordinator.publish(PLAYER_ID, state(LIFE_ID, 9, 9, "old", "sha256:old"));
+        coordinator.publish(PLAYER_ID, state(LIFE_ID, 1, 1, "new", "sha256:new"));
+
+        assertEquals(List.of("old", "new"), rendered);
+    }
+
+    @Test
+    void newDefinitionPublicationFencesOlderInFlightDefinitionResponse() {
+        PlayerSessionCache sessions = sessions(LIFE_ID);
+        RecordingGateway gateway = new RecordingGateway();
+        List<String> rendered = new ArrayList<>();
+        TrackedQuestRefreshCoordinator coordinator = coordinator(gateway, sessions, rendered);
+
+        coordinator.refresh(PLAYER_ID);
+        coordinator.publish(
+                PLAYER_ID,
+                state(LIFE_ID, 1, 1, "new-definition", "sha256:new"));
+        gateway.requests.getFirst().complete(
+                state(LIFE_ID, 99, 99, "old-definition", "sha256:old"));
+
+        assertEquals(List.of("new-definition"), rendered);
+    }
+
+    @Test
+    void publicationFencePreservesRequestedTrailingRefresh() {
+        PlayerSessionCache sessions = sessions(LIFE_ID);
+        RecordingGateway gateway = new RecordingGateway();
+        List<String> rendered = new ArrayList<>();
+        TrackedQuestRefreshCoordinator coordinator = coordinator(gateway, sessions, rendered);
+
+        coordinator.refresh(PLAYER_ID);
+        coordinator.refresh(PLAYER_ID);
+        coordinator.publish(PLAYER_ID, state(LIFE_ID, 2, "mutation"));
+
+        assertEquals(2, gateway.requests.size());
+        gateway.requests.getFirst().complete(state(LIFE_ID, 1, "old-refresh"));
+        gateway.requests.get(1).complete(state(LIFE_ID, 3, "trailing-refresh"));
+
+        assertEquals(List.of("mutation", "trailing-refresh"), rendered);
+    }
+
+    @Test
+    void acceptedStateIsObservedBeforeRendering() {
+        PlayerSessionCache sessions = sessions(LIFE_ID);
+        RecordingGateway gateway = new RecordingGateway();
+        List<String> events = new ArrayList<>();
+        TrackedQuestRefreshCoordinator coordinator = new TrackedQuestRefreshCoordinator(
+                gateway,
+                sessions,
+                Runnable::run,
+                (playerId, tracked) -> events.add("render:" + tracked.questId()),
+                (playerId, state) -> events.add("observe:" + state.revision().objectives()),
+                new NoOpLogger());
+
+        coordinator.publish(PLAYER_ID, state(LIFE_ID, 1, 2, "quest"));
+
+        assertEquals(List.of("observe:2", "render:quest"), events);
+    }
+
+    @Test
     void lifeChangeClearsOldProjectionBeforeTheNewRefreshCompletes() {
         PlayerSessionCache sessions = sessions(LIFE_ID);
         RecordingGateway gateway = new RecordingGateway();
@@ -158,6 +224,7 @@ class TrackedQuestRefreshCoordinatorTest {
                     throw new IllegalStateException("dispatcher unavailable");
                 },
                 (playerId, tracked) -> rendered.add(tracked == null ? "none" : tracked.questId()),
+                (playerId, state) -> {},
                 new NoOpLogger());
 
         coordinator.refresh(PLAYER_ID);
@@ -177,6 +244,7 @@ class TrackedQuestRefreshCoordinatorTest {
                 sessions,
                 Runnable::run,
                 (playerId, tracked) -> rendered.add(tracked == null ? "none" : tracked.questId()),
+                (playerId, state) -> {},
                 new NoOpLogger());
     }
 
@@ -201,11 +269,25 @@ class TrackedQuestRefreshCoordinatorTest {
             long revision,
             long objectiveRevision,
             String questId) {
+        return state(
+                lifeId,
+                revision,
+                objectiveRevision,
+                questId,
+                "definitions");
+    }
+
+    private static QuestInteractionState state(
+            UUID lifeId,
+            long revision,
+            long objectiveRevision,
+            String questId,
+            String definitions) {
         return new QuestInteractionState(
-                1,
+                2,
                 ACCOUNT_ID,
                 lifeId,
-                new QuestRevisionVector(1, revision, objectiveRevision, "definitions"),
+                new QuestRevisionVector(1, revision, objectiveRevision, definitions),
                 List.of(),
                 new TrackedQuestSnapshot(questId, questId, "active", List.of(), "next"),
                 2_000);

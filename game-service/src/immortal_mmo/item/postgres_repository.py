@@ -7,7 +7,12 @@ from sqlalchemy import BigInteger, cast, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from immortal_mmo.item.db_models import ItemInstanceRow, ItemResourceEntryRow, LifeItemStackRow
+from immortal_mmo.item.db_models import (
+    ItemInstanceRow,
+    ItemResourceEntryRow,
+    LifeInventoryStateRow,
+    LifeItemStackRow,
+)
 from immortal_mmo.item.models import (
     InsufficientItemQuantity,
     ItemConsumptionRequest,
@@ -24,6 +29,28 @@ from immortal_mmo.item.models import (
 class PostgresItemRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def get_inventory_revision(self, life_id: UUID, *, for_update: bool) -> int:
+        if not for_update:
+            revision = await self._session.scalar(
+                select(LifeInventoryStateRow.revision).where(
+                    LifeInventoryStateRow.life_id == life_id
+                )
+            )
+            return int(revision or 0)
+        await self._session.execute(
+            insert(LifeInventoryStateRow)
+            .values(life_id=life_id, revision=0)
+            .on_conflict_do_nothing(index_elements=[LifeInventoryStateRow.life_id])
+        )
+        revision = await self._session.scalar(
+            select(LifeInventoryStateRow.revision)
+            .where(LifeInventoryStateRow.life_id == life_id)
+            .with_for_update(of=LifeInventoryStateRow)
+        )
+        if revision is None:
+            raise RuntimeError("Inventory state disappeared after lazy insertion")
+        return int(revision)
 
     async def get_pending_instances(self, life_id: UUID) -> tuple[ItemInstance, ...]:
         rows = (
@@ -168,6 +195,7 @@ class PostgresItemRepository:
         )
         if row is None:
             raise ItemOperationConflict("Item instance location changed")
+        await self._increment_inventory_revision(life_id)
         return _instance(row)
 
     async def confirm_delivery(
@@ -205,6 +233,7 @@ class PostgresItemRepository:
         )
         if updated is None:
             raise RuntimeError("Item delivery state changed during confirmation")
+        await self._increment_inventory_revision(life_id)
         return _instance(updated)
 
     async def consume_instance(
@@ -244,6 +273,7 @@ class PostgresItemRepository:
         )
         if updated is None:
             raise ItemOperationConflict("Item instance ownership changed")
+        await self._increment_inventory_revision(life_id)
         return _instance(updated)
 
     async def consume_inventory_instances(
@@ -288,8 +318,28 @@ class PostgresItemRepository:
         ).all()
         if len(rows) != len(identities):
             raise ItemOperationConflict("Item instance ownership changed")
+        await self._increment_inventory_revision(life_id)
         by_id = {row.item_instance_id: _instance(row) for row in rows}
         return tuple(by_id[item_id] for item_id in identities)
+
+    async def _increment_inventory_revision(self, life_id: UUID) -> int:
+        await self._session.execute(
+            insert(LifeInventoryStateRow)
+            .values(life_id=life_id, revision=0)
+            .on_conflict_do_nothing(index_elements=[LifeInventoryStateRow.life_id])
+        )
+        revision = await self._session.scalar(
+            update(LifeInventoryStateRow)
+            .where(LifeInventoryStateRow.life_id == life_id)
+            .values(
+                revision=LifeInventoryStateRow.revision + 1,
+                updated_at=func.now(),
+            )
+            .returning(LifeInventoryStateRow.revision)
+        )
+        if revision is None:
+            raise RuntimeError("Inventory state disappeared before revision increment")
+        return int(revision)
 
     async def get_stack(self, life_id: UUID, item_code: str, *, for_update: bool) -> ItemStack:
         row = await self._get_or_create_stack(life_id, item_code, for_update=for_update)

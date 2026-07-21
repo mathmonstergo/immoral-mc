@@ -1,7 +1,7 @@
 package com.immortalmc.adapter.presentation;
 
-import com.immortalmc.adapter.client.QuestObjectiveSnapshot;
 import com.immortalmc.adapter.client.TrackedQuestSnapshot;
+import com.immortalmc.adapter.quest.QuestProviderMenuModel;
 import java.util.List;
 import java.util.Objects;
 
@@ -15,15 +15,11 @@ public record QuestScoreboardModel(String questTitle, List<String> objectives, S
     public static QuestScoreboardModel from(TrackedQuestSnapshot trackedQuest) {
         Objects.requireNonNull(trackedQuest, "trackedQuest");
         List<String> objectives = trackedQuest.objectives().stream()
-                .map(QuestScoreboardModel::formatObjective)
+                .map(QuestProviderMenuModel::progressText)
                 .toList();
         return new QuestScoreboardModel(
                 trackedQuest.title(),
                 objectives,
                 trackedQuest.nextActionHint());
-    }
-
-    private static String formatObjective(QuestObjectiveSnapshot objective) {
-        return objective.title() + "  " + objective.current() + "/" + objective.required();
     }
 }

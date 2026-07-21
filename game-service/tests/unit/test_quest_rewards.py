@@ -23,7 +23,13 @@ async def _ready_first_steps() -> tuple[QuestService, FakeUnitOfWorkFactory, UUI
     login = await players.login(UUID(int=8_001), "Rewarded")
     service = QuestService(factory, clock=lambda: NOW)
     account_id = login.account.account_id
-    await service.accept(account_id, "first-steps", "old-man", UUID(int=8_002))
+    await service.accept(
+        account_id,
+        "first-steps",
+        "old-man",
+        UUID(int=8_002),
+        expected_life_id=login.current_life.life_id,
+    )
     await players.detect_current_life_spirit_root(account_id)
     return service, factory, account_id, login.current_life.life_id
 
@@ -38,6 +44,7 @@ async def test_turn_in_freezes_fixed_item_and_cultivation_rewards() -> None:
         "first-steps",
         "old-man",
         operation_id,
+        expected_life_id=life_id,
         inventory_item_instance_ids=(),
     )
     replay = await QuestService(factory).turn_in(
@@ -45,6 +52,7 @@ async def test_turn_in_freezes_fixed_item_and_cultivation_rewards() -> None:
         "first-steps",
         "old-man",
         operation_id,
+        expected_life_id=life_id,
         inventory_item_instance_ids=(),
     )
 
@@ -97,6 +105,7 @@ async def test_full_reserve_keeps_cultivation_reward_pending_without_loss() -> N
         "first-steps",
         "old-man",
         UUID(int=8_004),
+        expected_life_id=life_id,
         inventory_item_instance_ids=(),
     )
 
@@ -123,6 +132,7 @@ async def test_pending_cultivation_reward_claim_is_idempotent() -> None:
         "first-steps",
         "old-man",
         UUID(int=8_005),
+        expected_life_id=life_id,
         inventory_item_instance_ids=(),
     )
     grant_id = UUID(json.loads(turn_in.body)["rewards"][1]["grant_id"])

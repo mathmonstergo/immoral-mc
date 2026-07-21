@@ -38,6 +38,7 @@ GAMEPLAY_TABLES = {
     "cultivation_session_techniques",
     "breakthrough_technique_debits",
     "life_item_stacks",
+    "life_inventory_states",
     "item_resource_entries",
     "quest_reward_grants",
     "item_instances",
@@ -224,6 +225,11 @@ EXPECTED_CONSTRAINTS = {
         "fk_life_item_stacks_life_id_lives",
         "ck_life_item_stack_quantity",
         "ck_life_item_stack_revision",
+    },
+    "life_inventory_states": {
+        "pk_life_inventory_states",
+        "fk_life_inventory_states_life_id_lives",
+        "ck_life_inventory_states_revision_nonnegative",
     },
     "item_resource_entries": {
         "pk_item_resource_entries",

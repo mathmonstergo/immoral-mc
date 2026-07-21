@@ -1239,7 +1239,7 @@ content, and the action handler owns only presentation behavior.
 ### 1. Scope / Trigger
 
 Trigger: Paper presents Game Service quest state through Citizens proximity,
-dialogue sessions, private labels, titles, particles, or scoreboards.
+the six-row quest-provider GUI, or the tracked-quest scoreboard.
 
 ### 2. Signatures
 
@@ -1250,29 +1250,91 @@ PUT /api/v1/players/{account_id}/current-life/quests/{quest_id}/turn-in
 ```
 
 Mutation requests require `Idempotency-Key: <UUID>` and JSON
-`{"provider_id":"<quest-provider-id>"}`. Paper refreshes through a
-`CompletableFuture<QuestInteractionState>` whose published completion runs on
-the Bukkit main thread.
+`{"provider_id":"<quest-provider-id>","expected_life_id":"<life-uuid>"}`.
+Turn-in additionally sends the unique `inventory_item_instance_ids` observed in
+the player inventory. `expected_life_id` is a mutation fence captured from the
+open GUI, not a proximity-rule predicate. Interaction responses use
+`contract_version: 2` and Paper publishes completions on the Bukkit main thread.
+
+Provider-side proximity content uses these backend definitions:
+
+```text
+QuestProviderDefinition.proximity_bark_rules: tuple[ProximityBarkRule, ...]
+ProximityBarkRule(rule_id, text, conditions, priority=0, cooldown_seconds=60)
+QuestStateCondition(quest_id, states)
+RealmLevelCondition(minimum_level?, maximum_level?)
+```
 
 ### 3. Contracts
 
 * Game Service owns quest state, objective evaluation, revisions, and mutation
   idempotency. Paper owns only short-lived presentation state.
+* Accept/turn-in lock the account/current-life lookup and reject a mismatched
+  `expected_life_id` as non-retryable `quest.stale_life` before reserving an
+  operation. A frozen operation from an older life remains replayable only when
+  the request repeats that operation's original life identity.
 * A Citizens quest NPC is identified by persistent NPC UUID plus stable
   `quest-provider-id`; transient Bukkit entity UUIDs are not quest identity.
+* Proximity speech and right-click GUI navigation are independent. Entering
+  range may present one resolved bark; right-click still opens the GUI and must
+  not recreate an offer session, second-click confirmation, or overhead label.
+* Right-clicking a bound provider opens one custom-holder, six-row inventory.
+  Slots `0..44` are content and `45..53` are navigation/actions. Cancel every
+  click and drag while this holder is the top inventory, including player-side
+  shift-click and hotbar swaps; route actions only from the holder's slot map.
+* List entries expose only the styled quest title plus `点击查看！`; locked
+  entries use `暂未解锁` and are inert. Detail pages own descriptions,
+  objectives, reward previews, status, and the primary action.
+* Global quest state and provider-local action are distinct. `available/offer`
+  accepts and `ready_to_turn_in/turn_in` submits. `available/none` means accept
+  at another provider, while `ready_to_turn_in/remind|none` means turn in at
+  another provider; neither may be presented as locked or incomplete.
+* Every open/refresh/mutation completion must still match the holder generation,
+  open-menu identity, account/life session, persistent NPC binding, and
+  component-wise revision vector before it renders. Invalid projections close
+  the GUI, notify the player, and write a stable warning event.
+* Successful quest mutations publish the returned complete interaction state.
+  Objective-input changes outside the quest GUI must call
+  `TrackedQuestRefreshCoordinator.refresh(playerUuid)`: this includes accepted
+  combat facts, cultivation/technique/realm mutations, successful physical-item
+  delivery confirmation, and confirmed storage deposit/withdrawal.
 * Proximity scanning runs from an indexed, bounded coordinator. Cache misses
   use the shared single-flight refresh path and never block the server thread.
+* Provider bark rules are optional. Conditions within a rule use AND; rules are
+  selected by descending `priority` and stable declaration order. No match
+  projects `proximity_bark: null`. Empty conditions are an explicit
+  unconditional fallback, not an implicit default.
+* Game Service evaluates every condition from authoritative facts and sends
+  Paper only the resolved `key`, `speaker`, `text`, and `cooldown_seconds`.
+  `QuestStateCondition` may reference any known catalog quest. Realm bounds are
+  inclusive levels `0..22`; a realm-only bark must load current cultivation
+  state even when no quest has a realm objective.
+* Proximity matching contains no life-ID condition. The service evaluates facts
+  for whichever life is currently authoritative; any life that satisfies the
+  configured task/realm conditions selects the same rule. Life identity on the
+  projection exists only to reject stale facts from another life.
+* A resolved key is `<provider-id>:<rule-id>`. Changing rules bypasses the old
+  key's cooldown, while re-entry for the same rule remains rate-limited.
+  Cultivation revision participates in `revision.objectives` whenever a realm
+  condition can affect a bark, so late pre-realm-change projections are older.
+* Do not add an achievement condition until an authoritative achievement fact
+  source and monotonic revision exist. Extend the typed condition union and
+  centralized Game Service selector in the same change; Paper never infers it.
 * Record the current inside-NPC set before starting enter callbacks. A supplied
   future may already be complete and execute its completion inline.
-* A refresh completion may speak only when its life ID matches the entering
-  life, the player is still inside that NPC, and the response still contains
-  the provider and bark.
+* Each outside-to-inside edge receives a non-reusable entry epoch. A refresh
+  completion may speak only when account/life match the entering player, that
+  exact entry epoch is still active, and the response still contains the
+  provider and bark. Leaving and re-entering must invalidate the older future.
+* `definitions` is a revision epoch: numeric vector components are comparable
+  only inside the same definitions hash. An accepted newer publication fences
+  older tracked refresh generations, and authoritative revision advancement
+  invalidates both cached provider entries and pre-existing provider refresh
+  generations so a late response cannot restore an old bark.
 * `proximity_bark` includes non-empty `speaker` and `text` fields. Format them
   through the same shared speaker-line helper used by formal NPC dialogue.
-* Offer sessions are cancelled when the player leaves range/world, disappears,
-  expires, or the persistent Citizens NPC disappears from the current index.
-* Private offer-label Y position is backing-entity `getHeight()` plus nameplate
-  clearance. Sidebar objectives use `NumberFormat.blank()` to hide order scores.
+* Sidebar objectives use `NumberFormat.blank()` to hide order scores and the
+  shared uncapped `<title> <current> / <required>` formatter.
 * Accept/turn-in retries are owned by the request coordinator. Retry at most
   once for I/O failures or `GameServiceException.retryable() == true`, using the
   same request closure and therefore the same operation UUID.
@@ -1284,37 +1346,59 @@ the Bukkit main thread.
 | Fresh provider cache | Send at most one private bark on the outside-to-inside edge; no HTTP |
 | Missing/stale cache | Start or join one refresh; speak on completion only if context remains valid |
 | Player leaves before refresh completes | Drop the bark without changing cooldown state |
-| Response life differs | Drop the response as stale |
+| Player leaves and re-enters before the first refresh completes | Entry epoch drops the first completion; only the new entry may speak |
+| Response account/life, generation, binding, or operation ID differs | Drop/close as stale; never render or report success |
+| Accept/turn-in `expected_life_id` is no longer current | HTTP 409 `quest.stale_life`, non-retryable, no operation reservation or state change |
+| Old definitions/provider refresh completes after a newer publication | Generation fence drops it; it cannot overwrite tracked state or repopulate bark cache |
 | Provider/bark absent from response | Send nothing; do not invent fallback quest text |
-| Bark speaker missing/invalid | Reject the Adapter DTO instead of showing unattributed dialogue |
-| Citizens NPC disappears | Cancel its pending offer label/session on the next shared scan |
+| Bark key, speaker, text, or cooldown missing/invalid | Reject the Adapter DTO instead of showing unattributed or unbounded dialogue |
+| Provider has no rules or no rule matches | Return `proximity_bark: null`; GUI remains available |
+| Rule references an unknown quest, duplicates a rule/condition target, or uses an invalid level/cooldown | Fail catalog construction/startup visibly |
+| Realm changes while quest state is unchanged | Select against the new level and publish a strictly newer objective revision |
+| GUI projection is malformed or provider is absent | Notify the player, log `quest_gui_projection_rejected`, and close |
+| `available` quest has `action=none` | Detail remains viewable but directs the player to the quest giver |
+| `ready_to_turn_in` quest has `action=remind|none` | Detail directs the player to the turn-in NPC; no mutation request |
+| Delivery confirmation or storage inventory transition commits | Trigger a tracked-quest refresh after the authoritative mutation |
 | Retryable mutation transport failure | Retry once with the same `Idempotency-Key` |
 | Non-retryable/domain mutation failure | Do not retry; preserve confirmed cosmetic state |
 | Game Service mutation fails | Keep authoritative quest/sidebar state unchanged and show retry feedback |
 
 ### 5. Good/Base/Bad Cases
 
-* Good: cache miss -> coalesced async refresh -> main-thread context validation
-  -> private bark through the same state-key cooldown path as cache hits.
-* Base: a 10-tick scan checks only current/adjacent chunks and carries excess
-  players to a later scan.
-* Bad: send a bark directly from an HTTP completion thread or after the player
-  has left the NPC.
-* Bad: keep a pending private label after the Citizens NPC despawns.
+* Good: right click -> authoritative provider projection -> read-only list ->
+  detail -> idempotent accept/turn-in -> publish returned state and reconcile.
+* Good: enter range -> resolved provider rule -> Paper cooldown by stable rule
+  key; task/realm conditions never cross the Adapter boundary.
+* Base: a 10-tick proximity scan checks only current/adjacent chunks and carries
+  excess players to a later scan while GUI fetches remain asynchronous.
+* Bad: infer the primary action from `state` alone, trust item material/name/Lore
+  for routing, or refresh the scoreboard before an item confirmation commits.
+* Bad: hardcode three mandatory bark strings on every quest, evaluate realm or
+  achievement conditions in Paper, or invent a bark when no rule matches.
 
 ### 6. Tests Required
 
-* A completed refresh future speaks immediately when the player is still in
-  range. This specifically proves inside state is committed before callbacks.
-* Client decoding preserves bark `speaker`; coordinator output includes the
-  colored speaker prefix and formal dialogue formatting remains unchanged.
-* Bukkit boundary tests assert blank sidebar number format and label placement
-  at runtime entity height plus clearance.
-* Cache-hit entry performs zero HTTP and remaining inside does not repeat bark.
-* State-key changes bypass an old bark cooldown; unchanged state does not.
-* Range, world, timeout, missing player, and missing NPC each remove an offer
-  label exactly once.
-* A 100-player/25-NPC fixture asserts bounded candidates and scan carryover.
+* Java DTO tests assert exact contract-v2 snake-case decoding, description,
+  objective type/item code, reward-preview shapes, and unknown-kind rejection.
+* GUI tests assert 54 slots, list/detail routing, locked entries, other-provider
+  disabled actions, full click/drag cancellation, mutation identity, invalid
+  projection logging, busy serialization, and close/quit/life/rebind guards.
+* Item reconciliation tests prove a successful delivery confirmation triggers
+  tracked refresh while a failed confirmation does not claim success.
+* Storage integration/controller tests prove confirmed inventory transitions
+  trigger reconciliation plus tracked refresh; stale/failed responses do not.
+* Backend rule tests cover silent providers, no match, priority plus stable
+  order, AND semantics, quest states, inclusive realm bounds, stable keys,
+  invalid references, and realm-revision advancement without a realm objective.
+* Cache-hit proximity entry performs zero HTTP, same keys honor cooldown,
+  changed rule keys bypass an old cooldown, leaving before async completion
+  drops the bark, leave/re-entry drops the prior entry epoch, authoritative
+  revision changes fence pre-existing provider requests, silent projections
+  stay silent, and a 100-player/25-NPC fixture remains bounded.
+* Mutation tests cover required `expected_life_id`, stale-life rejection before
+  operation reservation, old-life frozen replay, and changed-life idempotency
+  conflict. Tracked refresh tests cover a newer definitions publication fencing
+  an older in-flight response while preserving a requested trailing refresh.
 * A retryable mutation failure causes exactly two gateway calls carrying the
   same operation UUID; a non-retryable domain failure causes exactly one.
 * Full Game Service tests and a clean Paper build pass before deployment; the
@@ -1325,26 +1409,34 @@ the Bukkit main thread.
 #### Wrong
 
 ```java
-refresher.refresh(...).thenAccept(state -> barkSink.send(playerId, bark(state)));
-insideNpcIdsByPlayer.put(playerId, current);
+if (quest.state().equals("available")) {
+    showAcceptButton(); // wrong provider may have action=none
+}
+if (playerRealm >= configuredRealm) {
+    sendNpcText(); // authoritative condition leaked into Paper
+}
+confirmDelivery(...);
+renderTrackedQuest(cachedProjection); // confirmation has not committed yet
 ```
-
-An already-completed future runs inline before the player is recorded inside,
-and an incomplete future can speak after the context becomes stale.
 
 #### Correct
 
 ```java
-insideNpcIdsByPlayer.put(playerId, current);
-refresher.refresh(...).whenComplete((state, error) -> {
-    if (error == null && sameLife(state) && isStillInside(playerId, npcId)) {
-        sendThroughStateCooldown(state);
+if (quest.state().equals("available") && quest.action().equals("offer")) {
+    showAcceptButton();
+} else if (quest.state().equals("available")) {
+    showAcceptElsewhere();
+}
+confirmDelivery(...).whenComplete((result, error) -> {
+    if (error == null) {
+        trackedQuestRefreshes.refresh(playerId);
     }
 });
 ```
 
-Commit scan state first, then validate every asynchronous completion before
-touching player-visible presentation.
+Use provider-local action for commands and refresh only after the authoritative
+inventory mutation is confirmed. Resolve proximity conditions in Game Service;
+Paper consumes only the validated bark DTO and cooldown key.
 
 ## Scenario: Cultivation Projection Across Game Service and Paper
 
@@ -1531,9 +1623,11 @@ both paths publish only on the Paper main thread.
   every required instance and completing the quest in one transaction. The
   completion update must affect exactly one active row after consumption; an
   impossible false result aborts the Unit of Work.
-* The response keeps `current/required/completed` unchanged for all objective
-  types. `revision.objectives` advances with cultivation and item-stack
-  dependencies; Paper rejects component-wise older vectors.
+* The response keeps the `current/required/completed` shape consistent for all
+  objective types. Item-delivery `current` is uncapped so `20 / 15` remains
+  visible. `revision.objectives = cultivation_revision + inventory_revision`;
+  physical inventory removal and same-count replacement advance the inventory
+  component, and Paper rejects component-wise older vectors.
 * Paper renders at most twelve objective rows plus title and hint, and does
   not calculate or submit progress values.
 * Join-login and tracked-quest refresh attempts use non-reusable monotonic
@@ -1553,6 +1647,7 @@ both paths publish only on the Paper main thread.
 | Quest operation UUID reused with different physical inventory IDs | `quest.idempotency_conflict`; no mutation |
 | Older asynchronous account/life/revision response | Drop it without rendering |
 | Player quits and rejoins the same life before an old response completes | Non-reusable token drops the old completion |
+| Inventory count decreases or one equal-count instance replaces another | Advance the inventory revision and publish the lower/changed projection |
 | More than twelve objectives | Catalog validation rejects the quest |
 
 ### 5. Good/Base/Bad Cases
@@ -1571,8 +1666,8 @@ both paths publish only on the Paper main thread.
   twelve-objective catalog limit.
 * PostgreSQL tests assert acceptance timestamps, bounded batch counter updates,
   duplicate kill idempotency, atomic physical-instance shortage, migration
-  metadata, missing-source-life rejection, and current-layer gain/loss
-  persistence.
+  metadata, monotonic inventory revision on removal/same-count replacement,
+  missing-source-life rejection, and current-layer gain/loss persistence.
 * Concurrency tests hold acceptance and item-operation locks open, assert the
   competing transaction actually waits, then prove exact progress and stable
   replay/conflict behavior after the winner commits.
@@ -1775,6 +1870,9 @@ Paper entry points are right-clicking a physical manual and
 * Reconciliation removes unexpected/duplicate physical items, restores missing
   authoritative inventory items, and confirms pending delivery only after the
   Bukkit inventory accepts the instance.
+* A successful pending-delivery confirmation and each confirmed storage
+  deposit/withdrawal trigger tracked-quest refresh after the authoritative
+  inventory mutation. A local reconcile alone does not update the scoreboard.
 * Manual learning derives a stable operation UUID from `item_instance_id`,
   coalesces concurrent clicks, and reconciles after success, failure, or an
   invalid response. A success must still match the current account/life.
@@ -1795,6 +1893,8 @@ Paper entry points are right-clicking a physical manual and
 | Storage timeout, stale revision, or mismatched operation ID | Reconcile items and refetch authoritative page |
 | Player leaves area or changes life while request is in flight | Drop/close the stale presentation |
 | Player inventory is full during withdrawal | Do not submit the withdrawal |
+| Delivery confirmation succeeds | Refresh the tracked quest after commit |
+| Storage deposit/withdrawal succeeds | Reconcile Bukkit inventory and refresh the tracked quest |
 
 ### 5. Good/Base/Bad Cases
 
@@ -1814,7 +1914,8 @@ Paper entry points are right-clicking a physical manual and
   restart persistence, and advisory-lock serialization.
 * Java 25 tests cover exact HTTP methods/bodies/headers, DTO validation,
   reconciliation invalidation, stable manual operation ID, command permission,
-  inventory scanning, post-turn-in refresh, holder identity, and access policy.
+  inventory scanning, post-turn-in/delivery/storage refresh, holder identity,
+  and access policy.
 * Wiki validation must pass for the new item/manual and regional storage pages.
 
 ### 7. Wrong vs Correct

@@ -21,6 +21,7 @@ public final class PhysicalItemReconciler implements AutoCloseable {
     private final PlayerSessionCache sessions;
     private final PhysicalInventoryAccess inventory;
     private final Function<UUID, Player> playerLookup;
+    private final Consumer<UUID> refreshTrackedQuest;
     private final Consumer<Runnable> mainThread;
     private final AdapterLogger logger;
     private final Map<UUID, UUID> generations = new ConcurrentHashMap<>();
@@ -30,12 +31,14 @@ public final class PhysicalItemReconciler implements AutoCloseable {
             PlayerSessionCache sessions,
             PhysicalInventoryAccess inventory,
             Function<UUID, Player> playerLookup,
+            Consumer<UUID> refreshTrackedQuest,
             Consumer<Runnable> mainThread,
             AdapterLogger logger) {
         this.gateway = Objects.requireNonNull(gateway, "gateway");
         this.sessions = Objects.requireNonNull(sessions, "sessions");
         this.inventory = Objects.requireNonNull(inventory, "inventory");
         this.playerLookup = Objects.requireNonNull(playerLookup, "playerLookup");
+        this.refreshTrackedQuest = Objects.requireNonNull(refreshTrackedQuest, "refreshTrackedQuest");
         this.mainThread = Objects.requireNonNull(mainThread, "mainThread");
         this.logger = Objects.requireNonNull(logger, "logger");
     }
@@ -95,6 +98,7 @@ public final class PhysicalItemReconciler implements AutoCloseable {
     }
 
     private void apply(Player player, UUID accountId, ReconciliationSnapshot snapshot) {
+        UUID playerId = player.getUniqueId();
         Map<UUID, ItemInstanceSnapshot> owned = index(snapshot.inventory(), true);
         Map<UUID, ItemInstanceSnapshot> pending = index(snapshot.pending(), false);
         Set<UUID> authoritative = new LinkedHashSet<>(owned.keySet());
@@ -117,17 +121,25 @@ public final class PhysicalItemReconciler implements AutoCloseable {
             gateway.confirmItemDelivery(accountId, item.itemInstanceId()).whenComplete((ignored, error) -> {
                 if (error != null) {
                     logger.warn("physical_item_delivery_confirmation_failed player_uuid="
-                            + player.getUniqueId()
+                            + playerId
                             + " item_instance_id="
                             + item.itemInstanceId()
                             + " reason="
                             + message(error));
+                    return;
+                }
+                try {
+                    refreshTrackedQuest.accept(playerId);
+                } catch (RuntimeException refreshError) {
+                    logger.warn(
+                            "physical_item_quest_refresh_failed player_uuid=" + playerId,
+                            refreshError);
                 }
             });
         }
         if (removed > 0 || restored > 0 || confirmed > 0) {
             logger.info("physical_item_reconcile_applied player_uuid="
-                    + player.getUniqueId()
+                    + playerId
                     + " removed="
                     + removed
                     + " restored="

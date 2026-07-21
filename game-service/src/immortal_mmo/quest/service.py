@@ -20,12 +20,18 @@ from immortal_mmo.quest.models import (
     QuestCategory,
     QuestDefinition,
     QuestProviderDefinition,
+    QuestStateCondition,
+    RealmLevelCondition,
     RealmLevelObjectiveDefinition,
     TechniqueLayerObjectiveDefinition,
     UnrefinedCultivationRewardDefinition,
 )
 from immortal_mmo.quest.objectives import QuestEvaluationContext, evaluate_objective
 from immortal_mmo.quest.progression import QuestObjectiveProgressMismatchError
+from immortal_mmo.quest.proximity import (
+    ProximityEvaluationContext,
+    select_proximity_bark_rule,
+)
 from immortal_mmo.quest.repository import (
     FrozenHttpResponse,
     QuestObjectiveProgress,
@@ -46,12 +52,13 @@ from immortal_mmo.quest.schemas import (
     QuestProviderProjection,
     QuestProviderTemplate,
     QuestRevisionVector,
+    QuestRewardPreview,
     QuestRewardResult,
     TrackedQuest,
 )
 
 RESPONSE_CONTENT_TYPE = "application/json"
-RESPONSE_CONTRACT_VERSION = 1
+RESPONSE_CONTRACT_VERSION = 2
 
 
 class QuestNotFoundError(NotFoundError):
@@ -87,6 +94,11 @@ class QuestNotReadyError(RuleViolationError):
 class QuestIdempotencyConflictError(ConflictError):
     code = "quest.idempotency_conflict"
     message = "Idempotency key was already used for a different operation."
+
+
+class QuestStaleLifeError(ConflictError):
+    code = "quest.stale_life"
+    message = "Quest request targets a life that is no longer current."
 
 
 class QuestDefinitionVersionMismatchError(ConflictError):
@@ -166,6 +178,8 @@ class QuestService:
         quest_id: str,
         provider_id: str,
         operation_id: UUID,
+        *,
+        expected_life_id: UUID,
     ) -> FrozenHttpResponse:
         return await self._mutate(
             account_id,
@@ -173,6 +187,7 @@ class QuestService:
             provider_id,
             operation_id,
             QuestOperationCommand.ACCEPT,
+            expected_life_id=expected_life_id,
             inventory_item_instance_ids=(),
         )
 
@@ -183,6 +198,7 @@ class QuestService:
         provider_id: str,
         operation_id: UUID,
         *,
+        expected_life_id: UUID,
         inventory_item_instance_ids: tuple[UUID, ...],
     ) -> FrozenHttpResponse:
         return await self._mutate(
@@ -191,6 +207,7 @@ class QuestService:
             provider_id,
             operation_id,
             QuestOperationCommand.TURN_IN,
+            expected_life_id=expected_life_id,
             inventory_item_instance_ids=inventory_item_instance_ids,
         )
 
@@ -202,6 +219,7 @@ class QuestService:
         operation_id: UUID,
         command: QuestOperationCommand,
         *,
+        expected_life_id: UUID,
         inventory_item_instance_ids: tuple[UUID, ...],
     ) -> FrozenHttpResponse:
         fingerprint = self._fingerprint(
@@ -220,6 +238,7 @@ class QuestService:
                     command,
                     quest_id,
                     provider_id,
+                    expected_life_id,
                     fingerprint,
                 )
 
@@ -236,8 +255,12 @@ class QuestService:
                     command,
                     quest_id,
                     provider_id,
+                    expected_life_id,
                     fingerprint,
                 )
+
+            if facts.life_id != expected_life_id:
+                raise QuestStaleLifeError()
 
             operation = StoredQuestOperation(
                 operation_id=operation_id,
@@ -266,6 +289,7 @@ class QuestService:
                     command,
                     quest_id,
                     provider_id,
+                    expected_life_id,
                     fingerprint,
                 )
 
@@ -623,14 +647,11 @@ class QuestService:
             for objective in quest.objectives
             if isinstance(objective, ItemDeliveryObjectiveDefinition)
         }
-        inventory_items = (
-            await uow.items.get_inventory_instances(
-                facts.life_id,
-                item_codes,
-                for_update=lock_items,
-            )
-            if item_codes
-            else ()
+        inventory_items, inventory_revision = await self._load_inventory_objective_inputs(
+            uow,
+            facts.life_id,
+            item_codes,
+            lock_items=lock_items,
         )
         item_quantities: dict[str, int] = {item_code: 0 for item_code in item_codes}
         for item in inventory_items:
@@ -657,15 +678,22 @@ class QuestService:
             for quest in self._catalog.quests
             for objective in quest.objectives
         )
-        current_realm_level = 1
+        has_realm_proximity_conditions = any(
+            isinstance(condition, RealmLevelCondition)
+            for provider in self._catalog.providers
+            for rule in provider.proximity_bark_rules
+            for condition in rule.conditions
+        )
+        needs_realm_level = has_realm_objectives or has_realm_proximity_conditions
+        current_realm_level = 0
         cultivation_revision = 0
-        if has_realm_objectives or has_technique_objectives:
+        if needs_realm_level or has_technique_objectives:
             cultivation_state = await uow.cultivation.get_or_create_state(
                 facts.life_id,
                 for_update=False,
             )
             cultivation_revision = cultivation_state.revision
-            if has_realm_objectives:
+            if needs_realm_level:
                 current_realm_level = cultivation_state.current_level
 
         return QuestEvaluationContext(
@@ -677,11 +705,45 @@ class QuestService:
             },
             active_technique_layers=active_technique_layers,
             current_realm_level=current_realm_level,
-            revision=(
-                cultivation_revision
-                + len(inventory_items)
-            ),
+            revision=cultivation_revision + inventory_revision,
         )
+
+    @staticmethod
+    async def _load_inventory_objective_inputs(
+        uow: UnitOfWork,
+        life_id: UUID,
+        item_codes: set[str],
+        *,
+        lock_items: bool,
+    ) -> tuple[tuple[ItemInstance, ...], int]:
+        if not item_codes:
+            return (), 0
+        for _ in range(3):
+            revision_before = await uow.items.get_inventory_revision(
+                life_id,
+                for_update=False,
+            )
+            inventory_items = await uow.items.get_inventory_instances(
+                life_id,
+                item_codes,
+                for_update=lock_items,
+            )
+            revision_after = await uow.items.get_inventory_revision(
+                life_id,
+                for_update=lock_items,
+            )
+            if revision_before == revision_after:
+                return inventory_items, revision_after
+            if lock_items:
+                return (
+                    await uow.items.get_inventory_instances(
+                        life_id,
+                        item_codes,
+                        for_update=True,
+                    ),
+                    revision_after,
+                )
+        raise RuntimeError("Inventory objective inputs changed during projection")
 
     async def _validated_presented_inventory(
         self,
@@ -747,10 +809,12 @@ class QuestService:
         command: QuestOperationCommand,
         quest_id: str,
         provider_id: str,
+        expected_life_id: UUID,
         fingerprint: str,
     ) -> FrozenHttpResponse:
         if (
             operation.account_id != account_id
+            or operation.life_id != expected_life_id
             or operation.command is not command
             or operation.quest_id != quest_id
             or operation.provider_id != provider_id
@@ -829,13 +893,35 @@ class QuestService:
         quest_revision: int,
         provider_ids: Sequence[str],
     ) -> QuestInteractionState:
+        provider_definitions = tuple(
+            self._catalog.get_provider(provider_id) for provider_id in provider_ids
+        )
+        proximity_quest_ids = {
+            condition.quest_id
+            for provider in provider_definitions
+            for rule in provider.proximity_bark_rules
+            for condition in rule.conditions
+            if isinstance(condition, QuestStateCondition)
+        }
+        proximity_context = ProximityEvaluationContext(
+            quest_states={
+                quest_id: self._project_quest(
+                    self._catalog.get_quest(quest_id),
+                    progresses,
+                    context,
+                ).state
+                for quest_id in sorted(proximity_quest_ids)
+            },
+            current_realm_level=context.current_realm_level,
+        )
         providers = [
             self._project_provider(
-                self._catalog.get_provider(provider_id),
+                provider,
                 progresses,
                 context,
+                proximity_context,
             )
-            for provider_id in provider_ids
+            for provider in provider_definitions
         ]
         return QuestInteractionState(
             account_id=facts.account_id,
@@ -855,6 +941,7 @@ class QuestService:
         provider: QuestProviderDefinition,
         progresses: dict[str, QuestProgress],
         context: QuestEvaluationContext,
+        proximity_context: ProximityEvaluationContext,
     ) -> QuestProviderProjection:
         provider_order = {
             quest_id: index for index, quest_id in enumerate(provider.ordered_quest_ids)
@@ -882,7 +969,7 @@ class QuestService:
             quests=quests,
             actionable_quest_ids=actionable,
             direct_action_quest_id=actionable[0] if len(actionable) == 1 else None,
-            proximity_bark=self._project_proximity_bark(provider, lead),
+            proximity_bark=self._project_proximity_bark(provider, proximity_context),
         )
 
     def _project_quest(
@@ -904,7 +991,13 @@ class QuestService:
             objectives.append(
                 QuestObjectiveProjection(
                     objective_id=objective.objective_id,
+                    objective_type=objective.objective_type,
                     title=objective.label,
+                    item_code=(
+                        objective.item_code
+                        if isinstance(objective, ItemDeliveryObjectiveDefinition)
+                        else None
+                    ),
                     current=current,
                     required=evaluation.required,
                     completed=completed,
@@ -935,11 +1028,33 @@ class QuestService:
         return ProviderQuestState(
             quest_id=quest.quest_id,
             title=quest.title,
+            description=quest.description,
             category=quest.category,
             state=state,
             action=action,
             dialogue_key=dialogue if action != "none" else None,
             objectives=objectives,
+            reward_previews=[self._reward_preview(reward) for reward in quest.rewards],
+        )
+
+    @staticmethod
+    def _reward_preview(
+        reward: FixedItemRewardDefinition | UnrefinedCultivationRewardDefinition,
+    ) -> QuestRewardPreview:
+        if isinstance(reward, FixedItemRewardDefinition):
+            return QuestRewardPreview(
+                reward_id=reward.reward_id,
+                kind=reward.reward_type.value,
+                item_code=reward.item_code,
+                quantity=reward.quantity,
+                cultivation_amount=None,
+            )
+        return QuestRewardPreview(
+            reward_id=reward.reward_id,
+            kind=reward.reward_type.value,
+            item_code=None,
+            quantity=None,
+            cultivation_amount=reward.amount,
         )
 
     def _project_tracked_quest(
@@ -982,21 +1097,16 @@ class QuestService:
     def _project_proximity_bark(
         self,
         provider: QuestProviderDefinition,
-        quest: ProviderQuestState | None,
+        context: ProximityEvaluationContext,
     ) -> ProximityBark | None:
-        if quest is None or quest.state not in {"available", "active", "ready_to_turn_in"}:
+        rule = select_proximity_bark_rule(provider.proximity_bark_rules, context)
+        if rule is None:
             return None
-        definition = self._catalog.get_quest(quest.quest_id)
-        text = {
-            "available": definition.presentation.available_proximity_text,
-            "active": definition.presentation.active_proximity_text,
-            "ready_to_turn_in": definition.presentation.ready_proximity_text,
-        }[quest.state]
         return ProximityBark(
-            key=f"{quest.quest_id}:{quest.state}",
+            key=f"{provider.provider_id}:{rule.rule_id}",
             speaker=provider.display_name,
-            text=text,
-            cooldown_seconds=60,
+            text=rule.text,
+            cooldown_seconds=rule.cooldown_seconds,
         )
 
     @staticmethod
@@ -1034,8 +1144,8 @@ class QuestService:
             "ready_to_turn_in": 0,
             "active": 1,
             "available": 2,
-            "completed": 3,
-            "unavailable": 4,
+            "unavailable": 3,
+            "completed": 4,
         }[quest.state]
         return (
             state_rank,

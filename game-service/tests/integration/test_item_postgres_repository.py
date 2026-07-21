@@ -9,11 +9,16 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from immortal_mmo.cultivation.db_models import CultivationSessionRow
-from immortal_mmo.item.db_models import ItemResourceEntryRow, LifeItemStackRow
+from immortal_mmo.item.db_models import (
+    ItemResourceEntryRow,
+    LifeInventoryStateRow,
+    LifeItemStackRow,
+)
 from immortal_mmo.item.models import (
     InsufficientItemQuantity,
     ItemConsumptionRequest,
     ItemConsumptionType,
+    ItemLocation,
     ItemOperationConflict,
 )
 from immortal_mmo.item.postgres_repository import PostgresItemRepository
@@ -61,6 +66,77 @@ async def create_breakthrough_session(
         )
         await session.commit()
     return session_id
+
+
+@pytest.mark.asyncio
+async def test_physical_inventory_changes_advance_one_monotonic_life_revision(
+    postgres_sessions: async_sessionmaker[AsyncSession],
+    clean_postgres_data: None,
+) -> None:
+    del clean_postgres_data
+    life_id = await create_life(postgres_sessions)
+    item_id = uuid4()
+    occurred_at = datetime(2026, 7, 20, 8, tzinfo=UTC)
+
+    async with postgres_sessions() as session:
+        items = PostgresItemRepository(session)
+        assert await items.get_inventory_revision(life_id, for_update=False) == 0
+        await items.create_pending_instances(
+            life_id=life_id,
+            issuance_id=uuid4(),
+            quest_reward_grant_id=None,
+            item_code="mystic_iron",
+            definition_version=1,
+            technique_id=None,
+            item_instance_ids=(item_id,),
+            created_at=occurred_at,
+        )
+        assert await items.get_inventory_revision(life_id, for_update=False) == 0
+
+        await items.confirm_delivery(
+            item_instance_id=item_id,
+            life_id=life_id,
+            delivered_at=occurred_at,
+        )
+        assert await items.get_inventory_revision(life_id, for_update=False) == 1
+        await items.confirm_delivery(
+            item_instance_id=item_id,
+            life_id=life_id,
+            delivered_at=occurred_at,
+        )
+        assert await items.get_inventory_revision(life_id, for_update=False) == 1
+
+        await items.set_instance_location(
+            item_instance_id=item_id,
+            life_id=life_id,
+            expected=ItemLocation.INVENTORY,
+            destination=ItemLocation.STORAGE,
+        )
+        await items.set_instance_location(
+            item_instance_id=item_id,
+            life_id=life_id,
+            expected=ItemLocation.STORAGE,
+            destination=ItemLocation.INVENTORY,
+        )
+        assert await items.get_inventory_revision(life_id, for_update=False) == 3
+
+        await items.consume_inventory_instances(
+            life_id=life_id,
+            item_instance_ids=(item_id,),
+            consumed_at=occurred_at,
+        )
+        assert await items.get_inventory_revision(life_id, for_update=False) == 4
+        await items.consume_instance(
+            item_instance_id=item_id,
+            life_id=life_id,
+            consumed_at=occurred_at,
+        )
+        assert await items.get_inventory_revision(life_id, for_update=False) == 4
+        await session.commit()
+
+    async with postgres_sessions() as session:
+        state = await session.get(LifeInventoryStateRow, life_id)
+    assert state is not None and state.revision == 4
 
 
 async def hold_adjustment_until_released(

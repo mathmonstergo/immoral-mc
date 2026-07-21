@@ -51,7 +51,7 @@ def evaluate_objective(
     if isinstance(objective, CurrentLifeSpiritRootObjectiveDefinition):
         current = 1 if context.spirit_root_present else 0
     elif isinstance(objective, ItemDeliveryObjectiveDefinition):
-        current = min(context.item_quantities.get(objective.item_code, 0), objective.required)
+        current = context.item_quantities.get(objective.item_code, 0)
     elif isinstance(objective, MythicMobKillObjectiveDefinition):
         current = context.kill_progress.get((quest_id, objective.objective_id), 0)
     elif isinstance(objective, TechniqueLayerObjectiveDefinition):

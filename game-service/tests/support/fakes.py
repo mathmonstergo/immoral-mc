@@ -92,6 +92,7 @@ class _FakeState:
     item_stacks: dict[tuple[UUID, str], ItemStack] = field(default_factory=dict)
     item_entries: dict[tuple[UUID, str], ItemResourceEntry] = field(default_factory=dict)
     item_instances: dict[UUID, ItemInstance] = field(default_factory=dict)
+    inventory_revisions: dict[UUID, int] = field(default_factory=dict)
     storage_containers: dict[tuple[UUID, str], StorageContainer] = field(
         default_factory=dict
     )
@@ -1117,6 +1118,11 @@ class FakeItemRepository:
         self._state = state
         self._ensure_active = ensure_active
 
+    async def get_inventory_revision(self, life_id: UUID, *, for_update: bool) -> int:
+        self._ensure_active()
+        del for_update
+        return self._state.inventory_revisions.get(life_id, 0)
+
     async def get_pending_instances(self, life_id: UUID) -> tuple[ItemInstance, ...]:
         self._ensure_active()
         return tuple(
@@ -1235,6 +1241,7 @@ class FakeItemRepository:
             delivered_at=delivered_at,
         )
         self._state.item_instances[item_instance_id] = updated
+        self._increment_inventory_revision(life_id)
         return updated
 
     async def consume_instance(
@@ -1262,6 +1269,7 @@ class FakeItemRepository:
             consumed_at=consumed_at,
         )
         self._state.item_instances[item_instance_id] = consumed
+        self._increment_inventory_revision(life_id)
         return consumed
 
     async def consume_inventory_instances(
@@ -1296,6 +1304,7 @@ class FakeItemRepository:
             )
             self._state.item_instances[item_id] = consumed
             result.append(consumed)
+        self._increment_inventory_revision(life_id)
         return tuple(result)
 
     async def get_inventory_instances(
@@ -1341,7 +1350,13 @@ class FakeItemRepository:
             raise ItemOperationConflict("Item instance location changed")
         updated = replace(item, location=destination)
         self._state.item_instances[item_instance_id] = updated
+        self._increment_inventory_revision(life_id)
         return updated
+
+    def _increment_inventory_revision(self, life_id: UUID) -> int:
+        revision = self._state.inventory_revisions.get(life_id, 0) + 1
+        self._state.inventory_revisions[life_id] = revision
+        return revision
 
     async def get_stack(self, life_id: UUID, item_code: str, *, for_update: bool) -> ItemStack:
         self._ensure_active()

@@ -7,6 +7,7 @@ from immortal_mmo.quest.models import (
     CurrentLifeSpiritRootObjectiveDefinition,
     ItemDeliveryObjectiveDefinition,
     MythicMobKillObjectiveDefinition,
+    ProximityBarkRule,
     QuestCategory,
     QuestDefinition,
     QuestDialogueKeys,
@@ -14,6 +15,8 @@ from immortal_mmo.quest.models import (
     QuestPresentationHints,
     QuestProviderDefinition,
     QuestRepeatability,
+    QuestStateCondition,
+    RealmLevelCondition,
     RealmLevelObjectiveDefinition,
     TechniqueLayerObjectiveDefinition,
 )
@@ -24,6 +27,7 @@ def quest(quest_id: str, category: QuestCategory = QuestCategory.MAIN) -> QuestD
         quest_id=quest_id,
         version=1,
         title=quest_id,
+        description=f"{quest_id} description",
         category=category,
         repeatability=QuestRepeatability.ONCE_PER_LIFE,
         prerequisites=(),
@@ -44,9 +48,6 @@ def quest(quest_id: str, category: QuestCategory = QuestCategory.MAIN) -> QuestD
         presentation=QuestPresentationHints(
             active_next_action="前往鉴灵师处",
             ready_next_action="返回老村民处",
-            available_proximity_text="最近太不太平了...",
-            active_proximity_text="去找鉴灵师看看吧。",
-            ready_proximity_text="看来你已经有所收获。",
         ),
     )
 
@@ -74,6 +75,11 @@ def test_runtime_catalog_contains_first_steps_and_old_man() -> None:
     )
     assert old_man.main_quest_ids == ("first-steps",)
     assert old_man.side_quest_ids == ()
+    assert [rule.rule_id for rule in old_man.proximity_bark_rules] == [
+        "first-steps-available",
+        "first-steps-active",
+        "first-steps-ready",
+    ]
     assert QUEST_CATALOG.revision.startswith("sha256:")
     assert len(QUEST_CATALOG.revision) == len("sha256:") + 64
 
@@ -261,4 +267,90 @@ def test_catalog_rejects_more_objectives_than_the_sidebar_can_render() -> None:
         QuestDefinitionCatalog(
             quests=(oversized,),
             providers=(provider("oversized"),),
+        )
+
+
+def test_catalog_rejects_unknown_quest_in_proximity_rule() -> None:
+    known = quest("known")
+    invalid_provider = replace(
+        provider("known"),
+        proximity_bark_rules=(
+            ProximityBarkRule(
+                rule_id="missing-quest",
+                text="Missing",
+                conditions=(QuestStateCondition("missing", ("completed",)),),
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Unknown proximity bark quest ID"):
+        QuestDefinitionCatalog(quests=(known,), providers=(invalid_provider,))
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda: QuestStateCondition("quest", ()),
+        lambda: QuestStateCondition("quest", ("unknown",)),
+        lambda: RealmLevelCondition(),
+        lambda: RealmLevelCondition(minimum_level=-1),
+        lambda: RealmLevelCondition(minimum_level=5, maximum_level=4),
+        lambda: ProximityBarkRule("rule", " "),
+        lambda: ProximityBarkRule("rule", "Text", cooldown_seconds=0),
+        lambda: ProximityBarkRule(
+            "rule",
+            "Text",
+            conditions=(
+                RealmLevelCondition(minimum_level=1),
+                RealmLevelCondition(maximum_level=5),
+            ),
+        ),
+    ],
+)
+def test_proximity_rule_definitions_reject_invalid_content(factory) -> None:
+    with pytest.raises(ValueError):
+        factory()
+
+
+def test_provider_rejects_duplicate_proximity_rule_ids() -> None:
+    rule = ProximityBarkRule("same", "Text")
+
+    with pytest.raises(ValueError, match="Duplicate proximity bark rule ID"):
+        replace(provider("quest"), proximity_bark_rules=(rule, rule))
+
+
+def test_proximity_bark_key_accepts_the_256_character_boundary() -> None:
+    provider_id = "p" * 128
+    rule_id = "r" * 127
+    definition = replace(
+        provider("quest"),
+        provider_id=provider_id,
+        proximity_bark_rules=(ProximityBarkRule(rule_id, "Text"),),
+    )
+    key = f"{definition.provider_id}:{definition.proximity_bark_rules[0].rule_id}"
+
+    assert len(key) == 256
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda: replace(provider("quest"), provider_id="provider:branch"),
+        lambda: ProximityBarkRule("rule:branch", "Text"),
+    ],
+)
+def test_proximity_bark_key_components_reject_the_separator(factory) -> None:
+    with pytest.raises(ValueError, match="must not contain ':'"):
+        factory()
+
+
+def test_proximity_bark_key_rejects_a_length_above_the_wire_limit() -> None:
+    provider_id = "p" * 128
+    rule_id = "r" * 128
+
+    with pytest.raises(ValueError, match="must not exceed 256 characters"):
+        replace(
+            provider("quest"),
+            provider_id=provider_id,
+            proximity_bark_rules=(ProximityBarkRule(rule_id, "Text"),),
         )

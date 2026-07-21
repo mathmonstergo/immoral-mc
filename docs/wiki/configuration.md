@@ -60,10 +60,13 @@ quest:
 ```
 
 - `scan-interval-ticks`：任务 NPC 扫描间隔；
-- `proximity-radius`：玩家私有提示的触发距离；
+- `proximity-radius`：玩家从范围外进入时，任务 NPC 私有话语的触发距离；
 - `max-players-per-scan`：每轮处理上限，超出部分顺延到下一轮。
 
-修改后需重启 Paper。
+半径和扫描上限只控制 Paper 的接近检测，不决定 NPC 说什么。话语及任务状态/境界条件配置
+位于 Game Service 的 `QuestProviderDefinition.proximity_bark_rules`；未配置或未命中规则的
+提供者保持安静。参见[配置靠近 NPC 说话](quests.md#配置靠近-npc-说话)。修改扫描配置后
+需重启 Paper；修改提供者规则后需重启 Game Service。
 
 ## 修炼区域
 
