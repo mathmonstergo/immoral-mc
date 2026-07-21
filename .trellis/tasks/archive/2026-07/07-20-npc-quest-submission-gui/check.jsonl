@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Architecture boundary rules to verify Paper stays non-authoritative"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Quality/review checklist for tests and server authority"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Verify migration correctness for objective-input revision"}
+{"file": ".trellis/spec/guides/wiki-maintenance-guide.md", "reason": "Wiki docs (quests, npcs-and-dialogues) changed and must stay consistent"}
+{"file": ".trellis/tasks/07-20-npc-quest-submission-gui/research/current-quest-gui-contract.md", "reason": "Test-focus list doubles as the acceptance checklist for revision and turn-in edge cases"}
+{"file": ".trellis/tasks/07-20-npc-quest-submission-gui/research/proximity-speech-rules.md", "reason": "Verify GUI and proximity speech remain independent while authoritative typed rule selection and revision invalidation stay intact"}

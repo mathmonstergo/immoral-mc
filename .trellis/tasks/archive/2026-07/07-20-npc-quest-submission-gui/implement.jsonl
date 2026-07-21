@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Hard architecture rules: Game Service owns quest rules; Paper Adapter is presentation/boundary only"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Server authority, test, and review conventions for quest turn-in and GUI flows"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Adapter-facing API failure and domain error conventions for accept/turn-in endpoints"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Migration and repository rules; objective-input revision touches migrations and item repository"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Adapter -> Game Service -> DB data-flow thinking for revision vector and turn-in contract"}
+{"file": ".trellis/tasks/07-20-npc-quest-submission-gui/research/current-quest-gui-contract.md", "reason": "Existing Paper flow, reusable holder/controller pattern, backend transaction guarantees, objective-revision repair, test focus"}
+{"file": ".trellis/tasks/07-20-npc-quest-submission-gui/research/proximity-speech-rules.md", "reason": "Preserved proximity pipeline, typed provider-rule design, authority boundary, cooldown key, and revision requirements"}
+{"file": ".trellis/tasks/07-20-npc-quest-submission-gui/research/hypixel-chest-menu-style.md", "reason": "Chest-menu visual style reference for six-row GUI layout"}
